@@ -1,0 +1,47 @@
+CREATE TABLE IF NOT EXISTS servers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alias TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL DEFAULT '',
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 22,
+    user TEXT NOT NULL DEFAULT '',
+    auth_method TEXT NOT NULL DEFAULT 'key',
+    identity_file TEXT NOT NULL DEFAULT '',
+    proxy_jump TEXT NOT NULL DEFAULT '',
+    group_name TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_connected_at DATETIME,
+    last_test_at DATETIME,
+    last_test_status TEXT NOT NULL DEFAULT 'unknown',
+    last_test_error TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS server_tags (
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (server_id, tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS forwards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    type TEXT NOT NULL DEFAULT 'local',
+    local_addr TEXT NOT NULL DEFAULT '',
+    local_port INTEGER NOT NULL DEFAULT 0,
+    remote_addr TEXT NOT NULL DEFAULT '',
+    remote_port INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS command_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    command TEXT NOT NULL
+);
