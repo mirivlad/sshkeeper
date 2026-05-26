@@ -113,6 +113,7 @@ func Create(path string, masterPassword string) error {
 		key[i] = 0
 	}
 
+	fmt.Println(" done.")
 	return nil
 }
 
@@ -120,6 +121,8 @@ func Create(path string, masterPassword string) error {
 func (v *Vault) Unlock(masterPassword string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+
+	fmt.Print("Unlocking vault...")
 
 	data, err := os.ReadFile(v.path)
 	if err != nil {
@@ -160,6 +163,7 @@ func (v *Vault) Unlock(masterPassword string) error {
 		v.records[rec.ID] = plaintext
 	}
 
+	fmt.Println(" done.")
 	return nil
 }
 

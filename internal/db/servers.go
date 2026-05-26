@@ -246,3 +246,42 @@ func (db *DB) GetCommandTemplates(serverAlias string) ([]*model.CommandTemplate,
 	}
 	return templates, rows.Err()
 }
+
+// GetGroups returns all unique group names with server count
+func (db *DB) GetGroups() ([]string, error) {
+	rows, err := db.conn.Query(`
+		SELECT group_name FROM servers 
+		WHERE group_name != '' 
+		GROUP BY group_name 
+		ORDER BY group_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		groups = append(groups, name)
+	}
+	return groups, rows.Err()
+}
+
+// RenameGroup renames a group for all servers in it
+func (db *DB) RenameGroup(oldName, newName string) error {
+	_, err := db.conn.Exec(
+		"UPDATE servers SET group_name = ?, updated_at = CURRENT_TIMESTAMP WHERE group_name = ?",
+		newName, oldName)
+	return err
+}
+
+// DeleteGroup removes group assignment from all servers
+func (db *DB) DeleteGroup(name string) error {
+	_, err := db.conn.Exec(
+		"UPDATE servers SET group_name = '', updated_at = CURRENT_TIMESTAMP WHERE group_name = ?",
+		name)
+	return err
+}

@@ -41,6 +41,15 @@ func runTUI() error {
 	tui.TestConnection = func(server *model.Server) (bool, string) {
 		return ssh.Test(cfg, server, vaultFunc)
 	}
+	tui.TestConnectionWithPassword = func(server *model.Server, password string) (bool, string) {
+		directVaultFunc := func(sa string, st string) (string, error) {
+			if st == "ssh_password" || st == "key_passphrase" {
+				return password, nil
+			}
+			return vaultFunc(sa, st)
+		}
+		return ssh.Test(cfg, server, directVaultFunc)
+	}
 	tui.SaveServer = func(server *model.Server, password string) error {
 		if password != "" {
 			v := getOrCreateVault()
@@ -64,6 +73,16 @@ func runTUI() error {
 			return appDB.UpdateServer(server)
 		}
 		return appDB.CreateServer(server)
+	}
+
+	tui.GetGroups = func() ([]string, error) {
+		return appDB.GetGroups()
+	}
+	tui.RenameGroup = func(oldName, newName string) error {
+		return appDB.RenameGroup(oldName, newName)
+	}
+	tui.DeleteGroup = func(name string) error {
+		return appDB.DeleteGroup(name)
 	}
 
 	// Run TUI in a loop — if user requests connect, handle it and restart TUI

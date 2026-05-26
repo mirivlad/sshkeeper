@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -15,123 +16,71 @@ var groupListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List server groups",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		servers, err := appDB.ListServers()
+		groups, err := appDB.GetGroups()
 		if err != nil {
-			return fmt.Errorf("list servers: %w", err)
-		}
-
-		groups := make(map[string]int)
-		for _, s := range servers {
-			g := s.GroupName
-			if g == "" {
-				g = "(no group)"
-			}
-			groups[g]++
+			return fmt.Errorf("list groups: %w", err)
 		}
 
 		if len(groups) == 0 {
-			fmt.Println("No servers.")
+			fmt.Println("No groups. Use 'sshkeeper add --group <name>' to create one.")
 			return nil
 		}
 
-		for name, count := range groups {
-			fmt.Printf("  %-20s %d servers\n", name, count)
+		for _, g := range groups {
+			fmt.Printf("  %s\n", g)
 		}
 		return nil
 	},
 }
 
-var templateCmd = &cobra.Command{
-	Use:   "template",
-	Short: "Command template management",
-}
-
-var templateListCmd = &cobra.Command{
-	Use:   "list <alias>",
-	Short: "List command templates for a server",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		alias := args[0]
-		_, err := appDB.GetServer(alias)
-		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
-		}
-
-		templates, err := appDB.GetCommandTemplates(alias)
-		if err != nil {
-			return fmt.Errorf("list templates: %w", err)
-		}
-
-		if len(templates) == 0 {
-			fmt.Println("No command templates.")
-			return nil
-		}
-
-		for _, t := range templates {
-			fmt.Printf("  %-15s %s\n", t.Name, t.Command)
-		}
-		return nil
-	},
-}
-
-var templateAddCmd = &cobra.Command{
-	Use:   "add <alias> <name> <command>",
-	Short: "Add a command template",
-	Args:  cobra.ExactArgs(3),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		alias := args[0]
-		name := args[1]
-		command := args[2]
-
-		server, err := appDB.GetServer(alias)
-		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
-		}
-
-		if err := appDB.AddCommandTemplate(server.ID, name, command); err != nil {
-			return fmt.Errorf("add template: %w", err)
-		}
-
-		fmt.Println("Template added.")
-		return nil
-	},
-}
-
-var runTemplateCmd = &cobra.Command{
-	Use:   "run-template <alias> <template>",
-	Short: "Run a command template on a server",
+var groupRenameCmd = &cobra.Command{
+	Use:   "rename <old> <new>",
+	Short: "Rename a group (updates all servers in the group)",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		alias := args[0]
-		templateName := args[1]
+		oldName := args[0]
+		newName := args[1]
 
-		templates, err := appDB.GetCommandTemplates(alias)
-		if err != nil {
-			return fmt.Errorf("list templates: %w", err)
-		}
-		if len(templates) == 0 {
-			return fmt.Errorf("server not found or no templates: %s", alias)
+		if err := appDB.RenameGroup(oldName, newName); err != nil {
+			return fmt.Errorf("rename group: %w", err)
 		}
 
-		var command string
-		for _, t := range templates {
-			if t.Name == templateName {
-				command = t.Command
-				break
+		fmt.Printf("Group '%s' renamed to '%s'.\n", oldName, newName)
+		return nil
+	},
+}
+
+var groupDeleteCmd = &cobra.Command{
+	Use:   "delete <name>",
+	Short: "Delete a group (removes group from all servers)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+
+		if !forceFlag {
+			fmt.Printf("Remove group '%s' from all servers? (y/N): ", name)
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(response) != "y" {
+				fmt.Println("Cancelled.")
+				return nil
 			}
 		}
 
-		if command == "" {
-			return fmt.Errorf("template not found: %s", templateName)
+		if err := appDB.DeleteGroup(name); err != nil {
+			return fmt.Errorf("delete group: %w", err)
 		}
 
-		fmt.Printf("Running '%s' on %s...\n", command, alias)
+		fmt.Printf("Group '%s' removed from all servers.\n", name)
 		return nil
 	},
 }
 
+var forceFlag bool
+
 func init() {
 	groupCmd.AddCommand(groupListCmd)
-	templateCmd.AddCommand(templateListCmd)
-	templateCmd.AddCommand(templateAddCmd)
+	groupCmd.AddCommand(groupRenameCmd)
+	groupCmd.AddCommand(groupDeleteCmd)
+	groupDeleteCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Delete without confirmation")
 }

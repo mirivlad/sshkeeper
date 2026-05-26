@@ -78,7 +78,12 @@ var (
 	SearchServers  func(query string) ([]*model.Server, error)
 	DeleteServer   func(alias string) error
 	TestConnection func(server *model.Server) (bool, string)
+	// TestConnectionWithPassword tests with explicit password (for form test before save)
+	TestConnectionWithPassword func(server *model.Server, password string) (bool, string)
 	SaveServer     func(server *model.Server, password string) error
+	GetGroups      func() ([]string, error)   // Returns existing group names
+	RenameGroup    func(oldName, newName string) error  // Rename group for all servers
+	DeleteGroup    func(name string) error     // Remove group from all servers
 )
 
 // --- Screen type ---
@@ -380,6 +385,8 @@ type formModel struct {
 	spinner        spinner.Model
 	width          int
 	height         int
+	groups         string  // cached groups list (comma-separated for display)
+	showGroups     bool    // show group dropdown
 }
 
 func newFormModel(w, h int) *formModel {
@@ -393,7 +400,7 @@ func newFormModel(w, h int) *formModel {
 		"Auth Method (password/key/key_passphrase/agent)",
 		"Identity File",
 		"ProxyJump",
-		"Group",
+		"Group (type new or pick from list)",
 		"Notes",
 	}
 	for i, label := range labels {
@@ -413,7 +420,7 @@ func newFormModel(w, h int) *formModel {
 
 	inputs[0].Focus()
 
-	return &formModel{
+	fm := &formModel{
 		inputs:   inputs,
 		password: pw,
 		focusIdx: 0,
@@ -421,6 +428,15 @@ func newFormModel(w, h int) *formModel {
 		width:    w,
 		height:   h,
 	}
+
+	// Load existing groups
+	if GetGroups != nil {
+		if groups, err := GetGroups(); err == nil && len(groups) > 0 {
+			fm.groups = strings.Join(groups, ", ")
+		}
+	}
+
+	return fm
 }
 
 func newEditFormModel(s *model.Server, w, h int) *formModel {
@@ -581,10 +597,18 @@ func (fm *formModel) runTest() tea.Cmd {
 	fm.saved = false
 
 	s := fm.buildServer()
+	pw := fm.password.Value()
+
 	return tea.Batch(
 		fm.spinner.Tick,
 		func() tea.Msg {
-			if s.AuthMethod == model.AuthPassword && fm.password.Value() == "" {
+			// Use direct password test if available (for form test before save)
+			if TestConnectionWithPassword != nil {
+				ok, testErr := TestConnectionWithPassword(s, pw)
+				return testDoneMsg{ok: ok, err: testErr}
+			}
+			// Fallback to vault-based test
+			if s.AuthMethod == model.AuthPassword && pw == "" {
 				return testDoneMsg{ok: false, err: "Password is required for password auth."}
 			}
 			ok, testErr := TestConnection(s)
@@ -651,6 +675,10 @@ func (fm *formModel) View() string {
 	for i := range fm.inputs {
 		b.WriteString(fm.inputs[i].View())
 		b.WriteString("\n")
+		// Show existing groups hint under Group field
+		if i == 8 && fm.groups != "" {
+			b.WriteString(helpStyle.Render("  Groups: " + fm.groups + "\n"))
+		}
 	}
 
 	b.WriteString(fm.password.View())
