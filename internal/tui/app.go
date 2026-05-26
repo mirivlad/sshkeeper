@@ -222,56 +222,64 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func matchKeys(msg tea.KeyMsg, en, ru string) bool {
+	if len(msg.Runes) != 1 {
+		return false
+	}
+	r := msg.Runes[0]
+	return r == []rune(en)[0] || r == []rune(ru)[0]
+}
+
 func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-
-	case "/":
-		m.screen = screenSearch
-		m.searchInput.Focus()
-		return m, nil
-
-	case "a":
-		m.form = newFormModel(m.width, m.height)
-		m.screen = screenForm
-		return m, nil
-
-	case "e":
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
-			m.form = newEditFormModel(item.server, m.width, m.height)
+	// Check key by runes (layout-independent)
+	if msg.Type == tea.KeyRunes {
+		switch {
+		case matchKeys(msg, "q", "й"):
+			return m, tea.Quit
+		case matchKeys(msg, "/", "?"):
+			m.screen = screenSearch
+			m.searchInput.Focus()
+			return m, nil
+		case matchKeys(msg, "a", "ф"):
+			m.form = newFormModel(m.width, m.height)
 			m.screen = screenForm
-		}
-		return m, nil
-
-	case "d":
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
-			return m, func() tea.Msg {
-				err := DeleteServer(item.server.Alias)
-				if err != nil {
-					return saveDoneMsg{err: err}
+			return m, nil
+		case matchKeys(msg, "e", "у"):
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.form = newEditFormModel(item.server, m.width, m.height)
+				m.screen = screenForm
+			}
+			return m, nil
+		case matchKeys(msg, "d", "в"):
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				return m, func() tea.Msg {
+					err := DeleteServer(item.server.Alias)
+					if err != nil {
+						return saveDoneMsg{err: err}
+					}
+					servers, err := ListServers()
+					return serversLoadedMsg{servers: servers, err: err}
 				}
-				servers, err := ListServers()
-				return serversLoadedMsg{servers: servers, err: err}
+			}
+		case matchKeys(msg, "t", "е"):
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				return m, func() tea.Msg {
+					ok, testErr := TestConnection(item.server)
+					return testDoneMsg{ok: ok, err: testErr}
+				}
 			}
 		}
+	}
 
-	case "t":
+	switch msg.Type {
+	case tea.KeyEnter:
 		if item, ok := m.list.SelectedItem().(serverItem); ok {
-			return m, func() tea.Msg {
-				ok, testErr := TestConnection(item.server)
-				return testDoneMsg{ok: ok, err: testErr}
-			}
-		}
-
-	case "enter":
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
-			// Request connect — TUI will quit and caller handles it
 			return m, func() tea.Msg {
 				return connectRequestMsg{server: item.server}
 			}
 		}
-
+	case tea.KeyCtrlC:
+		return m, tea.Quit
 	default:
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
@@ -282,14 +290,14 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch msg.Type {
+	case tea.KeyEsc:
 		m.screen = screenList
 		m.searchInput.Blur()
 		m.searchInput.SetValue("")
 		return m, nil
 
-	case "enter":
+	case tea.KeyEnter:
 		m.screen = screenList
 		m.searchInput.Blur()
 		query := m.searchInput.Value()
@@ -312,8 +320,7 @@ func (m *tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	if msg.Type == tea.KeyEsc {
 		m.screen = screenList
 		m.form = nil
 		m.err = nil
@@ -480,8 +487,8 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "tab", "down":
+		switch msg.Type {
+		case tea.KeyTab:
 			fm.focusIdx++
 			total := len(fm.inputs) + 3
 			if fm.focusIdx >= total {
@@ -490,7 +497,7 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fm.updateFocus()
 			return fm, nil
 
-		case "shift+tab", "up":
+		case tea.KeyShiftTab:
 			fm.focusIdx--
 			if fm.focusIdx < 0 {
 				total := len(fm.inputs) + 3
@@ -499,7 +506,7 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fm.updateFocus()
 			return fm, nil
 
-		case "enter":
+		case tea.KeyEnter:
 			switch {
 			case fm.focusIdx == len(fm.inputs)+1:
 				return fm, fm.runTest()
@@ -515,7 +522,25 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return fm, nil
 			}
 
-		case "esc":
+		case tea.KeyEsc:
+			return fm, nil
+
+		case tea.KeyDown:
+			fm.focusIdx++
+			total := len(fm.inputs) + 3
+			if fm.focusIdx >= total {
+				fm.focusIdx = 0
+			}
+			fm.updateFocus()
+			return fm, nil
+
+		case tea.KeyUp:
+			fm.focusIdx--
+			if fm.focusIdx < 0 {
+				total := len(fm.inputs) + 3
+				fm.focusIdx = total - 1
+			}
+			fm.updateFocus()
 			return fm, nil
 		}
 	}
