@@ -222,64 +222,61 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func matchKeys(msg tea.KeyMsg, en, ru string) bool {
-	if len(msg.Runes) != 1 {
-		return false
-	}
-	r := msg.Runes[0]
-	return r == []rune(en)[0] || r == []rune(ru)[0]
-}
-
 func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Check key by runes (layout-independent)
-	if msg.Type == tea.KeyRunes {
-		switch {
-		case matchKeys(msg, "q", "й"):
-			return m, tea.Quit
-		case matchKeys(msg, "/", "?"):
-			m.screen = screenSearch
-			m.searchInput.Focus()
-			return m, nil
-		case matchKeys(msg, "a", "ф"):
-			m.form = newFormModel(m.width, m.height)
-			m.screen = screenForm
-			return m, nil
-		case matchKeys(msg, "e", "у"):
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
-				m.form = newEditFormModel(item.server, m.width, m.height)
-				m.screen = screenForm
-			}
-			return m, nil
-		case matchKeys(msg, "d", "в"):
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
-				return m, func() tea.Msg {
-					err := DeleteServer(item.server.Alias)
-					if err != nil {
-						return saveDoneMsg{err: err}
-					}
-					servers, err := ListServers()
-					return serversLoadedMsg{servers: servers, err: err}
-				}
-			}
-		case matchKeys(msg, "t", "е"):
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
-				return m, func() tea.Msg {
-					ok, testErr := TestConnection(item.server)
-					return testDoneMsg{ok: ok, err: testErr}
-				}
-			}
-		}
-	}
-
 	switch msg.Type {
 	case tea.KeyEnter:
+		// Connect to selected server
 		if item, ok := m.list.SelectedItem().(serverItem); ok {
 			return m, func() tea.Msg {
 				return connectRequestMsg{server: item.server}
 			}
 		}
-	case tea.KeyCtrlC:
+
+	case tea.KeyCtrlC, tea.KeyCtrlQ:
 		return m, tea.Quit
+
+	case tea.KeyCtrlA:
+		// Add server
+		m.form = newFormModel(m.width, m.height)
+		m.screen = screenForm
+		return m, nil
+
+	case tea.KeyCtrlE:
+		// Edit selected server
+		if item, ok := m.list.SelectedItem().(serverItem); ok {
+			m.form = newEditFormModel(item.server, m.width, m.height)
+			m.screen = screenForm
+		}
+		return m, nil
+
+	case tea.KeyCtrlD:
+		// Delete selected server
+		if item, ok := m.list.SelectedItem().(serverItem); ok {
+			return m, func() tea.Msg {
+				err := DeleteServer(item.server.Alias)
+				if err != nil {
+					return saveDoneMsg{err: err}
+				}
+				servers, err := ListServers()
+				return serversLoadedMsg{servers: servers, err: err}
+			}
+		}
+
+	case tea.KeyCtrlT:
+		// Test connection
+		if item, ok := m.list.SelectedItem().(serverItem); ok {
+			return m, func() tea.Msg {
+				ok, testErr := TestConnection(item.server)
+				return testDoneMsg{ok: ok, err: testErr}
+			}
+		}
+
+	case tea.KeyCtrlF, tea.KeyCtrlS:
+		// Search
+		m.screen = screenSearch
+		m.searchInput.Focus()
+		return m, nil
+
 	default:
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
@@ -342,11 +339,11 @@ func (m *tuiModel) View() string {
 	case screenList:
 		b.WriteString(m.list.View())
 		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("Enter connect | a add | e edit | d delete | t test | / search | q quit"))
+		b.WriteString(helpStyle.Render("Enter connect | Ctrl+A add | Ctrl+E edit | Ctrl+D del | Ctrl+T test | Ctrl+F search | Ctrl+Q quit"))
 
 	case screenSearch:
 		b.WriteString("Search: " + m.searchInput.View() + "\n")
-		b.WriteString(helpStyle.Render("Enter search | Esc cancel"))
+		b.WriteString(helpStyle.Render("Type to search | Enter confirm | Esc cancel"))
 
 	case screenForm:
 		b.WriteString(m.form.View())
