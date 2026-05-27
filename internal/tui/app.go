@@ -26,7 +26,10 @@ var (
 			Background(lipgloss.Color("4")).
 			Bold(true)
 
-	normalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	normalStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	selectedRowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4"))
+	listHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
+	sectionStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).MarginTop(1)
 
 	testOKStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
 	testFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
@@ -67,9 +70,13 @@ type serverItem struct {
 	server *model.Server
 }
 
-func (i serverItem) Title() string       { return i.server.Alias }
-func (i serverItem) Description() string { return fmt.Sprintf("%s@%s:%d  %s", i.server.User, i.server.Host, i.server.Port, i.server.AuthMethod) }
-func (i serverItem) FilterValue() string { return i.server.Alias + " " + i.server.DisplayName + " " + i.server.Host + " " + i.server.User }
+func (i serverItem) Title() string { return i.server.Alias }
+func (i serverItem) Description() string {
+	return fmt.Sprintf("%s@%s:%d  %s", i.server.User, i.server.Host, i.server.Port, i.server.AuthMethod)
+}
+func (i serverItem) FilterValue() string {
+	return i.server.Alias + " " + i.server.DisplayName + " " + i.server.Host + " " + i.server.User
+}
 
 // --- External callbacks ---
 
@@ -80,10 +87,12 @@ var (
 	TestConnection func(server *model.Server) (bool, string)
 	// TestConnectionWithPassword tests with explicit password (for form test before save)
 	TestConnectionWithPassword func(server *model.Server, password string) (bool, string)
-	SaveServer     func(server *model.Server, password string) error
-	GetGroups      func() ([]string, error)   // Returns existing group names
-	RenameGroup    func(oldName, newName string) error  // Rename group for all servers
-	DeleteGroup    func(name string) error     // Remove group from all servers
+	SaveServer                 func(server *model.Server, password string, oldAlias string) error
+	UpdateTestResult           func(alias string, status model.TestStatus, testErr string) error
+	HasSecret                  func(alias string, secretType string) bool
+	GetGroups                  func() ([]string, error)
+	RenameGroup                func(oldName, newName string) error
+	DeleteGroup                func(name string) error
 )
 
 // --- Screen type ---
@@ -99,8 +108,8 @@ const (
 // --- Result type — returned from TUI to caller ---
 
 type TUIResult struct {
-	Server  *model.Server
-	Action  string // "connect"
+	Server *model.Server
+	Action string // "connect"
 }
 
 // --- Main TUI model ---
@@ -196,8 +205,22 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.form.testResultTime = time.Now()
 			m.form.err = nil
+			return m, nil
 		}
-		return m, nil
+		// Update test status in DB and reload list
+		if item, ok := m.list.SelectedItem().(serverItem); ok && UpdateTestResult != nil {
+			status := model.TestUnknown
+			if msg.ok {
+				status = model.TestOK
+			} else if msg.err != "" {
+				status = model.TestFailed
+			}
+			UpdateTestResult(item.server.Alias, status, msg.err)
+		}
+		return m, func() tea.Msg {
+			servers, err := ListServers()
+			return serversLoadedMsg{servers: servers, err: err}
+		}
 
 	case saveDoneMsg:
 		if m.form != nil {
@@ -323,11 +346,23 @@ func (m *tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
+		if m.form != nil && (m.form.showGroupList || m.form.showAuthList) {
+			updated, cmd := m.form.Update(msg)
+			if fm, ok := updated.(*formModel); ok {
+				m.form = fm
+			}
+			return m, cmd
+		}
+
 		m.screen = screenList
 		m.form = nil
 		m.err = nil
 		m.success = ""
-		return m, nil
+		// Reload server list after form close
+		return m, func() tea.Msg {
+			servers, err := ListServers()
+			return serversLoadedMsg{servers: servers, err: err}
+		}
 	}
 
 	updated, cmd := m.form.Update(msg)
@@ -342,9 +377,7 @@ func (m *tuiModel) View() string {
 
 	switch m.screen {
 	case screenList:
-		b.WriteString(m.list.View())
-		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("Enter connect | Ctrl+A add | Ctrl+E edit | Ctrl+D del | Ctrl+T test | Ctrl+F search | Ctrl+Q quit"))
+		b.WriteString(m.viewServerList())
 
 	case screenSearch:
 		b.WriteString("Search: " + m.searchInput.View() + "\n")
@@ -366,13 +399,148 @@ func (m *tuiModel) View() string {
 	return b.String()
 }
 
+func (m *tuiModel) viewServerList() string {
+	var b strings.Builder
+	selectedAlias := ""
+	if item, ok := m.list.SelectedItem().(serverItem); ok && item.server != nil {
+		selectedAlias = item.server.Alias
+	}
+
+	b.WriteString(titleStyle.Render(fmt.Sprintf("sshkeeper  %d servers", len(m.servers))))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render(fmt.Sprintf("Vault unlocked | %s", testSummary(m.servers))))
+	b.WriteString("\n\n")
+	b.WriteString(listHeaderStyle.Render(fmt.Sprintf("  %-20s %-20s %-34s %-12s %-10s %s", "NAME", "ALIAS", "TARGET", "AUTH", "GROUP", "STATUS")))
+	b.WriteString("\n")
+
+	if len(m.servers) == 0 {
+		b.WriteString(helpStyle.Render("  No servers yet. Press Ctrl+A to add one."))
+		b.WriteString("\n")
+	} else {
+		for _, server := range m.servers {
+			marker := " "
+			rowStyle := normalStyle
+			if server.Alias == selectedAlias {
+				marker = ">"
+				rowStyle = selectedRowStyle
+			}
+			name := server.DisplayName
+			if name == "" {
+				name = server.Alias
+			}
+			target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
+			group := server.GroupName
+			if group == "" {
+				group = "-"
+			}
+			row := fmt.Sprintf("%s %-20s %-20s %-34s %-12s %-10s %s",
+				marker,
+				truncate(name, 20),
+				truncate(server.Alias, 20),
+				truncate(target, 34),
+				authLabel(server.AuthMethod),
+				truncate(group, 10),
+				testStatusLabel(server),
+			)
+			b.WriteString(rowStyle.Render(row))
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString("\n")
+	if selectedAlias != "" {
+		if selected := m.selectedServer(); selected != nil {
+			b.WriteString(m.viewSelectedServer(selected))
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString(helpStyle.Render("Enter connect | Ctrl+A add | Ctrl+E edit | Ctrl+D del | Ctrl+T test | Ctrl+F search | Ctrl+Q quit"))
+	return b.String()
+}
+
+func (m *tuiModel) selectedServer() *model.Server {
+	if item, ok := m.list.SelectedItem().(serverItem); ok && item.server != nil {
+		return item.server
+	}
+	return nil
+}
+
+func (m *tuiModel) viewSelectedServer(server *model.Server) string {
+	displayName := server.DisplayName
+	if displayName == "" {
+		displayName = "-"
+	}
+	group := server.GroupName
+	if group == "" {
+		group = "-"
+	}
+
+	var b strings.Builder
+	b.WriteString(sectionStyle.Render("Selected"))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("  Alias: %s\n", server.Alias))
+	b.WriteString(fmt.Sprintf("  Display Name: %s\n", displayName))
+	b.WriteString(fmt.Sprintf("  Host: %s\n", server.Host))
+	b.WriteString(fmt.Sprintf("  Port: %d\n", server.Port))
+	b.WriteString(fmt.Sprintf("  User: %s\n", server.User))
+	b.WriteString(fmt.Sprintf("  Auth: %s\n", authLabel(server.AuthMethod)))
+	b.WriteString(fmt.Sprintf("  Group: %s\n", group))
+	b.WriteString(fmt.Sprintf("  Status: %s\n", testStatusLabel(server)))
+	return b.String()
+}
+
+func testSummary(servers []*model.Server) string {
+	okCount := 0
+	failedCount := 0
+	for _, server := range servers {
+		switch server.LastTestStatus {
+		case model.TestOK:
+			okCount++
+		case model.TestFailed:
+			failedCount++
+		}
+	}
+	return fmt.Sprintf("%d OK | %d FAIL", okCount, failedCount)
+}
+
+func authLabel(auth model.AuthMethod) string {
+	switch auth {
+	case model.AuthPassword:
+		return "password"
+	case model.AuthKey:
+		return "key"
+	case model.AuthKeyPassphrase:
+		return "key+phrase"
+	case model.AuthAgent:
+		return "agent"
+	default:
+		return string(auth)
+	}
+}
+
+func testStatusLabel(server *model.Server) string {
+	switch server.LastTestStatus {
+	case model.TestOK:
+		return "OK"
+	case model.TestFailed:
+		if server.LastTestError != "" {
+			return "FAIL"
+		}
+		return "FAIL"
+	default:
+		return "?"
+	}
+}
+
 // --- Form model ---
 
 type formModel struct {
 	edit           bool
 	server         *model.Server
 	inputs         []textinput.Model
+	labels         []string
 	password       textinput.Model
+	passwordLabel  string
 	focusIdx       int
 	testResult     string
 	testOK         bool
@@ -385,9 +553,21 @@ type formModel struct {
 	spinner        spinner.Model
 	width          int
 	height         int
-	groups         string  // cached groups list (comma-separated for display)
-	showGroups     bool    // show group dropdown
+	groups         []string   // existing group names
+	groupList      list.Model // dropdown list for groups
+	showGroupList  bool       // whether group dropdown is visible
+	authList       list.Model
+	showAuthList   bool
 }
+
+// groupItem implements list.Item for the group dropdown
+type groupItem struct {
+	name string
+}
+
+func (i groupItem) Title() string       { return i.name }
+func (i groupItem) Description() string { return "" }
+func (i groupItem) FilterValue() string { return i.name }
 
 func newFormModel(w, h int) *formModel {
 	inputs := make([]textinput.Model, 10)
@@ -405,12 +585,12 @@ func newFormModel(w, h int) *formModel {
 	}
 	for i, label := range labels {
 		inputs[i] = textinput.New()
-		inputs[i].Placeholder = label
+		inputs[i].Placeholder = placeholderForLabel(label)
 		inputs[i].CharLimit = 128
 	}
 
 	pw := textinput.New()
-	pw.Placeholder = "Password / Passphrase (stored in vault)"
+	pw.Placeholder = "optional"
 	pw.CharLimit = 256
 	pw.EchoMode = textinput.EchoPassword
 
@@ -421,22 +601,73 @@ func newFormModel(w, h int) *formModel {
 	inputs[0].Focus()
 
 	fm := &formModel{
-		inputs:   inputs,
-		password: pw,
-		focusIdx: 0,
-		spinner:  s,
-		width:    w,
-		height:   h,
+		inputs:        inputs,
+		labels:        labels,
+		password:      pw,
+		passwordLabel: "Password / Passphrase",
+		focusIdx:      0,
+		spinner:       s,
+		width:         w,
+		height:        h,
 	}
+	fm.authList = newStringList([]string{
+		string(model.AuthPassword),
+		string(model.AuthKey),
+		string(model.AuthKeyPassphrase),
+		string(model.AuthAgent),
+	}, "Select auth method", 34, 16)
 
 	// Load existing groups
 	if GetGroups != nil {
 		if groups, err := GetGroups(); err == nil && len(groups) > 0 {
-			fm.groups = strings.Join(groups, ", ")
+			fm.groups = groups
+			fm.groupList = newStringList(groups, "Select group", 30, 8)
 		}
 	}
 
+	fm.updateFocus()
 	return fm
+}
+
+func placeholderForLabel(label string) string {
+	switch label {
+	case "Alias":
+		return "mail.kp"
+	case "Display Name":
+		return "Production mail"
+	case "Host":
+		return "mail.example.org"
+	case "Port":
+		return "22"
+	case "User":
+		return "root"
+	case "Auth Method (password/key/key_passphrase/agent)":
+		return "key"
+	case "Identity File":
+		return "~/.ssh/id_ed25519"
+	case "ProxyJump":
+		return "optional"
+	case "Group (type new or pick from list)":
+		return "KP"
+	case "Notes":
+		return "optional"
+	default:
+		return label
+	}
+}
+
+func newStringList(values []string, title string, width, height int) list.Model {
+	items := make([]list.Item, len(values))
+	for i, value := range values {
+		items[i] = groupItem{name: value}
+	}
+	l := list.New(items, list.NewDefaultDelegate(), width, height)
+	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
+	l.SetShowPagination(false)
+	l.Title = title
+	l.Styles.Title = titleStyle
+	return l
 }
 
 func newEditFormModel(s *model.Server, w, h int) *formModel {
@@ -453,6 +684,21 @@ func newEditFormModel(s *model.Server, w, h int) *formModel {
 	fm.inputs[7].SetValue(s.ProxyJump)
 	fm.inputs[8].SetValue(s.GroupName)
 	fm.inputs[9].SetValue(s.Notes)
+	if HasSecret != nil {
+		switch s.AuthMethod {
+		case model.AuthPassword:
+			if HasSecret(s.Alias, "ssh_password") {
+				fm.passwordLabel = "Password (secret saved; leave blank to keep)"
+				fm.password.Placeholder = ""
+			}
+		case model.AuthKeyPassphrase:
+			if HasSecret(s.Alias, "key_passphrase") {
+				fm.passwordLabel = "Key passphrase (secret saved; leave blank to keep)"
+				fm.password.Placeholder = ""
+			}
+		}
+	}
+	fm.updateFocus()
 	return fm
 }
 
@@ -498,6 +744,48 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return fm, cmd
 	}
 
+	// Handle group dropdown
+	if fm.showGroupList {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.Type {
+			case tea.KeyEsc:
+				fm.showGroupList = false
+				return fm, nil
+			case tea.KeyEnter:
+				if item, ok := fm.groupList.SelectedItem().(groupItem); ok {
+					fm.inputs[8].SetValue(item.name)
+				}
+				fm.showGroupList = false
+				return fm, nil
+			}
+		}
+		// Pass other keys to the list
+		var cmd tea.Cmd
+		fm.groupList, cmd = fm.groupList.Update(msg)
+		return fm, cmd
+	}
+
+	if fm.showAuthList {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.Type {
+			case tea.KeyEsc:
+				fm.showAuthList = false
+				return fm, nil
+			case tea.KeyEnter:
+				if item, ok := fm.authList.SelectedItem().(groupItem); ok {
+					fm.inputs[5].SetValue(item.name)
+				}
+				fm.showAuthList = false
+				return fm, nil
+			}
+		}
+		var cmd tea.Cmd
+		fm.authList, cmd = fm.authList.Update(msg)
+		return fm, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -518,6 +806,17 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			fm.updateFocus()
 			return fm, nil
+
+		case tea.KeyRunes:
+			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 5 {
+				fm.showAuthList = true
+				return fm, nil
+			}
+			// '/' on Group field opens group dropdown
+			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 8 && len(fm.groups) > 0 {
+				fm.showGroupList = true
+				return fm, nil
+			}
 
 		case tea.KeyEnter:
 			switch {
@@ -576,18 +875,34 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (fm *formModel) updateFocus() {
 	for i := range fm.inputs {
 		fm.inputs[i].Blur()
-		fm.inputs[i].Prompt = blurredStyle.Render(fm.inputs[i].Placeholder + ": ")
+		fm.inputs[i].Prompt = blurredStyle.Render(fm.labelAt(i) + ": ")
 	}
 	fm.password.Blur()
-	fm.password.Prompt = blurredStyle.Render(fm.password.Placeholder + ": ")
+	fm.password.Prompt = blurredStyle.Render(fm.passwordLabel + ": ")
 
 	if fm.focusIdx < len(fm.inputs) {
 		fm.inputs[fm.focusIdx].Focus()
-		fm.inputs[fm.focusIdx].Prompt = focusedStyle.Render(fm.inputs[fm.focusIdx].Placeholder + "> ")
+		fm.inputs[fm.focusIdx].Prompt = focusedStyle.Render(fm.labelAt(fm.focusIdx) + "> ")
 	} else if fm.focusIdx == len(fm.inputs) {
 		fm.password.Focus()
-		fm.password.Prompt = focusedStyle.Render(fm.password.Placeholder + "> ")
+		fm.password.Prompt = focusedStyle.Render(fm.passwordLabel + "> ")
 	}
+}
+
+func (fm *formModel) labelAt(index int) string {
+	if index >= 0 && index < len(fm.labels) {
+		if index == 5 {
+			return "Auth Method (/ pick)"
+		}
+		if index == 8 {
+			if len(fm.groups) > 0 {
+				return "Group (/ pick)"
+			}
+			return "Group"
+		}
+		return fm.labels[index]
+	}
+	return ""
 }
 
 func (fm *formModel) runTest() tea.Cmd {
@@ -635,7 +950,11 @@ func (fm *formModel) runSave() tea.Cmd {
 			if s.Host == "" {
 				return saveDoneMsg{err: fmt.Errorf("host is required")}
 			}
-			err := SaveServer(s, pw)
+			oldAlias := ""
+			if fm.edit && fm.server != nil {
+				oldAlias = fm.server.Alias
+			}
+			err := SaveServer(s, pw, oldAlias)
 			return saveDoneMsg{err: err}
 		},
 	)
@@ -672,13 +991,72 @@ func (fm *formModel) View() string {
 	b.WriteString(titleStyle.Render(title))
 	b.WriteString("\n\n")
 
-	for i := range fm.inputs {
+	// Calculate visible range based on terminal height
+	// Reserve lines for: title (2) + password (1) + buttons (3) + help (1) + padding (2) = ~9
+	reserved := 9
+	available := fm.height - reserved
+	if available < 4 {
+		available = 4
+	}
+
+	numInputs := len(fm.inputs)
+	startIdx := 0
+	endIdx := numInputs
+
+	// Scroll: keep focused field visible
+	if numInputs > available {
+		focusInput := fm.focusIdx
+		if focusInput >= numInputs {
+			focusInput = numInputs - 1
+		}
+		// Try to show `available` fields centered on focus
+		startIdx = focusInput - available/2
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx = startIdx + available
+		if endIdx > numInputs {
+			endIdx = numInputs
+			startIdx = endIdx - available
+			if startIdx < 0 {
+				startIdx = 0
+			}
+		}
+	}
+
+	// Show scroll indicator if needed
+	if startIdx > 0 {
+		b.WriteString(helpStyle.Render("  ↑ more fields above\n"))
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		if section := formSectionTitle(i); section != "" {
+			b.WriteString(sectionStyle.Render(section))
+			b.WriteString("\n")
+		}
+		if i == 5 {
+			fm.inputs[i].Placeholder = "password/key/key_passphrase/agent"
+		}
+		// Show group hint inline in placeholder for Group field
+		if i == 8 && len(fm.groups) > 0 && !fm.showGroupList {
+			fm.inputs[i].Placeholder = truncate(strings.Join(fm.groups, ", "), 25)
+		}
 		b.WriteString(fm.inputs[i].View())
 		b.WriteString("\n")
-		// Show existing groups hint under Group field
-		if i == 8 && fm.groups != "" {
-			b.WriteString(helpStyle.Render("  Groups: " + fm.groups + "\n"))
+		if i == 5 && fm.showAuthList {
+			b.WriteString("\n" + renderDropdown(fm.authList) + "\n")
+			b.WriteString(helpStyle.Render("Enter select | Esc cancel"))
+			return b.String()
 		}
+		if i == 8 && fm.showGroupList {
+			b.WriteString("\n" + renderDropdown(fm.groupList) + "\n")
+			b.WriteString(helpStyle.Render("Enter select | Esc cancel"))
+			return b.String()
+		}
+	}
+
+	if endIdx < numInputs {
+		b.WriteString(helpStyle.Render(fmt.Sprintf("  ↓ more fields below (%d-%d of %d)\n", startIdx+1, endIdx, numInputs)))
 	}
 
 	b.WriteString(fm.password.View())
@@ -723,8 +1101,53 @@ func (fm *formModel) View() string {
 		saveBtn = normalStyle.Render(saveBtn)
 	}
 
-	b.WriteString("\n" + testBtn + "  " + saveBtn + "\n\n")
-	b.WriteString(helpStyle.Render("Tab/↓ next | ↑ prev | Enter select | Esc back"))
+	b.WriteString("\n" + sectionStyle.Render("Actions") + "\n")
+	b.WriteString(testBtn + "  " + saveBtn + "\n\n")
+	b.WriteString(helpStyle.Render("Tab/↓ next | ↑ prev | / pick list | Enter select | Esc back"))
 
 	return b.String()
+}
+
+func renderDropdown(l list.Model) string {
+	var b strings.Builder
+	b.WriteString(sectionStyle.Render(l.Title))
+	b.WriteString("\n")
+	for i, item := range l.Items() {
+		group, ok := item.(groupItem)
+		if !ok {
+			continue
+		}
+		prefix := "  "
+		style := normalStyle
+		if i == l.Index() {
+			prefix = "> "
+			style = selectedRowStyle
+		}
+		b.WriteString(style.Render(prefix + group.name))
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func formSectionTitle(index int) string {
+	switch index {
+	case 0:
+		return "Identity"
+	case 2:
+		return "Connection"
+	case 5:
+		return "Authentication"
+	case 8:
+		return "Metadata"
+	default:
+		return ""
+	}
+}
+
+// truncate limits a string to maxLen, adding "..." if truncated
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }

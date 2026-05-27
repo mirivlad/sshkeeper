@@ -30,6 +30,17 @@ func (db *DB) UpdateServer(s *model.Server) error {
 	return err
 }
 
+func (db *DB) UpdateServerByAlias(oldAlias string, s *model.Server) error {
+	_, err := db.conn.Exec(`
+		UPDATE servers SET
+			alias=?, display_name=?, host=?, port=?, user=?, auth_method=?,
+			identity_file=?, proxy_jump=?, group_name=?, notes=?, updated_at=CURRENT_TIMESTAMP
+		WHERE alias=?`,
+		s.Alias, s.DisplayName, s.Host, s.Port, s.User, s.AuthMethod,
+		s.IdentityFile, s.ProxyJump, s.GroupName, s.Notes, oldAlias)
+	return err
+}
+
 func (db *DB) DeleteServer(alias string) error {
 	_, err := db.conn.Exec("DELETE FROM servers WHERE alias=?", alias)
 	return err

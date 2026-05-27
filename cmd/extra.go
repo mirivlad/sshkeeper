@@ -74,8 +74,13 @@ var runCmd = &cobra.Command{
 			return fmt.Errorf("server not found: %s", alias)
 		}
 
-		// Build ssh args with the command
-		sshArgs := buildSSHArgs(server)
+		// For password auth, use PTY-wrapper with command
+		if server.AuthMethod == model.AuthPassword {
+			return runWithPassword(server, command)
+		}
+
+		// For key/agent auth — direct execution
+		sshArgs := ssh.BuildSSHArgs(server)
 		sshArgs = append(sshArgs, command)
 
 		sshCmd := exec.Command(cfg.SSH.Binary, sshArgs...)
@@ -91,17 +96,21 @@ var runCmd = &cobra.Command{
 	},
 }
 
-func buildSSHArgs(server *model.Server) []string {
-	var args []string
-	args = append(args, "-p", fmt.Sprintf("%d", server.Port))
-	if server.IdentityFile != "" {
-		args = append(args, "-i", server.IdentityFile)
+// runWithPassword runs a command on a server with password auth via PTY-wrapper.
+func runWithPassword(server *model.Server, command string) error {
+	v := getOrCreateVault()
+	if !v.IsUnlocked() {
+		return fmt.Errorf("vault is locked. Run 'sshkeeper vault unlock' first")
 	}
-	if server.ProxyJump != "" {
-		args = append(args, "-J", server.ProxyJump)
+
+	vaultKey := fmt.Sprintf("server:%s:ssh_password", server.Alias)
+	password, err := v.Get(vaultKey)
+	if err != nil {
+		return fmt.Errorf("get password from vault: %w", err)
 	}
-	args = append(args, "-o", "StrictHostKeyChecking=accept-new")
-	target := fmt.Sprintf("%s@%s", server.User, server.Host)
-	args = append(args, target)
-	return args
+
+	sshArgs := ssh.BuildSSHArgs(server)
+	sshArgs = append(sshArgs, command)
+
+	return ssh.ConnectWithPassword(cfg.SSH.Binary, sshArgs, string(password))
 }

@@ -3,11 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 
-	"github.com/spf13/cobra"
 	"github.com/mirivlad/sshkeeper/internal/config"
 	"github.com/mirivlad/sshkeeper/internal/vault"
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
@@ -160,9 +161,75 @@ var vaultChangePasswordCmd = &cobra.Command{
 	},
 }
 
+var vaultListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List stored secret metadata",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		v := getOrCreateVault()
+		if !v.IsUnlocked() {
+			return fmt.Errorf("vault is locked. Unlock first with 'sshkeeper vault unlock'")
+		}
+		output, err := formatVaultSecretsList(v)
+		if err != nil {
+			return err
+		}
+		fmt.Print(output)
+		return nil
+	},
+}
+
+var vaultDeleteCmd = &cobra.Command{
+	Use:   "delete <alias> [type]",
+	Short: "Delete stored secrets for a server",
+	Args:  cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		alias := args[0]
+		secretType := ""
+		if len(args) == 2 {
+			secretType = args[1]
+		}
+
+		v := getOrCreateVault()
+		if !v.IsUnlocked() {
+			return fmt.Errorf("vault is locked. Unlock first with 'sshkeeper vault unlock'")
+		}
+		if err := deleteVaultSecrets(v, alias, secretType); err != nil {
+			return err
+		}
+		if err := v.Save(); err != nil {
+			return fmt.Errorf("save vault: %w", err)
+		}
+		if secretType == "" {
+			fmt.Printf("Deleted secrets for %s.\n", alias)
+		} else {
+			fmt.Printf("Deleted %s for %s.\n", secretType, alias)
+		}
+		return nil
+	},
+}
+
+func formatVaultSecretsList(v *vault.Vault) (string, error) {
+	metas, err := v.ListSecrets()
+	if err != nil {
+		return "", err
+	}
+	if len(metas) == 0 {
+		return "No secrets stored.\n", nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%-24s %-18s\n", "ALIAS", "TYPE")
+	for _, meta := range metas {
+		fmt.Fprintf(&b, "%-24s %-18s\n", meta.Alias, meta.Type)
+	}
+	return b.String(), nil
+}
+
 func init() {
 	vaultCmd.AddCommand(vaultUnlockCmd)
 	vaultCmd.AddCommand(vaultLockCmd)
 	vaultCmd.AddCommand(vaultStatusCmd)
 	vaultCmd.AddCommand(vaultChangePasswordCmd)
+	vaultCmd.AddCommand(vaultListCmd)
+	vaultCmd.AddCommand(vaultDeleteCmd)
 }

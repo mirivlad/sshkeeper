@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/mirivlad/sshkeeper/internal/config"
 	"github.com/mirivlad/sshkeeper/internal/model"
@@ -14,7 +13,7 @@ import (
 type VaultFunc func(serverAlias string, secretType string) (string, error)
 
 func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error {
-	args := buildArgs(server)
+	args := BuildSSHArgs(server)
 
 	switch server.AuthMethod {
 	case model.AuthPassword:
@@ -25,8 +24,7 @@ func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error
 		return ConnectWithPassword(cfg.SSH.Binary, args, password)
 
 	case model.AuthKeyPassphrase:
-		// For key+passphrase, we need to handle the passphrase
-		// For now, let ssh-agent handle it or prompt normally
+		// For key+passphrase, let ssh-agent handle it or prompt normally
 		// TODO: use ssh-agent or similar
 		fallthrough
 
@@ -46,13 +44,11 @@ func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error
 }
 
 func Test(cfg *config.Config, server *model.Server, getVault VaultFunc) (bool, string) {
-	args := buildArgs(server)
+	args := BuildSSHArgs(server)
 	args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
 
 	switch server.AuthMethod {
 	case model.AuthPassword:
-		// For password auth, we can't use BatchMode
-		// Use a short timeout and try to connect
 		args = append(args, "-o", "NumberOfPasswordPrompts=1")
 		password, err := getVault(server.Alias, "ssh_password")
 		if err != nil {
@@ -81,40 +77,29 @@ func Test(cfg *config.Config, server *model.Server, getVault VaultFunc) (bool, s
 	}
 }
 
+// testWithPassword tests SSH connection with password auth via PTY-wrapper.
+// It connects, sends the password, runs the test command, and checks the output.
 func testWithPassword(cfg *config.Config, args []string, password string) (bool, string) {
-	// For password test, we use PTY approach with a short timeout
-	// This is a simplified version - in production, use ConnectWithPassword
-	// with a test command
 	args = append(args, cfg.SSH.TestCommand)
 
-	cmd := exec.Command(cfg.SSH.Binary, args...)
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-
-	// Use a timeout
-	done := make(chan error, 1)
-	if err := cmd.Start(); err != nil {
-		return false, err.Error()
+	ok, output := connectWithPasswordAndRead(cfg.SSH.Binary, args, password, cfg.SSH.ConnectTimeoutSec)
+	if !ok {
+		return false, output
 	}
 
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			return false, err.Error()
-		}
+	result := strings.TrimSpace(output)
+	if result == "SSHKEEPER_OK" {
 		return true, ""
-	case <-time.After(time.Duration(cfg.SSH.ConnectTimeoutSec) * time.Second):
-		cmd.Process.Kill()
-		return false, "connection timeout"
 	}
+	// The output might have the test command echo before the result
+	if strings.Contains(result, "SSHKEEPER_OK") {
+		return true, ""
+	}
+	return false, result
 }
 
-func buildArgs(server *model.Server) []string {
+// BuildSSHArgs builds the SSH command arguments for a server profile.
+func BuildSSHArgs(server *model.Server) []string {
 	var args []string
 
 	args = append(args, "-p", fmt.Sprintf("%d", server.Port))
@@ -127,8 +112,6 @@ func buildArgs(server *model.Server) []string {
 		args = append(args, "-J", server.ProxyJump)
 	}
 
-	// Disable strict host key checking for first connection
-	// In production, this should be configurable
 	args = append(args, "-o", "StrictHostKeyChecking=accept-new")
 
 	target := fmt.Sprintf("%s@%s", server.User, server.Host)

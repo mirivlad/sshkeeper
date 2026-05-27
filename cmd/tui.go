@@ -36,41 +36,43 @@ func runTUI() error {
 		return appDB.SearchServers(query)
 	}
 	tui.DeleteServer = func(alias string) error {
-		return appDB.DeleteServer(alias)
+		if err := appDB.DeleteServer(alias); err != nil {
+			return err
+		}
+		v := getOrCreateVault()
+		if v.IsUnlocked() {
+			cleanupServerSecrets(v, alias)
+			if err := v.Save(); err != nil {
+				return fmt.Errorf("save vault after cleanup: %w", err)
+			}
+		}
+		return nil
 	}
 	tui.TestConnection = func(server *model.Server) (bool, string) {
 		return ssh.Test(cfg, server, vaultFunc)
 	}
 	tui.TestConnectionWithPassword = func(server *model.Server, password string) (bool, string) {
-		directVaultFunc := func(sa string, st string) (string, error) {
-			if st == "ssh_password" || st == "key_passphrase" {
-				return password, nil
-			}
-			return vaultFunc(sa, st)
-		}
-		return ssh.Test(cfg, server, directVaultFunc)
+		return ssh.Test(cfg, server, formTestVaultFunc(vaultFunc, server, password))
 	}
-	tui.SaveServer = func(server *model.Server, password string) error {
-		if password != "" {
-			v := getOrCreateVault()
-			vaultKey := fmt.Sprintf("server:%s:ssh_password", server.Alias)
-			secretType := "ssh_password"
-			if server.AuthMethod == model.AuthKeyPassphrase {
-				vaultKey = fmt.Sprintf("server:%s:key_passphrase", server.Alias)
-				secretType = "key_passphrase"
-			}
-			if err := v.Put(vaultKey, secretType, []byte(password)); err != nil {
-				return fmt.Errorf("store secret: %w", err)
+	tui.SaveServer = func(server *model.Server, password string, oldAlias string) error {
+		v := getOrCreateVault()
+		if v.IsUnlocked() {
+			if err := syncServerSecrets(v, oldAlias, server, password); err != nil {
+				return fmt.Errorf("sync vault secrets: %w", err)
 			}
 			if err := v.Save(); err != nil {
 				return fmt.Errorf("save vault: %w", err)
 			}
 		}
 
-		existing, _ := appDB.GetServer(server.Alias)
+		lookupAlias := server.Alias
+		if oldAlias != "" {
+			lookupAlias = oldAlias
+		}
+		existing, _ := appDB.GetServer(lookupAlias)
 		if existing != nil {
 			server.ID = existing.ID
-			return appDB.UpdateServer(server)
+			return appDB.UpdateServerByAlias(existing.Alias, server)
 		}
 		return appDB.CreateServer(server)
 	}
@@ -83,6 +85,16 @@ func runTUI() error {
 	}
 	tui.DeleteGroup = func(name string) error {
 		return appDB.DeleteGroup(name)
+	}
+	tui.UpdateTestResult = func(alias string, status model.TestStatus, testErr string) error {
+		return appDB.UpdateTestResult(alias, status, testErr)
+	}
+	tui.HasSecret = func(alias string, secretType string) bool {
+		v := getOrCreateVault()
+		if !v.IsUnlocked() {
+			return false
+		}
+		return v.HasSecret(serverSecretID(alias, secretType))
 	}
 
 	// Run TUI in a loop — if user requests connect, handle it and restart TUI
@@ -132,5 +144,3 @@ func runTUI() error {
 		return nil
 	}
 }
-
-

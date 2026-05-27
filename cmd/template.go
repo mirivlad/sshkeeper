@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 
 	"github.com/spf13/cobra"
+	"github.com/mirivlad/sshkeeper/internal/ssh"
 )
 
 var templateCmd = &cobra.Command{
@@ -70,12 +73,14 @@ var runTemplateCmd = &cobra.Command{
 		alias := args[0]
 		templateName := args[1]
 
+		server, err := appDB.GetServer(alias)
+		if err != nil {
+			return fmt.Errorf("server not found: %s", alias)
+		}
+
 		templates, err := appDB.GetCommandTemplates(alias)
 		if err != nil {
 			return fmt.Errorf("list templates: %w", err)
-		}
-		if len(templates) == 0 {
-			return fmt.Errorf("server not found or no templates: %s", alias)
 		}
 
 		var command string
@@ -91,7 +96,21 @@ var runTemplateCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Running '%s' on %s...\n", command, alias)
-		return nil
+
+		// Build ssh args with the command
+		sshArgs := ssh.BuildSSHArgs(server)
+		sshArgs = append(sshArgs, command)
+
+		sshCmd := exec.Command(cfg.SSH.Binary, sshArgs...)
+		sshCmd.Stdin = os.Stdin
+		sshCmd.Stdout = os.Stdout
+		sshCmd.Stderr = os.Stderr
+
+		if err := sshCmd.Start(); err != nil {
+			return fmt.Errorf("start ssh: %w", err)
+		}
+
+		return sshCmd.Wait()
 	},
 }
 

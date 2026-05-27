@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,18 +18,20 @@ import (
 )
 
 const (
-	currentVersion = 1
-	saltLen        = 32
-	nonceLen       = 24
-	keyLen         = 32
+	currentVersion    = 1
+	saltLen           = 32
+	nonceLen          = 24
+	keyLen            = 32
+	verifierID        = "__sshkeeper_vault_verifier__"
+	verifierPlaintext = "sshkeeper-vault-verifier-v1"
 )
 
 type KDFMeta struct {
-	Name         string `json:"name"`
-	MemoryKiB    int    `json:"memory_kib"`
-	Iterations   int    `json:"iterations"`
-	Parallelism  int    `json:"parallelism"`
-	Salt         string `json:"salt"`
+	Name        string `json:"name"`
+	MemoryKiB   int    `json:"memory_kib"`
+	Iterations  int    `json:"iterations"`
+	Parallelism int    `json:"parallelism"`
+	Salt        string `json:"salt"`
 }
 
 type Record struct {
@@ -38,23 +42,35 @@ type Record struct {
 }
 
 type VaultFile struct {
-	Version int       `json:"version"`
-	KDF     KDFMeta   `json:"kdf"`
-	Records []Record  `json:"records"`
+	Version  int      `json:"version"`
+	KDF      KDFMeta  `json:"kdf"`
+	Verifier *Record  `json:"verifier,omitempty"`
+	Records  []Record `json:"records"`
 }
 
 type Vault struct {
-	mu       sync.Mutex
-	path     string
+	mu        sync.Mutex
+	path      string
 	masterKey []byte
-	records  map[string][]byte // id -> plaintext
-	modified bool
+	records   map[string]secretRecord
+	modified  bool
+}
+
+type secretRecord struct {
+	secretType string
+	plaintext  []byte
+}
+
+type SecretMeta struct {
+	ID    string
+	Alias string
+	Type  string
 }
 
 func New(path string) *Vault {
 	return &Vault{
 		path:    path,
-		records: make(map[string][]byte),
+		records: make(map[string]secretRecord),
 	}
 }
 
@@ -76,21 +92,26 @@ func Create(path string, masterPassword string) error {
 
 	kdf := KDFMeta{
 		Name:        "argon2id",
-		MemoryKiB:   4096,
-		Iterations:  2,
+		MemoryKiB:   65536,
+		Iterations:  3,
 		Parallelism: 1,
 		Salt:        base64.StdEncoding.EncodeToString(salt),
 	}
 
 	fmt.Print("Deriving key...")
 
-	key := argon2.IDKey([]byte(masterPassword), salt, uint32(kdf.Iterations), uint32(kdf.MemoryKiB)*1024, uint8(kdf.Parallelism), keyLen)
+	key := argon2.IDKey([]byte(masterPassword), salt, uint32(kdf.Iterations), uint32(kdf.MemoryKiB), uint8(kdf.Parallelism), keyLen)
 
-	// Verify key is valid by doing a test encrypt/decrypt
+	verifier, err := newVerifierRecord(key)
+	if err != nil {
+		return fmt.Errorf("create verifier: %w", err)
+	}
+
 	vf := VaultFile{
-		Version: currentVersion,
-		KDF:     kdf,
-		Records: []Record{},
+		Version:  currentVersion,
+		KDF:      kdf,
+		Verifier: &verifier,
+		Records:  []Record{},
 	}
 
 	data, err := json.Marshal(vf)
@@ -143,24 +164,32 @@ func (v *Vault) Unlock(masterPassword string) error {
 		return fmt.Errorf("decode salt: %w", err)
 	}
 
-	key := argon2.IDKey([]byte(masterPassword), salt, uint32(vf.KDF.Iterations), uint32(vf.KDF.MemoryKiB)*1024, uint8(vf.KDF.Parallelism), keyLen)
+	key := argon2.IDKey([]byte(masterPassword), salt, uint32(vf.KDF.Iterations), uint32(vf.KDF.MemoryKiB), uint8(vf.KDF.Parallelism), keyLen)
 
-	// Try to decrypt first record to verify password
-	if len(vf.Records) > 0 {
+	if vf.Verifier != nil {
+		if err := verifyRecord(key, *vf.Verifier); err != nil {
+			return fmt.Errorf("invalid master password")
+		}
+	} else if len(vf.Records) > 0 {
 		if _, err := decryptRecord(key, vf.Records[0]); err != nil {
 			return fmt.Errorf("invalid master password")
 		}
+	} else {
+		return fmt.Errorf("vault cannot verify master password; recreate empty vault")
 	}
 
 	v.masterKey = key
-	v.records = make(map[string][]byte)
+	v.records = make(map[string]secretRecord)
 
 	for _, rec := range vf.Records {
 		plaintext, err := decryptRecord(key, rec)
 		if err != nil {
 			return fmt.Errorf("decrypt record %s: %w", rec.ID, err)
 		}
-		v.records[rec.ID] = plaintext
+		v.records[rec.ID] = secretRecord{
+			secretType: inferSecretType(rec.ID, rec.Type),
+			plaintext:  plaintext,
+		}
 	}
 
 	fmt.Println(" done.")
@@ -178,7 +207,7 @@ func (v *Vault) Lock() {
 		}
 	}
 	v.masterKey = nil
-	v.records = make(map[string][]byte)
+	v.records = make(map[string]secretRecord)
 }
 
 // IsUnlocked returns whether the vault is currently unlocked
@@ -197,7 +226,9 @@ func (v *Vault) Put(id string, secretType string, plaintext []byte) error {
 		return fmt.Errorf("vault is locked")
 	}
 
-	v.records[id] = plaintext
+	data := make([]byte, len(plaintext))
+	copy(data, plaintext)
+	v.records[id] = secretRecord{secretType: secretType, plaintext: data}
 	v.modified = true
 	return nil
 }
@@ -211,14 +242,53 @@ func (v *Vault) Get(id string) ([]byte, error) {
 		return nil, fmt.Errorf("vault is locked")
 	}
 
-	data, ok := v.records[id]
+	record, ok := v.records[id]
 	if !ok {
 		return nil, fmt.Errorf("secret not found: %s", id)
 	}
 
-	result := make([]byte, len(data))
-	copy(result, data)
+	result := make([]byte, len(record.plaintext))
+	copy(result, record.plaintext)
 	return result, nil
+}
+
+func (v *Vault) HasSecret(id string) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	_, ok := v.records[id]
+	return ok
+}
+
+func (v *Vault) ListSecrets() ([]SecretMeta, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.masterKey == nil {
+		return nil, fmt.Errorf("vault is locked")
+	}
+
+	metas := make([]SecretMeta, 0, len(v.records))
+	for id, record := range v.records {
+		alias, secretType, ok := parseServerSecretID(id)
+		if !ok {
+			continue
+		}
+		if record.secretType != "" {
+			secretType = record.secretType
+		}
+		metas = append(metas, SecretMeta{
+			ID:    id,
+			Alias: alias,
+			Type:  secretType,
+		})
+	}
+	sort.Slice(metas, func(i, j int) bool {
+		if metas[i].Alias == metas[j].Alias {
+			return metas[i].Type < metas[j].Type
+		}
+		return metas[i].Alias < metas[j].Alias
+	})
+	return metas, nil
 }
 
 // Delete removes a secret
@@ -245,8 +315,8 @@ func (v *Vault) Save() error {
 
 	kdf := KDFMeta{
 		Name:        "argon2id",
-		MemoryKiB:   4096,
-		Iterations:  2,
+		MemoryKiB:   65536,
+		Iterations:  3,
 		Parallelism: 1,
 		Salt:        base64.StdEncoding.EncodeToString(salt),
 	}
@@ -254,18 +324,24 @@ func (v *Vault) Save() error {
 	fmt.Print("Deriving key...")
 
 	var records []Record
-	for id, plaintext := range v.records {
-		rec, err := encryptRecord(v.masterKey, id, plaintext)
+	for id, record := range v.records {
+		rec, err := encryptRecordWithType(v.masterKey, id, record.secretType, record.plaintext)
 		if err != nil {
 			return fmt.Errorf("encrypt record %s: %w", id, err)
 		}
 		records = append(records, rec)
 	}
 
+	verifier, err := newVerifierRecord(v.masterKey)
+	if err != nil {
+		return fmt.Errorf("create verifier: %w", err)
+	}
+
 	vf := VaultFile{
-		Version: currentVersion,
-		KDF:     kdf,
-		Records: records,
+		Version:  currentVersion,
+		KDF:      kdf,
+		Verifier: &verifier,
+		Records:  records,
 	}
 
 	data, err := json.Marshal(vf)
@@ -309,12 +385,12 @@ func (v *Vault) ChangePassword(newPassword string) error {
 		return fmt.Errorf("generate salt: %w", err)
 	}
 
-	newKey := argon2.IDKey([]byte(newPassword), salt, 3, 8192*1024, 1, keyLen)
+	newKey := argon2.IDKey([]byte(newPassword), salt, 3, 65536, 1, keyLen)
 
 	kdf := KDFMeta{
 		Name:        "argon2id",
-		MemoryKiB:   4096,
-		Iterations:  2,
+		MemoryKiB:   65536,
+		Iterations:  3,
 		Parallelism: 1,
 		Salt:        base64.StdEncoding.EncodeToString(salt),
 	}
@@ -322,18 +398,24 @@ func (v *Vault) ChangePassword(newPassword string) error {
 	fmt.Print("Deriving key...")
 
 	var records []Record
-	for id, plaintext := range v.records {
-		rec, err := encryptRecord(newKey, id, plaintext)
+	for id, record := range v.records {
+		rec, err := encryptRecordWithType(newKey, id, record.secretType, record.plaintext)
 		if err != nil {
 			return fmt.Errorf("encrypt record: %w", err)
 		}
 		records = append(records, rec)
 	}
 
+	verifier, err := newVerifierRecord(newKey)
+	if err != nil {
+		return fmt.Errorf("create verifier: %w", err)
+	}
+
 	vf := VaultFile{
-		Version: currentVersion,
-		KDF:     kdf,
-		Records: records,
+		Version:  currentVersion,
+		KDF:      kdf,
+		Verifier: &verifier,
+		Records:  records,
 	}
 
 	data, err := json.Marshal(vf)
@@ -382,6 +464,10 @@ func (v *Vault) getSalt() string {
 }
 
 func encryptRecord(key []byte, id string, plaintext []byte) (Record, error) {
+	return encryptRecordWithType(key, id, "", plaintext)
+}
+
+func encryptRecordWithType(key []byte, id string, secretType string, plaintext []byte) (Record, error) {
 	aead, err := chacha20poly1305.NewX(key)
 	if err != nil {
 		return Record{}, err
@@ -396,9 +482,29 @@ func encryptRecord(key []byte, id string, plaintext []byte) (Record, error) {
 
 	return Record{
 		ID:         id,
+		Type:       secretType,
 		Nonce:      base64.StdEncoding.EncodeToString(nonce),
 		Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
 	}, nil
+}
+
+func inferSecretType(id string, recordType string) string {
+	if recordType != "" {
+		return recordType
+	}
+	_, secretType, ok := parseServerSecretID(id)
+	if !ok {
+		return ""
+	}
+	return secretType
+}
+
+func parseServerSecretID(id string) (string, string, bool) {
+	parts := strings.Split(id, ":")
+	if len(parts) != 3 || parts[0] != "server" || parts[1] == "" || parts[2] == "" {
+		return "", "", false
+	}
+	return parts[1], parts[2], true
 }
 
 func decryptRecord(key []byte, rec Record) ([]byte, error) {
@@ -425,6 +531,26 @@ func decryptRecord(key []byte, rec Record) ([]byte, error) {
 	return plaintext, nil
 }
 
+func newVerifierRecord(key []byte) (Record, error) {
+	rec, err := encryptRecord(key, verifierID, []byte(verifierPlaintext))
+	if err != nil {
+		return Record{}, err
+	}
+	rec.Type = "verifier"
+	return rec, nil
+}
+
+func verifyRecord(key []byte, rec Record) error {
+	plaintext, err := decryptRecord(key, rec)
+	if err != nil {
+		return err
+	}
+	if !SecureCompare(string(plaintext), verifierPlaintext) {
+		return fmt.Errorf("invalid verifier")
+	}
+	return nil
+}
+
 // VerifyPassword checks if a master password is correct without unlocking
 func VerifyPassword(path string, masterPassword string) (bool, error) {
 	data, err := os.ReadFile(path)
@@ -442,18 +568,20 @@ func VerifyPassword(path string, masterPassword string) (bool, error) {
 		return false, err
 	}
 
-	key := argon2.IDKey([]byte(masterPassword), salt, uint32(vf.KDF.Iterations), uint32(vf.KDF.MemoryKiB)*1024, uint8(vf.KDF.Parallelism), keyLen)
+	key := argon2.IDKey([]byte(masterPassword), salt, uint32(vf.KDF.Iterations), uint32(vf.KDF.MemoryKiB), uint8(vf.KDF.Parallelism), keyLen)
 	defer func() {
 		for i := range key {
 			key[i] = 0
 		}
 	}()
 
-	if len(vf.Records) == 0 {
-		// Empty vault, try a test encryption
-		return true, nil
+	if vf.Verifier != nil {
+		return verifyRecord(key, *vf.Verifier) == nil, nil
 	}
 
+	if len(vf.Records) == 0 {
+		return false, nil
+	}
 	_, err = decryptRecord(key, vf.Records[0])
 	return err == nil, nil
 }

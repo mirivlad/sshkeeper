@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/mirivlad/sshkeeper/internal/model"
+	"golang.org/x/term"
 )
 
 var addFlags struct {
@@ -19,7 +21,6 @@ var addFlags struct {
 	displayName  string
 	notes        string
 	tags         string
-	password     string
 }
 
 var addCmd = &cobra.Command{
@@ -59,11 +60,21 @@ func addNonInteractive(alias string) error {
 		server.DisplayName = alias
 	}
 
-	// Handle password auth - store in vault
-	if server.AuthMethod == model.AuthPassword {
-		password := addFlags.password
-		if password == "" {
-			return fmt.Errorf("password auth requires --password flag or interactive mode")
+	// Handle password/passphrase auth — request interactively, never via argv
+	if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
+		secretType := "password"
+		if server.AuthMethod == model.AuthKeyPassphrase {
+			secretType = "passphrase"
+		}
+
+		fmt.Printf("Enter %s (will be stored in vault, input hidden): ", secretType)
+		password, err := term.ReadPassword(int(syscall.Stdin))
+		fmt.Println()
+		if err != nil {
+			return fmt.Errorf("read %s: %w", secretType, err)
+		}
+		if len(password) == 0 {
+			return fmt.Errorf("%s cannot be empty", secretType)
 		}
 
 		v := getOrCreateVault()
@@ -72,29 +83,14 @@ func addNonInteractive(alias string) error {
 		}
 
 		vaultKey := fmt.Sprintf("server:%s:ssh_password", alias)
-		if err := v.Put(vaultKey, "ssh_password", []byte(password)); err != nil {
-			return fmt.Errorf("store password in vault: %w", err)
-		}
-		if err := v.Save(); err != nil {
-			return fmt.Errorf("save vault: %w", err)
-		}
-	}
-
-	// Handle key+passphrase - store passphrase in vault
-	if server.AuthMethod == model.AuthKeyPassphrase {
-		passphrase := addFlags.password
-		if passphrase == "" {
-			return fmt.Errorf("key+passphrase auth requires --password flag for the passphrase")
+		vaultType := "ssh_password"
+		if server.AuthMethod == model.AuthKeyPassphrase {
+			vaultKey = fmt.Sprintf("server:%s:key_passphrase", alias)
+			vaultType = "key_passphrase"
 		}
 
-		v := getOrCreateVault()
-		if !v.IsUnlocked() {
-			return fmt.Errorf("vault is locked. Run 'sshkeeper vault unlock' first")
-		}
-
-		vaultKey := fmt.Sprintf("server:%s:key_passphrase", alias)
-		if err := v.Put(vaultKey, "key_passphrase", []byte(passphrase)); err != nil {
-			return fmt.Errorf("store passphrase in vault: %w", err)
+		if err := v.Put(vaultKey, vaultType, password); err != nil {
+			return fmt.Errorf("store %s in vault: %w", secretType, err)
 		}
 		if err := v.Save(); err != nil {
 			return fmt.Errorf("save vault: %w", err)
@@ -132,5 +128,4 @@ func init() {
 	addCmd.Flags().StringVar(&addFlags.displayName, "display-name", "", "Display name")
 	addCmd.Flags().StringVar(&addFlags.notes, "notes", "", "Notes")
 	addCmd.Flags().StringVar(&addFlags.tags, "tags", "", "Comma-separated tags")
-	addCmd.Flags().StringVar(&addFlags.password, "password", "", "SSH password or key passphrase (stored in vault)")
 }

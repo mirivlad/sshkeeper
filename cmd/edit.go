@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"syscall"
 
-	"github.com/spf13/cobra"
 	"github.com/mirivlad/sshkeeper/internal/model"
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var editCmd = &cobra.Command{
@@ -17,6 +19,8 @@ var editCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("server not found: %s", alias)
 		}
+
+		oldAuthMethod := server.AuthMethod
 
 		if parsedHost != "" {
 			server.Host = parsedHost
@@ -46,6 +50,41 @@ var editCmd = &cobra.Command{
 			server.Notes = parsedNotes
 		}
 
+		if parsedAuth != "" && oldAuthMethod != server.AuthMethod {
+			v := getOrCreateVault()
+			if v.IsUnlocked() {
+				var secret string
+				if server.AuthMethod == model.AuthPassword {
+					fmt.Print("Enter new password (stored in vault, input hidden): ")
+					pw, err := term.ReadPassword(int(syscall.Stdin))
+					fmt.Println()
+					if err != nil {
+						return fmt.Errorf("read password: %w", err)
+					}
+					if len(pw) > 0 {
+						secret = string(pw)
+					}
+				} else if server.AuthMethod == model.AuthKeyPassphrase {
+					fmt.Print("Enter key passphrase (stored in vault, input hidden): ")
+					pw, err := term.ReadPassword(int(syscall.Stdin))
+					fmt.Println()
+					if err != nil {
+						return fmt.Errorf("read passphrase: %w", err)
+					}
+					if len(pw) > 0 {
+						secret = string(pw)
+					}
+				}
+
+				if err := syncServerSecrets(v, alias, server, secret); err != nil {
+					return fmt.Errorf("sync vault secrets: %w", err)
+				}
+				if err := v.Save(); err != nil {
+					return fmt.Errorf("save vault: %w", err)
+				}
+			}
+		}
+
 		if err := appDB.UpdateServer(server); err != nil {
 			return fmt.Errorf("update server: %w", err)
 		}
@@ -56,15 +95,15 @@ var editCmd = &cobra.Command{
 }
 
 var (
-	parsedHost      string
-	parsedPort      int
-	parsedUser      string
-	parsedAuth      string
-	parsedIdentity  string
-	parsedProxyJump string
-	parsedGroup     string
+	parsedHost        string
+	parsedPort        int
+	parsedUser        string
+	parsedAuth        string
+	parsedIdentity    string
+	parsedProxyJump   string
+	parsedGroup       string
 	parsedDisplayName string
-	parsedNotes     string
+	parsedNotes       string
 )
 
 func init() {

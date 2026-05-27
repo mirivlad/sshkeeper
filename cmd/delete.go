@@ -27,6 +27,15 @@ var deleteCmd = &cobra.Command{
 			return fmt.Errorf("delete server: %w", err)
 		}
 
+		// Clean up vault secrets for this server
+		v := getOrCreateVault()
+		if v.IsUnlocked() {
+			cleanupServerSecrets(v, alias)
+			if err := v.Save(); err != nil {
+				return fmt.Errorf("save vault after cleanup: %w", err)
+			}
+		}
+
 		fmt.Println("Deleted.")
 		return nil
 	},
