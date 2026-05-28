@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,94 @@ func TestServerListViewUsesDashboardLayout(t *testing.T) {
 	}
 	if strings.Contains(view, "Profiles managed locally") {
 		t.Fatalf("expected compact status header instead of README text\nview:\n%s", view)
+	}
+}
+
+func TestServerListViewKeepsDetailsVisibleWithManyServers(t *testing.T) {
+	servers := make([]*model.Server, 45)
+	for i := range servers {
+		servers[i] = &model.Server{
+			Alias:          fmt.Sprintf("server-%02d", i+1),
+			DisplayName:    fmt.Sprintf("Server %02d", i+1),
+			Host:           fmt.Sprintf("host-%02d.example.org", i+1),
+			Port:           22,
+			User:           "mirivlad",
+			AuthMethod:     model.AuthKey,
+			LastTestStatus: model.TestUnknown,
+		}
+	}
+
+	m := New(servers)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 18})
+	model := updated.(*tuiModel)
+
+	view := model.View()
+	if !strings.Contains(view, "Server 01") {
+		t.Fatalf("expected first selected server to be visible:\n%s", view)
+	}
+	if !strings.Contains(view, "Selected") {
+		t.Fatalf("expected selected server details to remain visible:\n%s", view)
+	}
+	if !strings.Contains(view, "Enter connect") {
+		t.Fatalf("expected footer to remain visible:\n%s", view)
+	}
+	if count := strings.Count(view, "server-"); count >= len(servers) {
+		t.Fatalf("expected bounded row rendering, rendered %d server aliases", count)
+	}
+}
+
+func TestVisibleServerRangeKeepsSelectionInsideWindow(t *testing.T) {
+	tests := []struct {
+		name      string
+		total     int
+		selected  int
+		available int
+		wantStart int
+		wantEnd   int
+	}{
+		{name: "first page", total: 40, selected: 0, available: 10, wantStart: 0, wantEnd: 10},
+		{name: "middle page", total: 40, selected: 20, available: 10, wantStart: 11, wantEnd: 21},
+		{name: "last page", total: 40, selected: 39, available: 10, wantStart: 30, wantEnd: 40},
+		{name: "all fit", total: 5, selected: 3, available: 10, wantStart: 0, wantEnd: 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start, end := visibleServerRange(tt.total, tt.selected, tt.available)
+			if start != tt.wantStart || end != tt.wantEnd {
+				t.Fatalf("visibleServerRange() = %d, %d; want %d, %d", start, end, tt.wantStart, tt.wantEnd)
+			}
+		})
+	}
+}
+
+func TestServerListViewScrollsWithSelection(t *testing.T) {
+	servers := make([]*model.Server, 45)
+	for i := range servers {
+		servers[i] = &model.Server{
+			Alias:       fmt.Sprintf("server-%02d", i+1),
+			DisplayName: fmt.Sprintf("Server %02d", i+1),
+			Host:        fmt.Sprintf("host-%02d.example.org", i+1),
+			Port:        22,
+			User:        "mirivlad",
+			AuthMethod:  model.AuthKey,
+		}
+	}
+
+	m := New(servers)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 18})
+	model := updated.(*tuiModel)
+	for i := 0; i < 20; i++ {
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(*tuiModel)
+	}
+
+	view := model.View()
+	if !strings.Contains(view, "Server 21") {
+		t.Fatalf("expected selected server to be visible after navigation:\n%s", view)
+	}
+	if !strings.Contains(view, "Showing") {
+		t.Fatalf("expected range hint for long server list:\n%s", view)
 	}
 }
 

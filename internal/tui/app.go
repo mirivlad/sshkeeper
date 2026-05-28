@@ -417,7 +417,9 @@ func (m *tuiModel) viewServerList() string {
 		b.WriteString(helpStyle.Render("  No servers yet. Press Ctrl+A to add one."))
 		b.WriteString("\n")
 	} else {
-		for _, server := range m.servers {
+		selectedIndex := m.list.Index()
+		start, end := visibleServerRange(len(m.servers), selectedIndex, m.visibleServerRows())
+		for _, server := range m.servers[start:end] {
 			marker := " "
 			rowStyle := normalStyle
 			if server.Alias == selectedAlias {
@@ -445,6 +447,10 @@ func (m *tuiModel) viewServerList() string {
 			b.WriteString(rowStyle.Render(row))
 			b.WriteString("\n")
 		}
+		if len(m.servers) > end-start {
+			b.WriteString(helpStyle.Render(fmt.Sprintf("  Showing %d-%d of %d", start+1, end, len(m.servers))))
+			b.WriteString("\n")
+		}
 	}
 
 	b.WriteString("\n")
@@ -463,6 +469,45 @@ func (m *tuiModel) selectedServer() *model.Server {
 		return item.server
 	}
 	return nil
+}
+
+func (m *tuiModel) visibleServerRows() int {
+	if m.height <= 0 {
+		return len(m.servers)
+	}
+
+	const fixedRows = 16
+	rows := m.height - fixedRows
+	if rows < 3 {
+		return 3
+	}
+	return rows
+}
+
+func visibleServerRange(total, selected, available int) (int, int) {
+	if total <= 0 || available <= 0 {
+		return 0, 0
+	}
+	if available >= total {
+		return 0, total
+	}
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= total {
+		selected = total - 1
+	}
+
+	start := selected - available + 1
+	if start < 0 {
+		start = 0
+	}
+	end := start + available
+	if end > total {
+		end = total
+		start = end - available
+	}
+	return start, end
 }
 
 func (m *tuiModel) viewSelectedServer(server *model.Server) string {

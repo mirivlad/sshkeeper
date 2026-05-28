@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `internal/tui/app_test.go`
 
-- [ ] **Step 1: Add a test for a constrained terminal height**
+- [x] **Step 1: Add a test for a constrained terminal height**
 
 Add a test that creates more servers than can fit on screen, sets a small terminal size, renders the list, and verifies the selected details and footer are still visible.
 
@@ -54,7 +54,7 @@ func TestServerListViewKeepsDetailsVisibleWithManyServers(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and confirm it fails**
+- [x] **Step 2: Run the focused test and confirm it fails**
 
 Run:
 
@@ -70,7 +70,7 @@ Expected: FAIL because the current table renders every server and can push the d
 - Modify: `internal/tui/app.go`
 - Modify: `internal/tui/app_test.go`
 
-- [ ] **Step 1: Add focused tests for visible range calculation**
+- [x] **Step 1: Add focused tests for visible range calculation**
 
 Add tests for a helper that computes the inclusive start and exclusive end indexes for rendered rows.
 
@@ -101,7 +101,7 @@ func TestVisibleServerRangeKeepsSelectionInsideWindow(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Implement `visibleServerRange`**
+- [x] **Step 2: Implement `visibleServerRange`**
 
 Add a small helper near `selectedServer`.
 
@@ -133,7 +133,7 @@ func visibleServerRange(total, selected, available int) (int, int) {
 }
 ```
 
-- [ ] **Step 3: Run helper tests**
+- [x] **Step 3: Run helper tests**
 
 Run:
 
@@ -149,7 +149,7 @@ Expected: PASS.
 - Modify: `internal/tui/app.go`
 - Modify: `internal/tui/app_test.go`
 
-- [ ] **Step 1: Reserve terminal space for fixed UI blocks**
+- [x] **Step 1: Reserve terminal space for fixed UI blocks**
 
 Add a helper that decides how many server rows may be rendered while keeping the selected details and footer visible.
 
@@ -168,7 +168,7 @@ func (m *tuiModel) visibleServerRows() int {
 }
 ```
 
-- [ ] **Step 2: Use the visible range in `viewServerList`**
+- [x] **Step 2: Use the visible range in `viewServerList`**
 
 In `viewServerList`, replace the loop over all servers with a bounded loop:
 
@@ -189,7 +189,7 @@ if len(m.servers) > end-start {
 }
 ```
 
-- [ ] **Step 3: Run long-list regression test**
+- [x] **Step 3: Run long-list regression test**
 
 Run:
 
@@ -204,7 +204,7 @@ Expected: PASS.
 **Files:**
 - Modify: `internal/tui/app_test.go`
 
-- [ ] **Step 1: Add a test for moving selection beyond the first window**
+- [x] **Step 1: Add a test for moving selection beyond the first window**
 
 Use the existing `m.list.Update` path by sending `tea.KeyDown` messages and confirm the rendered window follows the selected server.
 
@@ -240,7 +240,7 @@ func TestServerListViewScrollsWithSelection(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run TUI tests**
+- [x] **Step 2: Run TUI tests**
 
 Run:
 
@@ -255,7 +255,7 @@ Expected: PASS.
 **Files:**
 - No source edits expected.
 
-- [ ] **Step 1: Run the full test suite**
+- [x] **Step 1: Run the full test suite**
 
 Run:
 
@@ -265,7 +265,7 @@ env GOCACHE=/tmp/sshkeeper-go-cache go test ./...
 
 Expected: all packages pass.
 
-- [ ] **Step 2: Rebuild the project binary**
+- [x] **Step 2: Rebuild the project binary**
 
 Run:
 
@@ -275,7 +275,7 @@ env GOCACHE=/tmp/sshkeeper-go-cache go build -o bin/sshkeeper .
 
 Expected: exit code 0 and updated `bin/sshkeeper`.
 
-- [ ] **Step 3: Commit the implementation**
+- [x] **Step 3: Commit the implementation**
 
 Run:
 
