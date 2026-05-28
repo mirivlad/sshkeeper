@@ -81,3 +81,36 @@ func TestKeyPassphraseTestReportsVaultError(t *testing.T) {
 		t.Fatalf("expected vault error, got %q", errText)
 	}
 }
+
+func TestConnectRunsStartupCommand(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args")
+	script := filepath.Join(dir, "fake-ssh")
+	if err := os.WriteFile(script, []byte(fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$@" > %q
+`, argsFile)), 0o700); err != nil {
+		t.Fatalf("write fake ssh: %v", err)
+	}
+
+	cfg := &config.Config{SSH: config.SSHConfig{Binary: script}}
+	server := &model.Server{
+		Alias:          "prod",
+		Host:           "example.org",
+		Port:           22,
+		User:           "root",
+		AuthMethod:     model.AuthKey,
+		StartupCommand: "tmux attach -t ops",
+	}
+
+	if err := Connect(cfg, server, nil); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	if !strings.Contains(string(data), "tmux attach -t ops") {
+		t.Fatalf("expected startup command in ssh args, got:\n%s", data)
+	}
+}

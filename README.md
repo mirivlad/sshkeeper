@@ -65,7 +65,13 @@ sshkeeper run web "uptime"
 
 # Groups and templates
 sshkeeper group list
-sshkeeper template list web
+sshkeeper template list
+sshkeeper template add uptime "uptime"
+sshkeeper run-template web uptime
+
+# Tags and startup command
+sshkeeper add web --host 10.0.0.10 --user deploy --auth key --tags prod,web --startup-command "tmux attach -t ops"
+sshkeeper edit web --tags prod,web --startup-command "tmux attach -t ops"
 
 # OpenSSH config
 sshkeeper ssh-config generate
@@ -86,12 +92,21 @@ Running `sshkeeper` without arguments opens the TUI.
 | Key | Action |
 | --- | --- |
 | Enter | Connect to selected server |
+| Ctrl+R | Pick and run a command template on the selected servers |
+| Insert | Select or unselect a server, then move to the next row |
 | Ctrl+A | Add server |
 | Ctrl+E | Edit server |
 | Ctrl+D | Delete server |
 | Ctrl+T | Test connection |
 | Ctrl+F | Search |
+| Ctrl+G | Manage tags |
+| Ctrl+P | Manage global command templates |
 | Ctrl+Q / Ctrl+C | Quit |
+
+Templates are global entities and can run on any server. Foreground template
+runs leave the TUI, show the SSH session in the terminal, and then return to the
+TUI. Background runs execute the command and show per-server output in a result
+screen.
 
 In add/edit forms:
 

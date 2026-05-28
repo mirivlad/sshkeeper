@@ -14,6 +14,9 @@ type VaultFunc func(serverAlias string, secretType string) (string, error)
 
 func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error {
 	args := BuildSSHArgs(server)
+	if strings.TrimSpace(server.StartupCommand) != "" {
+		args = append(args, server.StartupCommand)
+	}
 
 	switch server.AuthMethod {
 	case model.AuthPassword:
@@ -42,6 +45,73 @@ func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error
 		}
 
 		return cmd.Wait()
+	}
+}
+
+func RunCommand(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) error {
+	args := BuildSSHArgs(server)
+	args = append(args, command)
+
+	switch server.AuthMethod {
+	case model.AuthPassword:
+		password, err := getVault(server.Alias, "ssh_password")
+		if err != nil {
+			return fmt.Errorf("get password from vault: %w", err)
+		}
+		return ConnectWithPassword(cfg.SSH.Binary, args, password)
+	case model.AuthKeyPassphrase:
+		passphrase, err := getVault(server.Alias, "key_passphrase")
+		if err != nil {
+			return fmt.Errorf("get key passphrase from vault: %w", err)
+		}
+		return ConnectWithPassword(cfg.SSH.Binary, args, passphrase)
+	default:
+		cmd := exec.Command(cfg.SSH.Binary, args...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start ssh: %w", err)
+		}
+		return cmd.Wait()
+	}
+}
+
+func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) (string, error) {
+	args := BuildSSHArgs(server)
+	args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
+
+	switch server.AuthMethod {
+	case model.AuthPassword:
+		args = append(args, "-o", "NumberOfPasswordPrompts=1", command)
+		password, err := getVault(server.Alias, "ssh_password")
+		if err != nil {
+			return "", fmt.Errorf("get password from vault: %w", err)
+		}
+		ok, output := connectWithPasswordAndRead(cfg.SSH.Binary, args, password, cfg.SSH.ConnectTimeoutSec)
+		if !ok {
+			return output, fmt.Errorf("ssh command failed")
+		}
+		return output, nil
+	case model.AuthKeyPassphrase:
+		args = append(args, "-o", "NumberOfPasswordPrompts=1", command)
+		passphrase, err := getVault(server.Alias, "key_passphrase")
+		if err != nil {
+			return "", fmt.Errorf("get key passphrase from vault: %w", err)
+		}
+		ok, output := connectWithPasswordAndRead(cfg.SSH.Binary, args, passphrase, cfg.SSH.ConnectTimeoutSec)
+		if !ok {
+			return output, fmt.Errorf("ssh command failed")
+		}
+		return output, nil
+	default:
+		args = append(args, "-o", "BatchMode=yes", command)
+		cmd := exec.Command(cfg.SSH.Binary, args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return string(output), err
+		}
+		return string(output), nil
 	}
 }
 

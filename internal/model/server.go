@@ -31,6 +31,7 @@ type Server struct {
 	ProxyJump       string     `json:"proxy_jump"`
 	GroupName       string     `json:"group_name"`
 	Notes           string     `json:"notes"`
+	StartupCommand  string     `json:"startup_command"`
 	Tags            []string   `json:"tags"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
@@ -50,10 +51,10 @@ const (
 )
 
 type Secret struct {
-	ID      string     `json:"id"`
-	Type    SecretType `json:"type"`
-	Nonce   []byte     `json:"nonce"`
-	Data    []byte     `json:"data"`
+	ID    string     `json:"id"`
+	Type  SecretType `json:"type"`
+	Nonce []byte     `json:"nonce"`
+	Data  []byte     `json:"data"`
 }
 
 type ForwardType string
@@ -80,8 +81,9 @@ type Tag struct {
 }
 
 type CommandTemplate struct {
-	ID       int64  `json:"id"`
-	ServerID int64  `json:"server_id"`
-	Name     string `json:"name"`
-	Command  string `json:"command"`
+	ID          int64  `json:"id"`
+	ServerID    int64  `json:"server_id"`
+	Name        string `json:"name"`
+	Command     string `json:"command"`
+	Description string `json:"description"`
 }

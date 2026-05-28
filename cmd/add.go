@@ -24,6 +24,7 @@ var addFlags struct {
 	groupName    string
 	displayName  string
 	notes        string
+	startup      string
 	tags         string
 }
 
@@ -50,16 +51,17 @@ func addInteractive() error {
 
 func addNonInteractive(alias string) error {
 	server := &model.Server{
-		Alias:        alias,
-		DisplayName:  addFlags.displayName,
-		Host:         addFlags.host,
-		Port:         addFlags.port,
-		User:         addFlags.user,
-		AuthMethod:   model.AuthMethod(addFlags.authMethod),
-		IdentityFile: addFlags.identityFile,
-		ProxyJump:    addFlags.proxyJump,
-		GroupName:    addFlags.groupName,
-		Notes:        addFlags.notes,
+		Alias:          alias,
+		DisplayName:    addFlags.displayName,
+		Host:           addFlags.host,
+		Port:           addFlags.port,
+		User:           addFlags.user,
+		AuthMethod:     model.AuthMethod(addFlags.authMethod),
+		IdentityFile:   addFlags.identityFile,
+		ProxyJump:      addFlags.proxyJump,
+		GroupName:      addFlags.groupName,
+		Notes:          addFlags.notes,
+		StartupCommand: addFlags.startup,
 	}
 
 	if server.Port == 0 {
@@ -118,14 +120,11 @@ func saveServerWithOptionalSecret(server *model.Server) error {
 	}
 
 	if addFlags.tags != "" {
-		tagList := strings.Split(addFlags.tags, ",")
-		for _, t := range tagList {
-			t = strings.TrimSpace(t)
-			if t != "" {
-				if err := appDB.AddTagToServer(server.ID, t); err != nil {
-					return fmt.Errorf("add tag %s: %w", t, err)
-				}
-			}
+		server.Tags = strings.Split(addFlags.tags, ",")
+	}
+	if len(server.Tags) > 0 {
+		if err := appDB.SetServerTags(server.ID, server.Tags); err != nil {
+			return fmt.Errorf("set tags: %w", err)
 		}
 	}
 
@@ -184,18 +183,28 @@ func promptServerForAdd(in io.Reader, out io.Writer) (*model.Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	startupCommand, err := promptOptional(reader, out, "Startup command", "")
+	if err != nil {
+		return nil, err
+	}
+	tagsText, err := promptOptional(reader, out, "Tags (comma-separated)", "")
+	if err != nil {
+		return nil, err
+	}
 
 	return &model.Server{
-		Alias:        alias,
-		DisplayName:  displayName,
-		Host:         host,
-		Port:         port,
-		User:         user,
-		AuthMethod:   authMethod,
-		IdentityFile: identityFile,
-		ProxyJump:    proxyJump,
-		GroupName:    groupName,
-		Notes:        notes,
+		Alias:          alias,
+		DisplayName:    displayName,
+		Host:           host,
+		Port:           port,
+		User:           user,
+		AuthMethod:     authMethod,
+		IdentityFile:   identityFile,
+		ProxyJump:      proxyJump,
+		GroupName:      groupName,
+		Notes:          notes,
+		StartupCommand: startupCommand,
+		Tags:           strings.Split(tagsText, ","),
 	}, nil
 }
 
@@ -248,5 +257,6 @@ func init() {
 	addCmd.Flags().StringVar(&addFlags.groupName, "group", "", "Server group")
 	addCmd.Flags().StringVar(&addFlags.displayName, "display-name", "", "Display name")
 	addCmd.Flags().StringVar(&addFlags.notes, "notes", "", "Notes")
+	addCmd.Flags().StringVar(&addFlags.startup, "startup-command", "", "Command to run after connecting")
 	addCmd.Flags().StringVar(&addFlags.tags, "tags", "", "Comma-separated tags")
 }

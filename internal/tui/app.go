@@ -34,7 +34,9 @@ var (
 	testOKStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
 	testFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 
-	helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).MarginLeft(2)
+	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).MarginLeft(2)
+	hotkeyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
+	helpTextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
 
 	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
@@ -59,9 +61,29 @@ type saveDoneMsg struct {
 	err error
 }
 
+type templatesLoadedMsg struct {
+	templates []*model.CommandTemplate
+	err       error
+}
+
+type tagsLoadedMsg struct {
+	tags []string
+	err  error
+}
+
+type backgroundRunDoneMsg struct {
+	results []templateRunResult
+}
+
 // connectRequestMsg — TUI requests a connect action to be handled outside
 type connectRequestMsg struct {
 	server *model.Server
+}
+
+type templateRunRequestMsg struct {
+	servers      []*model.Server
+	templateName string
+	command      string
 }
 
 // --- Server list item ---
@@ -76,6 +98,27 @@ func (i serverItem) Description() string {
 }
 func (i serverItem) FilterValue() string {
 	return i.server.Alias + " " + i.server.DisplayName + " " + i.server.Host + " " + i.server.User
+}
+
+type templateItem struct {
+	template *model.CommandTemplate
+}
+
+func (i templateItem) Title() string       { return i.template.Name }
+func (i templateItem) Description() string { return i.template.Command }
+func (i templateItem) FilterValue() string {
+	return i.template.Name + " " + i.template.Command + " " + i.template.Description
+}
+
+type templateRunResult struct {
+	Alias  string
+	Output string
+	Err    string
+}
+
+type helpItem struct {
+	Key    string
+	Action string
 }
 
 // --- External callbacks ---
@@ -93,6 +136,14 @@ var (
 	GetGroups                  func() ([]string, error)
 	RenameGroup                func(oldName, newName string) error
 	DeleteGroup                func(name string) error
+	ListTags                   func() ([]string, error)
+	RenameTag                  func(oldName, newName string) error
+	DeleteTag                  func(name string) error
+	SetServerTags              func(server *model.Server, tags []string) error
+	ListCommandTemplates       func() ([]*model.CommandTemplate, error)
+	SaveCommandTemplate        func(oldName string, template *model.CommandTemplate) error
+	DeleteCommandTemplate      func(name string) error
+	RunTemplateBackground      func(server *model.Server, command string) (string, error)
 )
 
 // --- Screen type ---
@@ -103,28 +154,49 @@ const (
 	screenList screen = iota
 	screenForm
 	screenSearch
+	screenTags
+	screenTagInput
+	screenTemplates
+	screenTemplateForm
+	screenTemplatePicker
+	screenTemplateMode
+	screenBackgroundResults
 )
 
 // --- Result type — returned from TUI to caller ---
 
 type TUIResult struct {
-	Server *model.Server
-	Action string // "connect"
+	Server       *model.Server
+	Servers      []*model.Server
+	Action       string // "connect" or "run_template_foreground"
+	Command      string
+	TemplateName string
 }
 
 // --- Main TUI model ---
 
 type tuiModel struct {
-	screen      screen
-	list        list.Model
-	servers     []*model.Server
-	searchInput textinput.Model
-	form        *formModel
-	err         error
-	success     string
-	width       int
-	height      int
-	result      *TUIResult
+	screen          screen
+	list            list.Model
+	servers         []*model.Server
+	searchInput     textinput.Model
+	form            *formModel
+	templateForm    *templateFormModel
+	templates       []*model.CommandTemplate
+	templateList    list.Model
+	pendingTemplate *model.CommandTemplate
+	tagList         list.Model
+	tags            []string
+	tagInput        textinput.Model
+	tagMode         string
+	tagOldName      string
+	selected        map[string]bool
+	bgResults       []templateRunResult
+	err             error
+	success         string
+	width           int
+	height          int
+	result          *TUIResult
 }
 
 func New(servers []*model.Server) *tuiModel {
@@ -143,11 +215,24 @@ func New(servers []*model.Server) *tuiModel {
 	search.Placeholder = "Search..."
 	search.CharLimit = 64
 
+	tagInput := textinput.New()
+	tagInput.Placeholder = "tag"
+	tagInput.CharLimit = 64
+	templateList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	templateList.SetShowStatusBar(false)
+	templateList.SetFilteringEnabled(false)
+	templateList.SetShowHelp(false)
+	tagList := newStringList(nil, "Tags", 0, 0)
+
 	return &tuiModel{
-		screen:      screenList,
-		list:        l,
-		servers:     servers,
-		searchInput: search,
+		screen:       screenList,
+		list:         l,
+		servers:      servers,
+		searchInput:  search,
+		selected:     map[string]bool{},
+		tagInput:     tagInput,
+		templateList: templateList,
+		tagList:      tagList,
 	}
 }
 
@@ -170,6 +255,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form.width = msg.Width
 			m.form.height = msg.Height
 		}
+		m.templateList.SetSize(msg.Width, managerListHeight(msg.Height))
+		m.tagList.SetSize(msg.Width, managerListHeight(msg.Height))
 		return m, nil
 
 	case serversLoadedMsg:
@@ -185,6 +272,22 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case templatesLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.setTemplates(msg.templates)
+		return m, nil
+
+	case tagsLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.setTags(msg.tags)
+		return m, nil
+
 	case connectRequestMsg:
 		// Store result and quit TUI — caller will handle the connect
 		m.result = &TUIResult{
@@ -192,6 +295,24 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Action: "connect",
 		}
 		return m, tea.Quit
+
+	case templateRunRequestMsg:
+		m.result = &TUIResult{
+			Servers:      msg.servers,
+			Action:       "run_template_foreground",
+			Command:      msg.command,
+			TemplateName: msg.templateName,
+		}
+		if len(msg.servers) == 1 {
+			m.result.Server = msg.servers[0]
+		}
+		return m, tea.Quit
+
+	case backgroundRunDoneMsg:
+		m.bgResults = msg.results
+		m.screen = screenList
+		m.pendingTemplate = nil
+		return m, nil
 
 	case testDoneMsg:
 		if m.form != nil {
@@ -223,6 +344,20 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case saveDoneMsg:
+		if m.templateForm != nil {
+			if msg.err != nil {
+				m.templateForm.err = msg.err
+				m.templateForm.saved = false
+			} else {
+				m.templateForm.saved = true
+			}
+			if m.templateForm.saved {
+				m.screen = screenTemplates
+				m.templateForm = nil
+				return m, m.loadTemplatesCmd()
+			}
+			return m, nil
+		}
 		if m.form != nil {
 			m.form.saving = false
 			if msg.err != nil {
@@ -244,6 +379,20 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForm(msg)
 		case screenSearch:
 			return m.updateSearch(msg)
+		case screenTags:
+			return m.updateTags(msg)
+		case screenTagInput:
+			return m.updateTagInput(msg)
+		case screenTemplates:
+			return m.updateTemplates(msg)
+		case screenTemplateForm:
+			return m.updateTemplateForm(msg)
+		case screenTemplatePicker:
+			return m.updateTemplatePicker(msg)
+		case screenTemplateMode:
+			return m.updateTemplateMode(msg)
+		case screenBackgroundResults:
+			return m.updateBackgroundResults(msg)
 		}
 	}
 
@@ -252,6 +401,12 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
+	case tea.KeyEsc:
+		if len(m.bgResults) > 0 {
+			m.bgResults = nil
+			return m, nil
+		}
+
 	case tea.KeyEnter:
 		// Connect to selected server
 		if item, ok := m.list.SelectedItem().(serverItem); ok {
@@ -259,6 +414,19 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return connectRequestMsg{server: item.server}
 			}
 		}
+
+	case tea.KeyInsert:
+		if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if m.selected[item.server.Alias] {
+				delete(m.selected, item.server.Alias)
+			} else {
+				m.selected[item.server.Alias] = true
+			}
+			if m.list.Index() < len(m.servers)-1 {
+				m.list.Select(m.list.Index() + 1)
+			}
+		}
+		return m, nil
 
 	case tea.KeyCtrlC, tea.KeyCtrlQ:
 		return m, tea.Quit
@@ -305,6 +473,17 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchInput.Focus()
 		return m, nil
 
+	case tea.KeyCtrlG:
+		m.screen = screenTags
+		return m, m.loadTagsCmd()
+
+	case tea.KeyCtrlP:
+		m.screen = screenTemplates
+		return m, m.loadTemplatesCmd()
+
+	case tea.KeyCtrlR:
+		return m.openTemplatePicker()
+
 	default:
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
@@ -344,6 +523,245 @@ func (m *tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m *tuiModel) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenList
+		return m, m.reloadServersCmd()
+	case tea.KeyCtrlA:
+		m.tagMode = "add"
+		m.tagOldName = ""
+		m.tagInput.SetValue("")
+		m.tagInput.Focus()
+		m.screen = screenTagInput
+		return m, nil
+	case tea.KeyCtrlE:
+		if item, ok := m.tagList.SelectedItem().(groupItem); ok {
+			m.tagMode = "rename"
+			m.tagOldName = item.name
+			m.tagInput.SetValue(item.name)
+			m.tagInput.Focus()
+			m.screen = screenTagInput
+		}
+		return m, nil
+	case tea.KeyCtrlD:
+		if item, ok := m.tagList.SelectedItem().(groupItem); ok && DeleteTag != nil {
+			name := item.name
+			return m, func() tea.Msg {
+				if err := DeleteTag(name); err != nil {
+					return tagsLoadedMsg{err: err}
+				}
+				tags, err := ListTags()
+				return tagsLoadedMsg{tags: tags, err: err}
+			}
+		}
+	case tea.KeyEnter:
+		if item, ok := m.tagList.SelectedItem().(groupItem); ok && SetServerTags != nil {
+			servers := m.selectedServers()
+			if len(servers) == 0 {
+				if selected := m.selectedServer(); selected != nil {
+					servers = []*model.Server{selected}
+				}
+			}
+			tag := item.name
+			return m, func() tea.Msg {
+				for _, server := range servers {
+					tags := toggleString(server.Tags, tag)
+					if err := SetServerTags(server, tags); err != nil {
+						return tagsLoadedMsg{err: err}
+					}
+				}
+				loaded, err := ListTags()
+				return tagsLoadedMsg{tags: loaded, err: err}
+			}
+		}
+	}
+	var cmd tea.Cmd
+	m.tagList, cmd = m.tagList.Update(msg)
+	return m, cmd
+}
+
+func (m *tuiModel) updateTagInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenTags
+		return m, nil
+	case tea.KeyEnter:
+		value := strings.TrimSpace(m.tagInput.Value())
+		if value == "" {
+			m.screen = screenTags
+			return m, nil
+		}
+		mode := m.tagMode
+		oldName := m.tagOldName
+		return m, func() tea.Msg {
+			if mode == "rename" && RenameTag != nil {
+				if err := RenameTag(oldName, value); err != nil {
+					return tagsLoadedMsg{err: err}
+				}
+			} else if SetServerTags != nil {
+				servers := m.selectedServers()
+				if len(servers) == 0 {
+					if selected := m.selectedServer(); selected != nil {
+						servers = []*model.Server{selected}
+					}
+				}
+				for _, server := range servers {
+					tags := append(splitCSV(strings.Join(server.Tags, ",")), value)
+					if err := SetServerTags(server, tags); err != nil {
+						return tagsLoadedMsg{err: err}
+					}
+				}
+			}
+			tags, err := ListTags()
+			return tagsLoadedMsg{tags: tags, err: err}
+		}
+	}
+	var cmd tea.Cmd
+	m.tagInput, cmd = m.tagInput.Update(msg)
+	return m, cmd
+}
+
+func (m *tuiModel) updateTemplates(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenList
+		return m, nil
+	case tea.KeyCtrlA:
+		m.templateForm = newTemplateFormModel(nil, m.width, m.height)
+		m.screen = screenTemplateForm
+		return m, nil
+	case tea.KeyCtrlE:
+		if item, ok := m.templateList.SelectedItem().(templateItem); ok {
+			m.templateForm = newTemplateFormModel(item.template, m.width, m.height)
+			m.screen = screenTemplateForm
+		}
+		return m, nil
+	case tea.KeyCtrlD:
+		if item, ok := m.templateList.SelectedItem().(templateItem); ok && DeleteCommandTemplate != nil {
+			name := item.template.Name
+			return m, func() tea.Msg {
+				if err := DeleteCommandTemplate(name); err != nil {
+					return templatesLoadedMsg{err: err}
+				}
+				templates, err := ListCommandTemplates()
+				return templatesLoadedMsg{templates: templates, err: err}
+			}
+		}
+	}
+	var cmd tea.Cmd
+	m.templateList, cmd = m.templateList.Update(msg)
+	return m, cmd
+}
+
+func (m *tuiModel) updateTemplateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyEsc {
+		m.screen = screenTemplates
+		m.templateForm = nil
+		return m, nil
+	}
+	updated, cmd := m.templateForm.Update(msg)
+	if tf, ok := updated.(*templateFormModel); ok {
+		m.templateForm = tf
+		if tf.saved {
+			m.screen = screenTemplates
+			m.templateForm = nil
+			return m, m.loadTemplatesCmd()
+		}
+	}
+	return m, cmd
+}
+
+func (m *tuiModel) updateTemplatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenList
+		return m, nil
+	case tea.KeyEnter:
+		if item, ok := m.templateList.SelectedItem().(templateItem); ok {
+			m.pendingTemplate = item.template
+			m.screen = screenTemplateMode
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.templateList, cmd = m.templateList.Update(msg)
+	return m, cmd
+}
+
+func (m *tuiModel) updateTemplateMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingTemplate == nil {
+		m.screen = screenList
+		return m, nil
+	}
+	switch msg.Type {
+	case tea.KeyCtrlB:
+		servers := m.targetServers()
+		tpl := m.pendingTemplate
+		return m, func() tea.Msg {
+			results := make([]templateRunResult, 0, len(servers))
+			for _, server := range servers {
+				output, err := RunTemplateBackground(server, tpl.Command)
+				result := templateRunResult{Alias: server.Alias, Output: strings.TrimSpace(output)}
+				if err != nil {
+					result.Err = err.Error()
+				}
+				results = append(results, result)
+			}
+			return backgroundRunDoneMsg{results: results}
+		}
+	case tea.KeyCtrlF, tea.KeyEnter:
+		servers := m.targetServers()
+		tpl := m.pendingTemplate
+		return m, func() tea.Msg {
+			return templateRunRequestMsg{servers: servers, templateName: tpl.Name, command: tpl.Command}
+		}
+	case tea.KeyEsc:
+		m.screen = screenTemplatePicker
+		return m, nil
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "b", "B":
+			servers := m.targetServers()
+			tpl := m.pendingTemplate
+			return m, func() tea.Msg {
+				results := make([]templateRunResult, 0, len(servers))
+				for _, server := range servers {
+					output, err := RunTemplateBackground(server, tpl.Command)
+					result := templateRunResult{Alias: server.Alias, Output: strings.TrimSpace(output)}
+					if err != nil {
+						result.Err = err.Error()
+					}
+					results = append(results, result)
+				}
+				return backgroundRunDoneMsg{results: results}
+			}
+		case "f", "F":
+			servers := m.targetServers()
+			tpl := m.pendingTemplate
+			return m, func() tea.Msg {
+				return templateRunRequestMsg{servers: servers, templateName: tpl.Name, command: tpl.Command}
+			}
+		}
+	default:
+		if msg.Type == tea.KeyEsc {
+			m.screen = screenTemplatePicker
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m *tuiModel) updateBackgroundResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc, tea.KeyEnter:
+		m.screen = screenList
+		m.pendingTemplate = nil
+		return m, m.reloadServersCmd()
+	}
+	return m, nil
+}
+
 func (m *tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
 		if m.form != nil && (m.form.showGroupList || m.form.showAuthList) {
@@ -381,10 +799,31 @@ func (m *tuiModel) View() string {
 
 	case screenSearch:
 		b.WriteString("Search: " + m.searchInput.View() + "\n")
-		b.WriteString(helpStyle.Render("Type to search | Enter confirm | Esc cancel"))
+		b.WriteString(renderHelp([]helpItem{{Key: "Type", Action: "search"}, {Key: "Enter", Action: "confirm"}, {Key: "Esc", Action: "cancel"}}, m.width))
 
 	case screenForm:
 		b.WriteString(m.form.View())
+
+	case screenTags:
+		b.WriteString(m.viewTags())
+
+	case screenTagInput:
+		b.WriteString(m.viewTagInput())
+
+	case screenTemplates:
+		b.WriteString(m.viewTemplates())
+
+	case screenTemplateForm:
+		b.WriteString(m.templateForm.View())
+
+	case screenTemplatePicker:
+		b.WriteString(m.viewTemplatePicker())
+
+	case screenTemplateMode:
+		b.WriteString(m.viewTemplateMode())
+
+	case screenBackgroundResults:
+		b.WriteString(m.viewBackgroundResults())
 	}
 
 	if m.err != nil {
@@ -426,6 +865,12 @@ func (m *tuiModel) viewServerList() string {
 				marker = ">"
 				rowStyle = selectedRowStyle
 			}
+			if m.selected[server.Alias] {
+				marker = "*"
+				if server.Alias == selectedAlias {
+					marker = ">*"
+				}
+			}
 			name := server.DisplayName
 			if name == "" {
 				name = server.Alias
@@ -460,8 +905,197 @@ func (m *tuiModel) viewServerList() string {
 			b.WriteString("\n")
 		}
 	}
-	b.WriteString(helpStyle.Render("Enter connect | Ctrl+A add | Ctrl+E edit | Ctrl+D del | Ctrl+T test | Ctrl+F search | Ctrl+Q quit"))
+	if len(m.bgResults) > 0 {
+		b.WriteString(m.viewInlineBackgroundResults())
+		b.WriteString("\n")
+	}
+	selectedCount := len(m.selectedServers())
+	footer := m.renderListHelp(selectedCount, len(m.bgResults) > 0)
+	b.WriteString(strings.Repeat("\n", bottomPaddingLines(b.String(), footer, m.height)))
+	b.WriteString(footer)
 	return b.String()
+}
+
+func (m *tuiModel) viewInlineBackgroundResults() string {
+	var b strings.Builder
+	b.WriteString(sectionStyle.Render("Last Background Run"))
+	b.WriteString("\n")
+	for _, result := range m.bgResults {
+		status := "OK"
+		if result.Err != "" {
+			status = "FAIL"
+		}
+		b.WriteString(fmt.Sprintf("  %-20s %s", result.Alias, status))
+		if result.Err != "" {
+			b.WriteString("  " + result.Err)
+		}
+		b.WriteString("\n")
+	}
+
+	selectedAlias := ""
+	if selected := m.selectedServer(); selected != nil {
+		selectedAlias = selected.Alias
+	}
+	result := m.backgroundResultForAlias(selectedAlias)
+	if result == nil && len(m.bgResults) == 1 {
+		result = &m.bgResults[0]
+	}
+	if result != nil {
+		output := strings.TrimSpace(result.Output)
+		if output == "" && result.Err != "" {
+			output = result.Err
+		}
+		if output != "" {
+			b.WriteString(helpStyle.Render("  Output: " + result.Alias))
+			b.WriteString("\n")
+			for _, line := range strings.Split(output, "\n") {
+				b.WriteString(m.renderBackgroundOutputLine(line))
+				b.WriteString("\n")
+			}
+		}
+	}
+	return b.String()
+}
+
+func (m *tuiModel) backgroundResultForAlias(alias string) *templateRunResult {
+	for i := range m.bgResults {
+		if m.bgResults[i].Alias == alias {
+			return &m.bgResults[i]
+		}
+	}
+	return nil
+}
+
+func (m *tuiModel) renderListHelp(selectedCount int, hasBackgroundResult bool) string {
+	width := m.width - 2
+	if width <= 0 {
+		width = 80
+	}
+	lines := wrapHelpItems(m.listHelpItems(selectedCount, hasBackgroundResult), width)
+	rendered := make([]string, len(lines))
+	for i, line := range lines {
+		rendered[i] = "  " + renderHelpLine(line)
+	}
+	return strings.Join(rendered, "\n")
+}
+
+func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []helpItem {
+	insAction := "select"
+	if selectedCount > 0 {
+		insAction = fmt.Sprintf("select (%d selected)", selectedCount)
+	}
+	items := []helpItem{
+		{Key: "Enter", Action: "connect"},
+		{Key: "Ctrl+R", Action: "run tpl"},
+		{Key: "Ins", Action: insAction},
+	}
+	if hasBackgroundResult {
+		items = append(items, helpItem{Key: "Esc", Action: "clear result"})
+	}
+	return append(items,
+		helpItem{Key: "Ctrl+P", Action: "tpl mgr"},
+		helpItem{Key: "Ctrl+G", Action: "tags"},
+		helpItem{Key: "Ctrl+A", Action: "add"},
+		helpItem{Key: "Ctrl+E", Action: "edit"},
+		helpItem{Key: "Ctrl+D", Action: "del"},
+		helpItem{Key: "Ctrl+T", Action: "test"},
+		helpItem{Key: "Ctrl+F", Action: "search"},
+		helpItem{Key: "Ctrl+Q", Action: "quit"},
+	)
+}
+
+func wrapHelpItems(items []helpItem, width int) [][]helpItem {
+	if width <= 0 {
+		return [][]helpItem{items}
+	}
+	var lines [][]helpItem
+	var current []helpItem
+	currentWidth := 0
+	for _, item := range items {
+		itemWidth := len(plainHelpItem(item))
+		if len(current) == 0 {
+			current = []helpItem{item}
+			currentWidth = itemWidth
+			continue
+		}
+		nextWidth := currentWidth + len(" | ") + itemWidth
+		if nextWidth > width {
+			lines = append(lines, current)
+			current = []helpItem{item}
+			currentWidth = itemWidth
+			continue
+		}
+		current = append(current, item)
+		currentWidth = nextWidth
+	}
+	if len(current) > 0 {
+		lines = append(lines, current)
+	}
+	return lines
+}
+
+func renderHelpLine(items []helpItem) string {
+	parts := make([]string, len(items))
+	for i, item := range items {
+		parts[i] = hotkeyStyle.Render(item.Key) + helpTextStyle.Render(": "+item.Action)
+	}
+	return strings.Join(parts, helpTextStyle.Render(" | "))
+}
+
+func renderHelp(items []helpItem, width int) string {
+	if width <= 0 {
+		width = 80
+	}
+	lines := wrapHelpItems(items, width-2)
+	rendered := make([]string, len(lines))
+	for i, line := range lines {
+		rendered[i] = "  " + renderHelpLine(line)
+	}
+	return strings.Join(rendered, "\n")
+}
+
+func plainHelpItem(item helpItem) string {
+	return item.Key + ": " + item.Action
+}
+
+func plainHelpLine(items []helpItem) string {
+	parts := make([]string, len(items))
+	for i, item := range items {
+		parts[i] = plainHelpItem(item)
+	}
+	return strings.Join(parts, " | ")
+}
+
+func bottomPaddingLines(content string, footer string, height int) int {
+	if height <= 0 {
+		return 0
+	}
+	used := strings.Count(content, "\n") + displayLineCount(footer)
+	if used >= height {
+		return 0
+	}
+	return height - used
+}
+
+func displayLineCount(s string) int {
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+func (m *tuiModel) renderBackgroundOutputLine(line string) string {
+	line = strings.ReplaceAll(strings.TrimRight(line, "\r"), "\t", "    ")
+	line = "    " + line
+	width := m.width
+	if width <= 0 {
+		return line
+	}
+	if len(line) > width {
+		line = truncate(line, width)
+	}
+	return line + strings.Repeat(" ", width-len(line))
 }
 
 func (m *tuiModel) selectedServer() *model.Server {
@@ -530,8 +1164,235 @@ func (m *tuiModel) viewSelectedServer(server *model.Server) string {
 	b.WriteString(fmt.Sprintf("  User: %s\n", server.User))
 	b.WriteString(fmt.Sprintf("  Auth: %s\n", authLabel(server.AuthMethod)))
 	b.WriteString(fmt.Sprintf("  Group: %s\n", group))
+	if len(server.Tags) > 0 {
+		b.WriteString(fmt.Sprintf("  Tags: %s\n", strings.Join(server.Tags, ", ")))
+	}
+	if server.StartupCommand != "" {
+		b.WriteString(fmt.Sprintf("  Startup: %s\n", server.StartupCommand))
+	}
 	b.WriteString(fmt.Sprintf("  Status: %s\n", testStatusLabel(server)))
 	return b.String()
+}
+
+func (m *tuiModel) viewTags() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Tags"))
+	b.WriteString("\n\n")
+	if len(m.tags) == 0 {
+		b.WriteString(helpStyle.Render("  No tags yet. Press Ctrl+A to add one to the selected servers."))
+		b.WriteString("\n")
+	} else {
+		for i, item := range m.tagList.Items() {
+			tag, ok := item.(groupItem)
+			if !ok {
+				continue
+			}
+			marker := "  "
+			style := normalStyle
+			if i == m.tagList.Index() {
+				marker = "> "
+				style = selectedRowStyle
+			}
+			b.WriteString(style.Render(marker + tag.name))
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(renderHelp([]helpItem{
+		{Key: "Enter", Action: "toggle for selected/current"},
+		{Key: "Ctrl+A", Action: "add"},
+		{Key: "Ctrl+E", Action: "rename"},
+		{Key: "Ctrl+D", Action: "delete"},
+		{Key: "Esc", Action: "back"},
+	}, m.width))
+	return b.String()
+}
+
+func (m *tuiModel) viewTagInput() string {
+	title := "Add Tag"
+	if m.tagMode == "rename" {
+		title = "Rename Tag"
+	}
+	return titleStyle.Render(title) + "\n\n" + m.tagInput.View() + "\n\n" + renderHelp([]helpItem{{Key: "Enter", Action: "save"}, {Key: "Esc", Action: "cancel"}}, m.width)
+}
+
+func (m *tuiModel) viewTemplates() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Command Templates"))
+	b.WriteString("\n\n")
+	if len(m.templates) == 0 {
+		b.WriteString(helpStyle.Render("  No command templates yet. Press Ctrl+A to add one."))
+		b.WriteString("\n")
+	} else {
+		for i, item := range m.templateList.Items() {
+			tpl, ok := item.(templateItem)
+			if !ok {
+				continue
+			}
+			marker := "  "
+			style := normalStyle
+			if i == m.templateList.Index() {
+				marker = "> "
+				style = selectedRowStyle
+			}
+			line := fmt.Sprintf("%s%-24s %s", marker, truncate(tpl.template.Name, 24), tpl.template.Command)
+			b.WriteString(style.Render(line))
+			b.WriteString("\n")
+			if tpl.template.Description != "" {
+				b.WriteString(helpStyle.Render("    " + tpl.template.Description))
+				b.WriteString("\n")
+			}
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(renderHelp([]helpItem{
+		{Key: "Ctrl+A", Action: "add"},
+		{Key: "Ctrl+E", Action: "edit"},
+		{Key: "Ctrl+D", Action: "delete"},
+		{Key: "Esc", Action: "back"},
+	}, m.width))
+	return b.String()
+}
+
+func (m *tuiModel) viewTemplatePicker() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Run Template"))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render(fmt.Sprintf("Targets: %s", strings.Join(serverAliases(m.targetServers()), ", "))))
+	b.WriteString("\n\n")
+	if len(m.templates) == 0 {
+		b.WriteString(helpStyle.Render("  No command templates. Press Esc, then Ctrl+P to add one."))
+	} else {
+		for i, item := range m.templateList.Items() {
+			tpl, ok := item.(templateItem)
+			if !ok {
+				continue
+			}
+			marker := "  "
+			style := normalStyle
+			if i == m.templateList.Index() {
+				marker = "> "
+				style = selectedRowStyle
+			}
+			b.WriteString(style.Render(fmt.Sprintf("%s%-24s %s", marker, truncate(tpl.template.Name, 24), tpl.template.Command)))
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(renderHelp([]helpItem{{Key: "Enter", Action: "choose"}, {Key: "Esc", Action: "back"}}, m.width))
+	return b.String()
+}
+
+func (m *tuiModel) viewTemplateMode() string {
+	name := ""
+	command := ""
+	if m.pendingTemplate != nil {
+		name = m.pendingTemplate.Name
+		command = m.pendingTemplate.Command
+	}
+	return titleStyle.Render("Run Mode") + "\n\n" +
+		fmt.Sprintf("Template: %s\nCommand: %s\nTargets: %s\n\n", name, command, strings.Join(serverAliases(m.targetServers()), ", ")) +
+		renderHelp([]helpItem{{Key: "Ctrl+F (Enter)", Action: "Foreground"}, {Key: "Ctrl+B", Action: "Background"}, {Key: "Esc", Action: "back"}}, m.width)
+}
+
+func (m *tuiModel) viewBackgroundResults() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Background Results"))
+	b.WriteString("\n\n")
+	for _, result := range m.bgResults {
+		status := "OK"
+		if result.Err != "" {
+			status = "FAIL: " + result.Err
+		}
+		b.WriteString(sectionStyle.Render(result.Alias + "  " + status))
+		b.WriteString("\n")
+		if result.Output != "" {
+			b.WriteString(result.Output)
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(renderHelp([]helpItem{{Key: "Enter/Esc", Action: "back"}}, m.width))
+	return b.String()
+}
+
+func (m *tuiModel) selectedServers() []*model.Server {
+	if len(m.selected) == 0 {
+		return nil
+	}
+	servers := make([]*model.Server, 0, len(m.selected))
+	for _, server := range m.servers {
+		if m.selected[server.Alias] {
+			servers = append(servers, server)
+		}
+	}
+	return servers
+}
+
+func (m *tuiModel) targetServers() []*model.Server {
+	servers := m.selectedServers()
+	if len(servers) > 0 {
+		return servers
+	}
+	if selected := m.selectedServer(); selected != nil {
+		return []*model.Server{selected}
+	}
+	return nil
+}
+
+func (m *tuiModel) openTemplatePicker() (tea.Model, tea.Cmd) {
+	if m.selectedServer() == nil && len(m.selectedServers()) == 0 {
+		return m, nil
+	}
+	m.screen = screenTemplatePicker
+	return m, m.loadTemplatesCmd()
+}
+
+func (m *tuiModel) reloadServersCmd() tea.Cmd {
+	return func() tea.Msg {
+		servers, err := ListServers()
+		return serversLoadedMsg{servers: servers, err: err}
+	}
+}
+
+func (m *tuiModel) loadTemplatesCmd() tea.Cmd {
+	return func() tea.Msg {
+		if ListCommandTemplates == nil {
+			return templatesLoadedMsg{err: fmt.Errorf("template storage is unavailable")}
+		}
+		templates, err := ListCommandTemplates()
+		return templatesLoadedMsg{templates: templates, err: err}
+	}
+}
+
+func (m *tuiModel) loadTagsCmd() tea.Cmd {
+	return func() tea.Msg {
+		if ListTags == nil {
+			return tagsLoadedMsg{err: fmt.Errorf("tag storage is unavailable")}
+		}
+		tags, err := ListTags()
+		return tagsLoadedMsg{tags: tags, err: err}
+	}
+}
+
+func (m *tuiModel) setTemplates(templates []*model.CommandTemplate) {
+	m.templates = templates
+	items := make([]list.Item, len(templates))
+	for i, template := range templates {
+		items[i] = templateItem{template: template}
+	}
+	l := list.New(items, list.NewDefaultDelegate(), m.width, managerListHeight(m.height))
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowHelp(false)
+	l.Title = "Command Templates"
+	l.Styles.Title = titleStyle
+	m.templateList = l
+}
+
+func (m *tuiModel) setTags(tags []string) {
+	m.tags = tags
+	m.tagList = newStringList(tags, "Tags", m.width, managerListHeight(m.height))
 }
 
 func testSummary(servers []*model.Server) string {
@@ -615,7 +1476,7 @@ func (i groupItem) Description() string { return "" }
 func (i groupItem) FilterValue() string { return i.name }
 
 func newFormModel(w, h int) *formModel {
-	inputs := make([]textinput.Model, 10)
+	inputs := make([]textinput.Model, 12)
 	labels := []string{
 		"Alias",
 		"Display Name",
@@ -627,6 +1488,8 @@ func newFormModel(w, h int) *formModel {
 		"ProxyJump",
 		"Group (type new or pick from list)",
 		"Notes",
+		"Startup Command",
+		"Tags (comma-separated)",
 	}
 	for i, label := range labels {
 		inputs[i] = textinput.New()
@@ -696,6 +1559,10 @@ func placeholderForLabel(label string) string {
 		return "KP"
 	case "Notes":
 		return "optional"
+	case "Startup Command":
+		return "optional"
+	case "Tags (comma-separated)":
+		return "prod, web"
 	default:
 		return label
 	}
@@ -729,6 +1596,8 @@ func newEditFormModel(s *model.Server, w, h int) *formModel {
 	fm.inputs[7].SetValue(s.ProxyJump)
 	fm.inputs[8].SetValue(s.GroupName)
 	fm.inputs[9].SetValue(s.Notes)
+	fm.inputs[10].SetValue(s.StartupCommand)
+	fm.inputs[11].SetValue(strings.Join(s.Tags, ", "))
 	if HasSecret != nil {
 		switch s.AuthMethod {
 		case model.AuthPassword:
@@ -1013,16 +1882,18 @@ func (fm *formModel) buildServer() *model.Server {
 		authMethod = model.AuthKey
 	}
 	return &model.Server{
-		Alias:        fm.inputs[0].Value(),
-		DisplayName:  fm.inputs[1].Value(),
-		Host:         fm.inputs[2].Value(),
-		Port:         port,
-		User:         fm.inputs[4].Value(),
-		AuthMethod:   authMethod,
-		IdentityFile: fm.inputs[6].Value(),
-		ProxyJump:    fm.inputs[7].Value(),
-		GroupName:    fm.inputs[8].Value(),
-		Notes:        fm.inputs[9].Value(),
+		Alias:          fm.inputs[0].Value(),
+		DisplayName:    fm.inputs[1].Value(),
+		Host:           fm.inputs[2].Value(),
+		Port:           port,
+		User:           fm.inputs[4].Value(),
+		AuthMethod:     authMethod,
+		IdentityFile:   fm.inputs[6].Value(),
+		ProxyJump:      fm.inputs[7].Value(),
+		GroupName:      fm.inputs[8].Value(),
+		Notes:          fm.inputs[9].Value(),
+		StartupCommand: fm.inputs[10].Value(),
+		Tags:           splitCSV(fm.inputs[11].Value()),
 	}
 }
 
@@ -1090,12 +1961,12 @@ func (fm *formModel) View() string {
 		b.WriteString("\n")
 		if i == 5 && fm.showAuthList {
 			b.WriteString("\n" + renderDropdown(fm.authList) + "\n")
-			b.WriteString(helpStyle.Render("Enter select | Esc cancel"))
+			b.WriteString(renderHelp([]helpItem{{Key: "Enter", Action: "select"}, {Key: "Esc", Action: "cancel"}}, fm.width))
 			return b.String()
 		}
 		if i == 8 && fm.showGroupList {
 			b.WriteString("\n" + renderDropdown(fm.groupList) + "\n")
-			b.WriteString(helpStyle.Render("Enter select | Esc cancel"))
+			b.WriteString(renderHelp([]helpItem{{Key: "Enter", Action: "select"}, {Key: "Esc", Action: "cancel"}}, fm.width))
 			return b.String()
 		}
 	}
@@ -1148,7 +2019,13 @@ func (fm *formModel) View() string {
 
 	b.WriteString("\n" + sectionStyle.Render("Actions") + "\n")
 	b.WriteString(testBtn + "  " + saveBtn + "\n\n")
-	b.WriteString(helpStyle.Render("Tab/↓ next | ↑ prev | / pick list | Enter select | Esc back"))
+	b.WriteString(renderHelp([]helpItem{
+		{Key: "Tab/↓", Action: "next"},
+		{Key: "↑", Action: "prev"},
+		{Key: "/", Action: "pick list"},
+		{Key: "Enter", Action: "select"},
+		{Key: "Esc", Action: "back"},
+	}, fm.width))
 
 	return b.String()
 }
@@ -1174,6 +2051,145 @@ func renderDropdown(l list.Model) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+type templateFormModel struct {
+	edit     bool
+	oldName  string
+	inputs   []textinput.Model
+	labels   []string
+	focusIdx int
+	err      error
+	saved    bool
+	width    int
+	height   int
+}
+
+func newTemplateFormModel(t *model.CommandTemplate, w, h int) *templateFormModel {
+	labels := []string{"Name", "Command", "Description"}
+	inputs := make([]textinput.Model, len(labels))
+	for i := range inputs {
+		inputs[i] = textinput.New()
+		inputs[i].CharLimit = 512
+	}
+	inputs[0].Placeholder = "uptime"
+	inputs[1].Placeholder = "uptime"
+	inputs[2].Placeholder = "optional"
+	inputs[0].Focus()
+
+	tf := &templateFormModel{inputs: inputs, labels: labels, width: w, height: h}
+	if t != nil {
+		tf.edit = true
+		tf.oldName = t.Name
+		inputs[0].SetValue(t.Name)
+		inputs[1].SetValue(t.Command)
+		inputs[2].SetValue(t.Description)
+	}
+	tf.updateFocus()
+	return tf
+}
+
+func (tf *templateFormModel) Init() tea.Cmd {
+	return nil
+}
+
+func (tf *templateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyTab, tea.KeyDown:
+			tf.focusIdx++
+			if tf.focusIdx > len(tf.inputs) {
+				tf.focusIdx = 0
+			}
+			tf.updateFocus()
+			return tf, nil
+		case tea.KeyShiftTab, tea.KeyUp:
+			tf.focusIdx--
+			if tf.focusIdx < 0 {
+				tf.focusIdx = len(tf.inputs)
+			}
+			tf.updateFocus()
+			return tf, nil
+		case tea.KeyEnter:
+			if tf.focusIdx == len(tf.inputs) {
+				return tf, tf.save()
+			}
+			tf.focusIdx++
+			tf.updateFocus()
+			return tf, nil
+		}
+	}
+	if tf.focusIdx < len(tf.inputs) {
+		var cmd tea.Cmd
+		tf.inputs[tf.focusIdx], cmd = tf.inputs[tf.focusIdx].Update(msg)
+		return tf, cmd
+	}
+	return tf, nil
+}
+
+func (tf *templateFormModel) updateFocus() {
+	for i := range tf.inputs {
+		tf.inputs[i].Blur()
+		tf.inputs[i].Prompt = blurredStyle.Render(tf.labels[i] + ": ")
+	}
+	if tf.focusIdx < len(tf.inputs) {
+		tf.inputs[tf.focusIdx].Focus()
+		tf.inputs[tf.focusIdx].Prompt = focusedStyle.Render(tf.labels[tf.focusIdx] + "> ")
+	}
+}
+
+func (tf *templateFormModel) save() tea.Cmd {
+	return func() tea.Msg {
+		if SaveCommandTemplate == nil {
+			return saveDoneMsg{err: fmt.Errorf("template storage is unavailable")}
+		}
+		t := &model.CommandTemplate{
+			Name:        strings.TrimSpace(tf.inputs[0].Value()),
+			Command:     strings.TrimSpace(tf.inputs[1].Value()),
+			Description: strings.TrimSpace(tf.inputs[2].Value()),
+		}
+		if t.Name == "" {
+			return saveDoneMsg{err: fmt.Errorf("name is required")}
+		}
+		if t.Command == "" {
+			return saveDoneMsg{err: fmt.Errorf("command is required")}
+		}
+		if err := SaveCommandTemplate(tf.oldName, t); err != nil {
+			return saveDoneMsg{err: err}
+		}
+		return saveDoneMsg{}
+	}
+}
+
+func (tf *templateFormModel) View() string {
+	var b strings.Builder
+	title := "Add Template"
+	if tf.edit {
+		title = "Edit Template"
+	}
+	b.WriteString(titleStyle.Render(title))
+	b.WriteString("\n\n")
+	for i := range tf.inputs {
+		b.WriteString(tf.inputs[i].View())
+		b.WriteString("\n")
+	}
+	button := "[ Save ]"
+	if tf.focusIdx == len(tf.inputs) {
+		button = selectedStyle.Render(button)
+	}
+	b.WriteString("\n" + button + "\n\n")
+	if tf.err != nil {
+		b.WriteString(errorStyle.Render(tf.err.Error()))
+		b.WriteString("\n")
+	}
+	b.WriteString(renderHelp([]helpItem{
+		{Key: "Tab/↓", Action: "next"},
+		{Key: "↑", Action: "prev"},
+		{Key: "Enter", Action: "select"},
+		{Key: "Esc", Action: "back"},
+	}, tf.width))
+	return b.String()
+}
+
 func formSectionTitle(index int) string {
 	switch index {
 	case 0:
@@ -1195,4 +2211,44 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		result = append(result, item)
+	}
+	return result
+}
+
+func toggleString(values []string, value string) []string {
+	clean := splitCSV(strings.Join(values, ","))
+	for i, item := range clean {
+		if item == value {
+			return append(clean[:i], clean[i+1:]...)
+		}
+	}
+	return append(clean, value)
+}
+
+func serverAliases(servers []*model.Server) []string {
+	aliases := make([]string, 0, len(servers))
+	for _, server := range servers {
+		aliases = append(aliases, server.Alias)
+	}
+	return aliases
+}
+
+func managerListHeight(height int) int {
+	if height <= 8 {
+		return 3
+	}
+	return height - 6
 }

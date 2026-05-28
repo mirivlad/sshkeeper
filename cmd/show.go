@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -31,6 +32,12 @@ var showCmd = &cobra.Command{
 		}
 		if server.GroupName != "" {
 			fmt.Printf("Group:        %s\n", server.GroupName)
+		}
+		if len(server.Tags) > 0 {
+			fmt.Printf("Tags:         %s\n", strings.Join(server.Tags, ", "))
+		}
+		if server.StartupCommand != "" {
+			fmt.Printf("Startup Cmd:  %s\n", server.StartupCommand)
 		}
 		if server.Notes != "" {
 			fmt.Printf("Notes:        %s\n", server.Notes)

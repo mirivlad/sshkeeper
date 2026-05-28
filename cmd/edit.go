@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 	"syscall"
 
 	"github.com/mirivlad/sshkeeper/internal/model"
@@ -49,6 +50,13 @@ var editCmd = &cobra.Command{
 		if parsedNotes != "" {
 			server.Notes = parsedNotes
 		}
+		if parsedStartup != "" {
+			server.StartupCommand = parsedStartup
+		}
+		tagsChanged := cmd.Flags().Changed("tags")
+		if tagsChanged {
+			server.Tags = strings.Split(parsedTags, ",")
+		}
 
 		if parsedAuth != "" && oldAuthMethod != server.AuthMethod {
 			v := getOrCreateVault()
@@ -88,6 +96,11 @@ var editCmd = &cobra.Command{
 		if err := appDB.UpdateServer(server); err != nil {
 			return fmt.Errorf("update server: %w", err)
 		}
+		if tagsChanged {
+			if err := appDB.SetServerTags(server.ID, server.Tags); err != nil {
+				return fmt.Errorf("set tags: %w", err)
+			}
+		}
 
 		fmt.Println("Saved.")
 		return nil
@@ -104,6 +117,8 @@ var (
 	parsedGroup       string
 	parsedDisplayName string
 	parsedNotes       string
+	parsedStartup     string
+	parsedTags        string
 )
 
 func init() {
@@ -116,4 +131,6 @@ func init() {
 	editCmd.Flags().StringVar(&parsedGroup, "group", "", "Server group")
 	editCmd.Flags().StringVar(&parsedDisplayName, "display-name", "", "Display name")
 	editCmd.Flags().StringVar(&parsedNotes, "notes", "", "Notes")
+	editCmd.Flags().StringVar(&parsedStartup, "startup-command", "", "Command to run after connecting")
+	editCmd.Flags().StringVar(&parsedTags, "tags", "", "Comma-separated tags")
 }

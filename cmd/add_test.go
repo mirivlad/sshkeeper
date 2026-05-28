@@ -20,6 +20,8 @@ func TestPromptServerForAddCollectsInteractiveFields(t *testing.T) {
 		"bastion",
 		"prod",
 		"critical host",
+		"tmux attach -t prod",
+		"prod,web",
 		"",
 	}, "\n"))
 	var output bytes.Buffer
@@ -38,8 +40,12 @@ func TestPromptServerForAddCollectsInteractiveFields(t *testing.T) {
 		server.IdentityFile != "~/.ssh/id_prod" ||
 		server.ProxyJump != "bastion" ||
 		server.GroupName != "prod" ||
-		server.Notes != "critical host" {
+		server.Notes != "critical host" ||
+		server.StartupCommand != "tmux attach -t prod" {
 		t.Fatalf("unexpected server: %#v", server)
+	}
+	if strings.Join(server.Tags, ",") != "prod,web" {
+		t.Fatalf("tags = %#v", server.Tags)
 	}
 	if strings.Contains(output.String(), "not yet implemented") {
 		t.Fatalf("interactive add should not report unimplemented:\n%s", output.String())
@@ -51,6 +57,8 @@ func TestPromptServerForAddAppliesDefaults(t *testing.T) {
 		"prod",
 		"",
 		"prod.example.org",
+		"",
+		"",
 		"",
 		"",
 		"",

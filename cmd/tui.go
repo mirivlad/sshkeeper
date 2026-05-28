@@ -72,9 +72,15 @@ func runTUI() error {
 		existing, _ := appDB.GetServer(lookupAlias)
 		if existing != nil {
 			server.ID = existing.ID
-			return appDB.UpdateServerByAlias(existing.Alias, server)
+			if err := appDB.UpdateServerByAlias(existing.Alias, server); err != nil {
+				return err
+			}
+			return appDB.SetServerTags(existing.ID, server.Tags)
 		}
-		return appDB.CreateServer(server)
+		if err := appDB.CreateServer(server); err != nil {
+			return err
+		}
+		return appDB.SetServerTags(server.ID, server.Tags)
 	}
 
 	tui.GetGroups = func() ([]string, error) {
@@ -85,6 +91,38 @@ func runTUI() error {
 	}
 	tui.DeleteGroup = func(name string) error {
 		return appDB.DeleteGroup(name)
+	}
+	tui.ListTags = func() ([]string, error) {
+		return appDB.ListTags()
+	}
+	tui.RenameTag = func(oldName, newName string) error {
+		return appDB.RenameTag(oldName, newName)
+	}
+	tui.DeleteTag = func(name string) error {
+		return appDB.DeleteTag(name)
+	}
+	tui.SetServerTags = func(server *model.Server, tags []string) error {
+		server.Tags = tags
+		return appDB.SetServerTags(server.ID, tags)
+	}
+	tui.ListCommandTemplates = func() ([]*model.CommandTemplate, error) {
+		return appDB.ListCommandTemplates()
+	}
+	tui.SaveCommandTemplate = func(oldName string, template *model.CommandTemplate) error {
+		if oldName == "" {
+			return appDB.CreateCommandTemplate(template)
+		}
+		return appDB.UpdateCommandTemplate(oldName, template)
+	}
+	tui.DeleteCommandTemplate = func(name string) error {
+		return appDB.DeleteCommandTemplate(name)
+	}
+	tui.RunTemplateBackground = func(server *model.Server, command string) (string, error) {
+		fresh, err := appDB.GetServer(server.Alias)
+		if err != nil {
+			return "", err
+		}
+		return ssh.RunCommandOutput(cfg, fresh, vaultFunc, command)
 	}
 	tui.UpdateTestResult = func(alias string, status model.TestStatus, testErr string) error {
 		return appDB.UpdateTestResult(alias, status, testErr)
@@ -136,6 +174,27 @@ func runTUI() error {
 			os.Stdin.Read(buf)
 
 			// Reload servers for TUI
+			servers, _ = appDB.ListServers()
+			continue
+		}
+		if result != nil && result.Action == "run_template_foreground" && len(result.Servers) > 0 {
+			for _, server := range result.Servers {
+				fresh, err := appDB.GetServer(server.Alias)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Server not found: %s\n", server.Alias)
+					continue
+				}
+				fmt.Printf("Running template %q on %s...\n", result.TemplateName, fresh.Alias)
+				if err := ssh.RunCommand(cfg, fresh, vaultFunc, result.Command); err != nil {
+					fmt.Fprintf(os.Stderr, "Command error on %s: %v\n", fresh.Alias, err)
+				}
+				appDB.UpdateLastConnected(fresh.Alias)
+			}
+
+			fmt.Println("\n[Press Enter to return to sshkeeper]")
+			buf := make([]byte, 1)
+			os.Stdin.Read(buf)
+
 			servers, _ = appDB.ListServers()
 			continue
 		}
