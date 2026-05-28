@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/mirivlad/sshkeeper/internal/config"
 	"github.com/mirivlad/sshkeeper/internal/db"
+	"github.com/spf13/cobra"
 )
 
 var initCmd = &cobra.Command{
@@ -47,7 +47,7 @@ var initCmd = &cobra.Command{
 		fmt.Printf("Created database: %s/sshkeeper.db\n", cfg.DataDir)
 		fmt.Printf("Created vault: %s/vault.bin\n", cfg.DataDir)
 		fmt.Println()
-		fmt.Println("Next step: run 'sshkeeper vault unlock' to set master password.")
+		fmt.Println("Next step: run 'sshkeeper' or any command that needs secrets to create the vault master password.")
 		return nil
 	},
 }

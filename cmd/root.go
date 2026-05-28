@@ -122,7 +122,7 @@ func initApp() {
 
 			vaultInstance = v
 			fmt.Println()
-			fmt.Println("Vault created and unlocked. You're ready to go!")
+			fmt.Println("Vault created and unlocked for this command. You're ready to go!")
 			fmt.Println()
 			break
 		}
@@ -148,7 +148,7 @@ func initApp() {
 					fmt.Printf("Invalid password. %d attempts remaining.\n", remaining)
 					continue
 				}
-				fmt.Fprintf(os.Stderr, "Too many failed attempts. Run 'sshkeeper vault unlock' to try again.\n")
+				fmt.Fprintf(os.Stderr, "Too many failed attempts. Start the command again to retry.\n")
 				os.Exit(1)
 			}
 
@@ -172,7 +172,7 @@ func commandRequiresStartupVaultUnlock(args []string) bool {
 	}
 
 	switch args[0] {
-	case "connect", "c", "run", "run-template", "test", "add", "edit", "delete":
+	case "connect", "c", "run", "run-template", "test", "edit", "delete":
 		return true
 	default:
 		return false

@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"os"
+	"strconv"
 	"strings"
 	"syscall"
 
-	"github.com/spf13/cobra"
 	"github.com/mirivlad/sshkeeper/internal/model"
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
@@ -32,8 +36,16 @@ var addCmd = &cobra.Command{
 		if len(args) == 1 && addFlags.host != "" {
 			return addNonInteractive(args[0])
 		}
-		return fmt.Errorf("interactive add not yet implemented, use: sshkeeper add <alias> --host <host> --user <user> --auth <method>")
+		return addInteractive()
 	},
+}
+
+func addInteractive() error {
+	server, err := promptServerForAdd(os.Stdin, os.Stdout)
+	if err != nil {
+		return err
+	}
+	return saveServerWithOptionalSecret(server)
 }
 
 func addNonInteractive(alias string) error {
@@ -60,6 +72,10 @@ func addNonInteractive(alias string) error {
 		server.DisplayName = alias
 	}
 
+	return saveServerWithOptionalSecret(server)
+}
+
+func saveServerWithOptionalSecret(server *model.Server) error {
 	// Handle password/passphrase auth — request interactively, never via argv
 	if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
 		secretType := "password"
@@ -78,14 +94,14 @@ func addNonInteractive(alias string) error {
 		}
 
 		v := getOrCreateVault()
-		if !v.IsUnlocked() {
-			return fmt.Errorf("vault is locked. Run 'sshkeeper vault unlock' first")
+		if err := unlockVaultForCommand(v); err != nil {
+			return err
 		}
 
-		vaultKey := fmt.Sprintf("server:%s:ssh_password", alias)
+		vaultKey := fmt.Sprintf("server:%s:ssh_password", server.Alias)
 		vaultType := "ssh_password"
 		if server.AuthMethod == model.AuthKeyPassphrase {
-			vaultKey = fmt.Sprintf("server:%s:key_passphrase", alias)
+			vaultKey = fmt.Sprintf("server:%s:key_passphrase", server.Alias)
 			vaultType = "key_passphrase"
 		}
 
@@ -115,6 +131,111 @@ func addNonInteractive(alias string) error {
 
 	fmt.Println("Saved.")
 	return nil
+}
+
+func promptServerForAdd(in io.Reader, out io.Writer) (*model.Server, error) {
+	reader := bufio.NewReader(in)
+
+	alias, err := promptRequired(reader, out, "Alias")
+	if err != nil {
+		return nil, err
+	}
+	displayName, err := promptOptional(reader, out, "Display name", alias)
+	if err != nil {
+		return nil, err
+	}
+	host, err := promptRequired(reader, out, "Host")
+	if err != nil {
+		return nil, err
+	}
+	portText, err := promptOptional(reader, out, "Port", "22")
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port <= 0 {
+		return nil, fmt.Errorf("invalid port: %s", portText)
+	}
+	user, err := promptOptional(reader, out, "User", "root")
+	if err != nil {
+		return nil, err
+	}
+	authText, err := promptOptional(reader, out, "Auth method (password/key/key_passphrase/agent)", string(model.AuthKey))
+	if err != nil {
+		return nil, err
+	}
+	authMethod := model.AuthMethod(authText)
+	if !isSupportedAuthMethod(authMethod) {
+		return nil, fmt.Errorf("unsupported auth method: %s", authText)
+	}
+	identityFile, err := promptOptional(reader, out, "Identity file", "")
+	if err != nil {
+		return nil, err
+	}
+	proxyJump, err := promptOptional(reader, out, "ProxyJump", "")
+	if err != nil {
+		return nil, err
+	}
+	groupName, err := promptOptional(reader, out, "Group", "")
+	if err != nil {
+		return nil, err
+	}
+	notes, err := promptOptional(reader, out, "Notes", "")
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.Server{
+		Alias:        alias,
+		DisplayName:  displayName,
+		Host:         host,
+		Port:         port,
+		User:         user,
+		AuthMethod:   authMethod,
+		IdentityFile: identityFile,
+		ProxyJump:    proxyJump,
+		GroupName:    groupName,
+		Notes:        notes,
+	}, nil
+}
+
+func promptRequired(reader *bufio.Reader, out io.Writer, label string) (string, error) {
+	for {
+		value, err := promptOptional(reader, out, label, "")
+		if err != nil {
+			return "", err
+		}
+		if value != "" {
+			return value, nil
+		}
+		fmt.Fprintf(out, "%s is required.\n", label)
+	}
+}
+
+func promptOptional(reader *bufio.Reader, out io.Writer, label string, defaultValue string) (string, error) {
+	if defaultValue == "" {
+		fmt.Fprintf(out, "%s: ", label)
+	} else {
+		fmt.Fprintf(out, "%s [%s]: ", label, defaultValue)
+	}
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	value := strings.TrimSpace(line)
+	if value == "" {
+		return defaultValue, nil
+	}
+	return value, nil
+}
+
+func isSupportedAuthMethod(method model.AuthMethod) bool {
+	switch method {
+	case model.AuthPassword, model.AuthKey, model.AuthKeyPassphrase, model.AuthAgent:
+		return true
+	default:
+		return false
+	}
 }
 
 func init() {

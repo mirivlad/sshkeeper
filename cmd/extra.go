@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/mirivlad/sshkeeper/internal/model"
 	"github.com/mirivlad/sshkeeper/internal/ssh"
+	"github.com/spf13/cobra"
 )
 
 var importCmd = &cobra.Command{
@@ -74,9 +74,8 @@ var runCmd = &cobra.Command{
 			return fmt.Errorf("server not found: %s", alias)
 		}
 
-		// For password auth, use PTY-wrapper with command
-		if server.AuthMethod == model.AuthPassword {
-			return runWithPassword(server, command)
+		if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
+			return runWithSecret(server, command)
 		}
 
 		// For key/agent auth — direct execution
@@ -96,21 +95,25 @@ var runCmd = &cobra.Command{
 	},
 }
 
-// runWithPassword runs a command on a server with password auth via PTY-wrapper.
-func runWithPassword(server *model.Server, command string) error {
+// runWithSecret runs a command on a server through the PTY prompt handler.
+func runWithSecret(server *model.Server, command string) error {
 	v := getOrCreateVault()
 	if !v.IsUnlocked() {
-		return fmt.Errorf("vault is locked. Run 'sshkeeper vault unlock' first")
+		return fmt.Errorf("%s", vaultLockedProcessMessage())
 	}
 
-	vaultKey := fmt.Sprintf("server:%s:ssh_password", server.Alias)
-	password, err := v.Get(vaultKey)
+	secretType := "ssh_password"
+	if server.AuthMethod == model.AuthKeyPassphrase {
+		secretType = "key_passphrase"
+	}
+	vaultKey := fmt.Sprintf("server:%s:%s", server.Alias, secretType)
+	secret, err := v.Get(vaultKey)
 	if err != nil {
-		return fmt.Errorf("get password from vault: %w", err)
+		return fmt.Errorf("get %s from vault: %w", secretType, err)
 	}
 
 	sshArgs := ssh.BuildSSHArgs(server)
 	sshArgs = append(sshArgs, command)
 
-	return ssh.ConnectWithPassword(cfg.SSH.Binary, sshArgs, string(password))
+	return ssh.ConnectWithPassword(cfg.SSH.Binary, sshArgs, string(secret))
 }

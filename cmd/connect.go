@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/mirivlad/sshkeeper/internal/model"
 	"github.com/mirivlad/sshkeeper/internal/ssh"
+	"github.com/spf13/cobra"
 )
 
 var connectCmd = &cobra.Command{
@@ -23,7 +23,7 @@ var connectCmd = &cobra.Command{
 		v := getOrCreateVault()
 		vaultFunc := func(serverAlias string, secretType string) (string, error) {
 			if !v.IsUnlocked() {
-				return "", fmt.Errorf("vault is locked. Run 'sshkeeper vault unlock' first")
+				return "", fmt.Errorf("%s", vaultLockedProcessMessage())
 			}
 			key := fmt.Sprintf("server:%s:%s", serverAlias, secretType)
 			data, err := v.Get(key)
@@ -64,7 +64,7 @@ var testCmd = &cobra.Command{
 		v := getOrCreateVault()
 		vaultFunc := func(serverAlias string, secretType string) (string, error) {
 			if !v.IsUnlocked() {
-				return "", fmt.Errorf("vault is locked. Run 'sshkeeper vault unlock' first")
+				return "", fmt.Errorf("%s", vaultLockedProcessMessage())
 			}
 			key := fmt.Sprintf("server:%s:%s", serverAlias, secretType)
 			data, err := v.Get(key)

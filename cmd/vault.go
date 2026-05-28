@@ -220,6 +220,10 @@ func unlockVaultForCommand(v *vault.Vault) error {
 	return nil
 }
 
+func vaultLockedProcessMessage() string {
+	return "vault is locked in this process; enter the master password when this command prompts for it"
+}
+
 func formatVaultStatus(unlocked bool, exists bool) string {
 	if !exists {
 		return "Vault: not found"

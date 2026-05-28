@@ -44,10 +44,13 @@ sshkeeper init
 ## Common CLI Commands
 
 ```bash
-# Add profiles
+# Add profiles with flags
 sshkeeper add web --host 10.0.0.10 --user deploy --auth key
 sshkeeper add prod --host 10.0.0.20 --user root --auth password
 sshkeeper add bastion --host bastion.example.org --user admin --auth key_passphrase --identity-file ~/.ssh/id_rsa
+
+# Or use the interactive CLI prompt
+sshkeeper add
 
 # Inspect profiles
 sshkeeper list
@@ -71,7 +74,10 @@ sshkeeper ssh-config install-include
 
 Commands that only read profile metadata, such as `list`, `show`, `search`,
 `config path`, `group list`, and `export`, do not require the master password.
-Commands that need secrets ask for the master password in that process.
+Commands that need secrets ask for the master password in that process. Adding
+`key` or `agent` profiles does not require unlocking the vault; adding
+`password` or `key_passphrase` profiles asks for the master password before
+storing the secret.
 
 ## TUI
 
