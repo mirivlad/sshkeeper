@@ -61,6 +61,11 @@ type secretRecord struct {
 	plaintext  []byte
 }
 
+type derivedKey struct {
+	key    []byte
+	legacy bool
+}
+
 type SecretMeta struct {
 	ID    string
 	Alias string
@@ -164,22 +169,19 @@ func (v *Vault) Unlock(masterPassword string) error {
 		return fmt.Errorf("decode salt: %w", err)
 	}
 
-	key := argon2.IDKey([]byte(masterPassword), salt, uint32(vf.KDF.Iterations), uint32(vf.KDF.MemoryKiB), uint8(vf.KDF.Parallelism), keyLen)
+	candidate, err := deriveValidKey([]byte(masterPassword), salt, vf)
+	if err != nil {
+		return err
+	}
+	key := candidate.key
 
-	if vf.Verifier != nil {
-		if err := verifyRecord(key, *vf.Verifier); err != nil {
-			return fmt.Errorf("invalid master password")
-		}
-	} else if len(vf.Records) > 0 {
-		if _, err := decryptRecord(key, vf.Records[0]); err != nil {
-			return fmt.Errorf("invalid master password")
-		}
-	} else {
+	if len(vf.Records) == 0 && vf.Verifier == nil {
 		return fmt.Errorf("vault cannot verify master password; recreate empty vault")
 	}
 
 	v.masterKey = key
 	v.records = make(map[string]secretRecord)
+	v.modified = candidate.legacy
 
 	for _, rec := range vf.Records {
 		plaintext, err := decryptRecord(key, rec)
@@ -531,6 +533,44 @@ func decryptRecord(key []byte, rec Record) ([]byte, error) {
 	return plaintext, nil
 }
 
+func deriveValidKey(masterPassword, salt []byte, vf VaultFile) (derivedKey, error) {
+	key := deriveKey(masterPassword, salt, vf.KDF.MemoryKiB, vf.KDF.Iterations, vf.KDF.Parallelism)
+	if canDecryptVaultFile(key, vf) {
+		return derivedKey{key: key}, nil
+	}
+	clearBytes(key)
+
+	if shouldTryLegacyKDF(vf) {
+		legacyMemoryKiB := vf.KDF.MemoryKiB * 1024
+		key = deriveKey(masterPassword, salt, legacyMemoryKiB, vf.KDF.Iterations, vf.KDF.Parallelism)
+		if canDecryptVaultFile(key, vf) {
+			return derivedKey{key: key, legacy: true}, nil
+		}
+		clearBytes(key)
+	}
+
+	return derivedKey{}, fmt.Errorf("invalid master password")
+}
+
+func shouldTryLegacyKDF(vf VaultFile) bool {
+	return vf.Verifier == nil && vf.KDF.MemoryKiB > 0 && vf.KDF.MemoryKiB <= 4096
+}
+
+func deriveKey(masterPassword, salt []byte, memoryKiB, iterations, parallelism int) []byte {
+	return argon2.IDKey(masterPassword, salt, uint32(iterations), uint32(memoryKiB), uint8(parallelism), keyLen)
+}
+
+func canDecryptVaultFile(key []byte, vf VaultFile) bool {
+	if vf.Verifier != nil {
+		return verifyRecord(key, *vf.Verifier) == nil
+	}
+	if len(vf.Records) > 0 {
+		_, err := decryptRecord(key, vf.Records[0])
+		return err == nil
+	}
+	return false
+}
+
 func newVerifierRecord(key []byte) (Record, error) {
 	rec, err := encryptRecord(key, verifierID, []byte(verifierPlaintext))
 	if err != nil {
@@ -568,22 +608,22 @@ func VerifyPassword(path string, masterPassword string) (bool, error) {
 		return false, err
 	}
 
-	key := argon2.IDKey([]byte(masterPassword), salt, uint32(vf.KDF.Iterations), uint32(vf.KDF.MemoryKiB), uint8(vf.KDF.Parallelism), keyLen)
-	defer func() {
-		for i := range key {
-			key[i] = 0
-		}
-	}()
-
-	if vf.Verifier != nil {
-		return verifyRecord(key, *vf.Verifier) == nil, nil
-	}
-
-	if len(vf.Records) == 0 {
+	candidate, err := deriveValidKey([]byte(masterPassword), salt, vf)
+	if err != nil {
 		return false, nil
 	}
-	_, err = decryptRecord(key, vf.Records[0])
-	return err == nil, nil
+	key := candidate.key
+	defer func() {
+		clearBytes(key)
+	}()
+
+	return true, nil
+}
+
+func clearBytes(data []byte) {
+	for i := range data {
+		data[i] = 0
+	}
 }
 
 // Constant-time comparison to prevent timing attacks

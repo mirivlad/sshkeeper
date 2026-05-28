@@ -97,6 +97,56 @@ func TestLegacyVaultWithRecordsStillVerifiesByFirstRecord(t *testing.T) {
 	}
 }
 
+func TestLegacyVaultWithPreReductionKDFStillUnlocks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault.bin")
+	salt := []byte("12345678901234567890123456789012")
+	key := argon2.IDKey([]byte("correct horse"), salt, 2, 1024, 1, keyLen)
+
+	rec, err := encryptRecord(key, "server:test:ssh_password", []byte("secret"))
+	if err != nil {
+		t.Fatalf("encrypt legacy record: %v", err)
+	}
+
+	data, err := json.Marshal(VaultFile{
+		Version: currentVersion,
+		KDF: KDFMeta{
+			Name:        "argon2id",
+			MemoryKiB:   1,
+			Iterations:  2,
+			Parallelism: 1,
+			Salt:        base64.StdEncoding.EncodeToString(salt),
+		},
+		Records: []Record{rec},
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy vault: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write legacy vault: %v", err)
+	}
+
+	ok, err := VerifyPassword(path, "correct horse")
+	if err != nil {
+		t.Fatalf("verify legacy vault: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected legacy vault using pre-reduction KDF to accept correct password")
+	}
+
+	v := New(path)
+	if err := v.Unlock("correct horse"); err != nil {
+		t.Fatalf("unlock legacy vault using pre-reduction KDF: %v", err)
+	}
+
+	secret, err := v.Get("server:test:ssh_password")
+	if err != nil {
+		t.Fatalf("get legacy secret: %v", err)
+	}
+	if string(secret) != "secret" {
+		t.Fatalf("unexpected legacy secret: %q", secret)
+	}
+}
+
 func TestLegacyEmptyVaultWithoutVerifierCannotUnlock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vault.bin")
 	salt := []byte("12345678901234567890123456789012")
