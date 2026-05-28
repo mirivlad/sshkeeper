@@ -28,7 +28,7 @@ var vaultCmd = &cobra.Command{
 
 var vaultUnlockCmd = &cobra.Command{
 	Use:   "unlock",
-	Short: "Unlock the vault with master password",
+	Short: "Verify the vault master password",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v := getOrCreateVault()
 
@@ -69,16 +69,14 @@ var vaultUnlockCmd = &cobra.Command{
 				return fmt.Errorf("create vault: %w", err)
 			}
 
-			// Unlock immediately
 			if err := v.Unlock(string(pw1)); err != nil {
 				return fmt.Errorf("unlock vault: %w", err)
 			}
 
-			fmt.Println("Vault created and unlocked.")
+			fmt.Println("Vault created. Commands will ask for the master password when they need secrets.")
 			return nil
 		}
 
-		// Unlock existing vault
 		fmt.Print("Master password: ")
 		pw, err := term.ReadPassword(int(syscall.Stdin))
 		fmt.Println()
@@ -90,7 +88,7 @@ var vaultUnlockCmd = &cobra.Command{
 			return fmt.Errorf("unlock vault: %w", err)
 		}
 
-		fmt.Println("Vault unlocked.")
+		fmt.Println("Master password accepted. Vault unlock is process-local; commands will ask again when they need secrets.")
 		return nil
 	},
 }
@@ -111,11 +109,7 @@ var vaultStatusCmd = &cobra.Command{
 	Short: "Show vault status",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v := getOrCreateVault()
-		if v.IsUnlocked() {
-			fmt.Println("Vault: unlocked")
-		} else {
-			fmt.Println("Vault: locked")
-		}
+		fmt.Println(formatVaultStatus(v.IsUnlocked(), vault.Exists(config.VaultPath(cfg.DataDir))))
 		return nil
 	},
 }
@@ -126,8 +120,8 @@ var vaultChangePasswordCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v := getOrCreateVault()
 
-		if !v.IsUnlocked() {
-			return fmt.Errorf("vault is locked. Unlock first with 'sshkeeper vault unlock'")
+		if err := unlockVaultForCommand(v); err != nil {
+			return err
 		}
 
 		fmt.Print("New master password: ")
@@ -166,8 +160,8 @@ var vaultListCmd = &cobra.Command{
 	Short: "List stored secret metadata",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v := getOrCreateVault()
-		if !v.IsUnlocked() {
-			return fmt.Errorf("vault is locked. Unlock first with 'sshkeeper vault unlock'")
+		if err := unlockVaultForCommand(v); err != nil {
+			return err
 		}
 		output, err := formatVaultSecretsList(v)
 		if err != nil {
@@ -190,8 +184,8 @@ var vaultDeleteCmd = &cobra.Command{
 		}
 
 		v := getOrCreateVault()
-		if !v.IsUnlocked() {
-			return fmt.Errorf("vault is locked. Unlock first with 'sshkeeper vault unlock'")
+		if err := unlockVaultForCommand(v); err != nil {
+			return err
 		}
 		if err := deleteVaultSecrets(v, alias, secretType); err != nil {
 			return err
@@ -206,6 +200,34 @@ var vaultDeleteCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func unlockVaultForCommand(v *vault.Vault) error {
+	if v.IsUnlocked() {
+		return nil
+	}
+
+	fmt.Print("Master password: ")
+	pw, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return fmt.Errorf("read password: %w", err)
+	}
+
+	if err := v.Unlock(string(pw)); err != nil {
+		return fmt.Errorf("unlock vault: %w", err)
+	}
+	return nil
+}
+
+func formatVaultStatus(unlocked bool, exists bool) string {
+	if !exists {
+		return "Vault: not found"
+	}
+	if unlocked {
+		return "Vault: unlocked in current process"
+	}
+	return "Vault: locked (vault commands unlock per command)"
 }
 
 func formatVaultSecretsList(v *vault.Vault) (string, error) {

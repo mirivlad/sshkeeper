@@ -1,25 +1,22 @@
 # sshkeeper
 
-Консольный менеджер SSH-подключений для Linux. Управляет профилями серверов, секретами и запускает SSH-сессии через системный OpenSSH.
+`sshkeeper` is a Linux console manager for SSH profiles, secrets, and quick
+OpenSSH launches. It does not replace OpenSSH; it keeps connection metadata in a
+local SQLite database, keeps passwords/passphrases in an encrypted vault, and
+starts the system `ssh` client with the right options.
 
-**sshkeeper не заменяет OpenSSH.** Он управляет профилями подключений, секретами и удобным запуском SSH-сессий.
+## Features
 
-## Возможности
+- Bubble Tea TUI for daily interactive use.
+- CLI commands for scripting and quick edits.
+- Encrypted vault for SSH passwords and key passphrases.
+- Password and key-passphrase auth through a PTY prompt handler, without putting
+  secrets in command-line arguments.
+- Key, SSH-agent, password, and key+passphrase auth modes.
+- Groups, tags, command templates, search, and OpenSSH config generation.
+- Import from `~/.ssh/config`.
 
-- **TUI-интерфейс** на Bubble Tea — интерактивный терминальный интерфейс
-- **CLI-команды** для скриптов и быстрых операций
-- **Encrypted vault** (Argon2id + XChaCha20-Poly1305) для хранения паролей
-- **Парольная авторизация** через PTY-wrapper (без передачи пароля в argv)
-- **Подключение по ключу**, SSH-agent, key+passphrase
-- **Группы и теги** для организации серверов
-- **Шаблоны команд** для частых задач
-- **Генерация OpenSSH config** из профилей
-- **Импорт из ~/.ssh/config**
-- **Тестирование подключения** без сохранения
-
-## Установка
-
-### Из исходников
+## Install
 
 ```bash
 git clone https://git.mirv.top/mirivlad/sshkeeper.git
@@ -27,177 +24,140 @@ cd sshkeeper
 go build -o ~/.local/bin/sshkeeper .
 ```
 
-Требования: Go 1.25+, Linux x86_64
+Requirements: Go 1.25+, Linux x86_64, system OpenSSH.
 
-## Быстрый старт
+## First Run
+
+Run the TUI or any command. On the first run, `sshkeeper` creates its config,
+database, and vault, then asks for a master password.
 
 ```bash
-# Первый запуск — создание vault и мастер-пароля
-sshkeeper init
-
-# Или сразу запустить TUI (vault создастся автоматически)
 sshkeeper
+```
 
-# Добавить сервер
-sshkeeper add myserver --host 10.0.0.1 --user admin --auth key
+You can also initialize explicitly:
 
-# Добавить сервер с паролем
-sshkeeper add prod-web --host 10.0.0.5 --user deploy --auth password --password
+```bash
+sshkeeper init
+```
 
-# Показать список серверов
+## Common CLI Commands
+
+```bash
+# Add profiles
+sshkeeper add web --host 10.0.0.10 --user deploy --auth key
+sshkeeper add prod --host 10.0.0.20 --user root --auth password
+sshkeeper add bastion --host bastion.example.org --user admin --auth key_passphrase --identity-file ~/.ssh/id_rsa
+
+# Inspect profiles
 sshkeeper list
+sshkeeper show web
+sshkeeper search prod
 
-# Подключиться к серверу
-sshkeeper connect myserver
-sshkeeper c myserver
+# Connect and test
+sshkeeper connect web
+sshkeeper c web
+sshkeeper test web
+sshkeeper run web "uptime"
 
-# Проверить подключение
-sshkeeper test myserver
-
-# Запустить команду на сервере
-sshkeeper run myserver "uptime"
-
-# Группы
+# Groups and templates
 sshkeeper group list
+sshkeeper template list web
 
-# Редактировать сервер
-sshkeeper edit myserver --host 10.0.0.2
-
-# Удалить сервер
-sshkeeper delete myserver
-
-# Импорт из ~/.ssh/config
-sshkeeper import
-
-# Сгенерировать OpenSSH config
+# OpenSSH config
 sshkeeper ssh-config generate
 sshkeeper ssh-config install-include
 ```
 
+Commands that only read profile metadata, such as `list`, `show`, `search`,
+`config path`, `group list`, and `export`, do not require the master password.
+Commands that need secrets ask for the master password in that process.
+
 ## TUI
 
-Запуск без аргументов открывает интерактивный терминальный интерфейс:
+Running `sshkeeper` without arguments opens the TUI.
 
-```bash
-sshkeeper
-```
+| Key | Action |
+| --- | --- |
+| Enter | Connect to selected server |
+| Ctrl+A | Add server |
+| Ctrl+E | Edit server |
+| Ctrl+D | Delete server |
+| Ctrl+T | Test connection |
+| Ctrl+F | Search |
+| Ctrl+Q / Ctrl+C | Quit |
 
-Клавиши (работают на любой раскладке — используются Ctrl+комбинации):
+In add/edit forms:
 
-| Клавиша | Действие |
-|---------|----------|
-| Enter | Подключиться к серверу |
-| Ctrl+A | Добавить сервер |
-| Ctrl+E | Редактировать сервер |
-| Ctrl+D | Удалить сервер |
-| Ctrl+T | Проверить подключение |
-| Ctrl+F | Поиск |
-| Ctrl+Q / Ctrl+C | Выход |
-
-В форме добавления/редактирования:
-
-| Клавиша | Действие |
-|---------|----------|
-| Tab/↓ | Следующее поле |
-| Shift+Tab/↑ | Предыдущее поле |
-| Enter | Перейти к кнопке / активировать |
-| Esc | Назад |
-
-Кнопки **[Test]** и **[Save]**:
-- **Test** — проверяет подключение без сохранения
-- **Save** — сохраняет профиль (не требует тест)
-
-## Хранение данных
-
-XDG-совместимые Пути:
-
-| Файл | Путь |
-|------|------|
-| База данных | `~/.local/share/sshkeeper/sshkeeper.db` |
-| Vault | `~/.local/share/sshkeeper/vault.bin` |
-| Конфиг | `~/.config/sshkeeper/config.toml` |
-| SSH config | `~/.ssh/config.d/sshkeeper.conf` |
+| Key | Action |
+| --- | --- |
+| Tab / Down | Next field |
+| Shift+Tab / Up | Previous field |
+| `/` on Auth Method or Group | Pick from list |
+| Enter | Move to action / activate |
+| Esc | Back |
 
 ## Vault
 
-Vault — зашифрованное хранилище для паролей и passphrase.
+The vault stores SSH passwords and key passphrases encrypted on disk.
 
-**Шифрование:** XChaCha20-Poly1305  
-**KDF:** Argon2id (4 MiB, 2 iterations)
+- Cipher: XChaCha20-Poly1305.
+- KDF: Argon2id, currently 64 MiB memory, 3 iterations.
+- Existing legacy vault files remain readable.
+- Unlock state is process-local. `sshkeeper vault unlock` verifies the master
+  password, but it does not keep future shell commands unlocked.
 
-При первом запуске sshkeeper создаёт vault и запрашивает мастер-пароль. При последующих запусках — запрашивает мастер-пароль для разблокировки.
+Useful commands:
 
 ```bash
-# Разблокировать vault вручную
-sshkeeper vault unlock
-
-# Заблокировать
-sshkeeper vault lock
-
-# Сменить мастер-пароль
-sshkeeper vault change-password
-
-# Статус
 sshkeeper vault status
+sshkeeper vault unlock
+sshkeeper vault list
+sshkeeper vault delete <alias> [ssh_password|key_passphrase]
+sshkeeper vault change-password
 ```
 
-## CLI-команды
+`vault list`, `vault delete`, and `vault change-password` ask for the master
+password themselves because they need to decrypt the vault in the current
+process.
 
-```
-sshkeeper                     TUI (по умолчанию)
-sshkeeper add [alias]         Добавить сервер
-sshkeeper list                Список серверов
-sshkeeper show <alias>        Детали сервера
-sshkeeper edit <alias>        Редактировать
-sshkeeper delete <alias>      Удалить
-sshkeeper connect <alias>     Подключиться (c — алиас)
-sshkeeper test <alias>        Проверить подключение
-sshkeeper search <query>      Поиск
-sshkeeper run <alias> <cmd>   Выполнить команду
-sshkeeper import              Импорт из ~/.ssh/config
-sshkeeper export              Экспорт
-sshkeeper group list          Группы
-sshkeeper vault [subcommand]  Управление vault
-sshkeeper ssh-config generate Генерация SSH config
-```
+## Data Locations
 
-## Сборка
+`sshkeeper` uses XDG-style app directories:
+
+| Data | Default path |
+| --- | --- |
+| Config | `~/.config/sshkeeper/config.toml` |
+| Database | `~/.local/share/sshkeeper/sshkeeper.db` |
+| Vault | `~/.local/share/sshkeeper/vault.bin` |
+| Generated OpenSSH config | `~/.ssh/config.d/sshkeeper.conf` |
+
+If `XDG_CONFIG_HOME` or `XDG_DATA_HOME` are set, sshkeeper stores data under
+`$XDG_CONFIG_HOME/sshkeeper` and `$XDG_DATA_HOME/sshkeeper`.
+
+## Build And Test
 
 ```bash
-# Собрать
-make build
-
-# Установить в ~/.local/bin
-make install
-
-# Запуск без сборки
-go run .
-
-# Тесты (если есть)
 go test ./...
+go build -o bin/sshkeeper .
 ```
 
-## Структура проекта
+`bin/` is ignored by git.
 
-```
+## Project Layout
+
+```text
 sshkeeper/
-├── main.go                      # Точка входа
-├── Makefile                     # Сборка
-├── cmd/                         # CLI-команды
-│   ├── root.go                  # Root command, initApp
-│   ├── tui.go                   # TUI launcher
-│   ├── add.go, edit.go, ...     # Команды
-│   └── vault.go                 # Vault management
-├── internal/
-│   ├── config/                  # Конфигурация, XDG paths
-│   ├── db/                      # SQLite, migrations, CRUD
-│   ├── model/                   # Модели данных
-│   ├── vault/                   # Encrypted vault (Argon2id + XChaCha20-Poly1305)
-│   ├── ssh/                     # SSH connect, test, PTY-wrapper, import, configgen
-│   └── tui/                     # Bubble Tea TUI
-└── go.mod
+├── cmd/                 # Cobra CLI commands and TUI launcher
+├── internal/config/     # XDG paths and config loading
+├── internal/db/         # SQLite migrations and CRUD
+├── internal/model/      # Domain models
+├── internal/ssh/        # OpenSSH command building, PTY prompt handling
+├── internal/tui/        # Bubble Tea UI
+├── internal/vault/      # Encrypted vault
+└── main.go
 ```
 
-## Лицензия
+## License
 
 MIT

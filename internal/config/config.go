@@ -8,9 +8,9 @@ import (
 )
 
 type Config struct {
-	SSH  SSHConfig  `toml:"ssh"`
+	SSH   SSHConfig   `toml:"ssh"`
 	Vault VaultConfig `toml:"vault"`
-	UI   UIConfig   `toml:"ui"`
+	UI    UIConfig    `toml:"ui"`
 
 	// resolved paths
 	ConfigDir string `toml:"-"`
@@ -18,9 +18,9 @@ type Config struct {
 }
 
 type SSHConfig struct {
-	Binary              string `toml:"binary"`
-	ConnectTimeoutSec   int    `toml:"connect_timeout_seconds"`
-	TestCommand         string `toml:"test_command"`
+	Binary            string `toml:"binary"`
+	ConnectTimeoutSec int    `toml:"connect_timeout_seconds"`
+	TestCommand       string `toml:"test_command"`
 }
 
 type VaultConfig struct {
@@ -50,25 +50,11 @@ func defaultConfig() *Config {
 func Load() (*Config, error) {
 	cfg := defaultConfig()
 
-	// XDG paths
-	configDir := os.Getenv("XDG_CONFIG_HOME")
-	if configDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		configDir = filepath.Join(home, ".config", "sshkeeper")
+	configDir, dataDir, err := resolveDirs(os.Getenv("XDG_CONFIG_HOME"), os.Getenv("XDG_DATA_HOME"))
+	if err != nil {
+		return nil, err
 	}
 	cfg.ConfigDir = configDir
-
-	dataDir := os.Getenv("XDG_DATA_HOME")
-	if dataDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		dataDir = filepath.Join(home, ".local", "share", "sshkeeper")
-	}
 	cfg.DataDir = dataDir
 
 	// Ensure dirs exist
@@ -103,4 +89,20 @@ func Load() (*Config, error) {
 	cfg.DataDir = dataDir
 
 	return cfg, nil
+}
+
+func resolveDirs(configRoot, dataRoot string) (string, string, error) {
+	if configRoot == "" || dataRoot == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", "", err
+		}
+		if configRoot == "" {
+			configRoot = filepath.Join(home, ".config")
+		}
+		if dataRoot == "" {
+			dataRoot = filepath.Join(home, ".local", "share")
+		}
+	}
+	return filepath.Join(configRoot, "sshkeeper"), filepath.Join(dataRoot, "sshkeeper"), nil
 }

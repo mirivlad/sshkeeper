@@ -24,12 +24,14 @@ func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error
 		return ConnectWithPassword(cfg.SSH.Binary, args, password)
 
 	case model.AuthKeyPassphrase:
-		// For key+passphrase, let ssh-agent handle it or prompt normally
-		// TODO: use ssh-agent or similar
-		fallthrough
+		passphrase, err := getVault(server.Alias, "key_passphrase")
+		if err != nil {
+			return fmt.Errorf("get key passphrase from vault: %w", err)
+		}
+		return ConnectWithPassword(cfg.SSH.Binary, args, passphrase)
 
 	default:
-		// key, agent, key+passphrase - direct execution
+		// key and agent auth use direct OpenSSH execution.
 		cmd := exec.Command(cfg.SSH.Binary, args...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
@@ -56,8 +58,16 @@ func Test(cfg *config.Config, server *model.Server, getVault VaultFunc) (bool, s
 		}
 		return testWithPassword(cfg, args, password)
 
+	case model.AuthKeyPassphrase:
+		args = append(args, "-o", "NumberOfPasswordPrompts=1")
+		passphrase, err := getVault(server.Alias, "key_passphrase")
+		if err != nil {
+			return false, fmt.Sprintf("vault error: %v", err)
+		}
+		return testWithPassword(cfg, args, passphrase)
+
 	default:
-		// key, agent, key+passphrase
+		// key and agent auth should not prompt during tests.
 		args = append(args, "-o", "BatchMode=yes")
 		args = append(args, cfg.SSH.TestCommand)
 

@@ -5,16 +5,16 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/spf13/cobra"
 	"github.com/mirivlad/sshkeeper/internal/config"
 	"github.com/mirivlad/sshkeeper/internal/db"
 	"github.com/mirivlad/sshkeeper/internal/vault"
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 var (
-	cfg    *config.Config
-	appDB  *db.DB
+	cfg   *config.Config
+	appDB *db.DB
 )
 
 var rootCmd = &cobra.Command{
@@ -127,9 +127,8 @@ func initApp() {
 			break
 		}
 	} else {
-		// Vault exists — need to unlock
-		// Skip unlock for vault commands that handle their own unlock/lock
-		if isVaultSubcommand() {
+		// Vault exists — unlock only for commands that may need secrets.
+		if !commandRequiresStartupVaultUnlock(os.Args[1:]) {
 			vaultInstance = v
 			return
 		}
@@ -161,19 +160,21 @@ func initApp() {
 	}
 }
 
-// isVaultSubcommand checks if the current command is a vault subcommand
-func isVaultSubcommand() bool {
-	args := os.Args[1:]
-	for _, arg := range args {
-		if arg == "vault" {
-			return true
-		}
+func commandRequiresStartupVaultUnlock(args []string) bool {
+	if len(args) == 0 {
+		return true
 	}
-	// Skip for help
+
 	for _, arg := range args {
 		if arg == "-h" || arg == "--help" {
-			return true
+			return false
 		}
 	}
-	return false
+
+	switch args[0] {
+	case "connect", "c", "run", "run-template", "test", "add", "edit", "delete":
+		return true
+	default:
+		return false
+	}
 }

@@ -38,3 +38,20 @@ func TestFormatVaultSecretsListHandlesEmptyVault(t *testing.T) {
 		t.Fatalf("expected empty output message, got:\n%s", output)
 	}
 }
+
+func TestFormatVaultStatusExplainsProcessLocalUnlock(t *testing.T) {
+	locked := formatVaultStatus(false, true)
+	if !strings.Contains(locked, "locked") || !strings.Contains(locked, "per command") {
+		t.Fatalf("expected locked status to explain per-command unlock, got %q", locked)
+	}
+
+	unlocked := formatVaultStatus(true, true)
+	if !strings.Contains(unlocked, "unlocked") || !strings.Contains(unlocked, "current process") {
+		t.Fatalf("expected unlocked status to mention current process, got %q", unlocked)
+	}
+
+	missing := formatVaultStatus(false, false)
+	if !strings.Contains(missing, "not found") {
+		t.Fatalf("expected missing status, got %q", missing)
+	}
+}
