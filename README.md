@@ -19,7 +19,7 @@ starts the system `ssh` client with the right options.
 ## Install
 
 ```bash
-git clone https://git.mirv.top/mirivlad/sshkeeper.git
+git clone https://github.com/mirivlad/sshkeeper.git
 cd sshkeeper
 go build -o ~/.local/bin/sshkeeper .
 ```
@@ -89,6 +89,22 @@ storing the secret.
 
 Running `sshkeeper` without arguments opens the TUI.
 
+## Screenshots
+
+### Main Window
+
+![sshkeeper main window](docs/screenshots/screen_1.png)
+
+### Edit Server
+
+![sshkeeper edit server form](docs/screenshots/screen_2.png)
+
+![sshkeeper group picker](docs/screenshots/screen_3.png)
+
+### Template Manager
+
+![sshkeeper template manager](docs/screenshots/screen_4.png)
+
 | Key | Action |
 | --- | --- |
 | Enter | Connect to selected server |
@@ -142,6 +158,13 @@ sshkeeper vault change-password
 password themselves because they need to decrypt the vault in the current
 process.
 
+## Security
+
+`sshkeeper` stores SSH passwords and key passphrases in an encrypted local vault
+and avoids passing secrets through command-line arguments. The project has not
+had an independent security audit; review the implementation and threat model
+before using it for high-risk environments.
+
 ## Data Locations
 
 `sshkeeper` uses XDG-style app directories:
@@ -181,4 +204,4 @@ sshkeeper/
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
