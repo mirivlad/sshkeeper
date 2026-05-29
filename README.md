@@ -18,6 +18,21 @@ starts the system `ssh` client with the right options.
 
 ## Install
 
+### Install from release
+
+Download the latest Linux x86_64 release from:
+
+https://github.com/mirivlad/sshkeeper/releases/latest
+
+```bash
+tar -xzf sshkeeper_v0.1.0_linux_amd64.tar.gz
+chmod +x sshkeeper-linux-amd64
+sudo install -m 0755 sshkeeper-linux-amd64 /usr/local/bin/sshkeeper
+sshkeeper
+```
+
+### Build from source
+
 ```bash
 git clone https://github.com/mirivlad/sshkeeper.git
 cd sshkeeper
