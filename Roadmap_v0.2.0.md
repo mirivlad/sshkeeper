@@ -1,0 +1,94 @@
+## Theme
+
+Routes, tunnels and cleaner TUI.
+
+sshkeeper v0.2.0 focuses on real-world SSH workflows where servers are accessed through bastions, jump chains and port forwards, while keeping the TUI simple and discoverable.
+
+## Planned features
+
+### 1. Cleaner TUI action model
+
+- Replace always-visible hotkey overload with a compact action bar.
+- Keep only primary actions visible:
+  - Connect
+  - Add
+  - Edit
+  - Search
+  - Templates
+  - Forwards
+  - Select
+  - Help
+  - Quit
+- Move secondary shortcuts to the help screen.
+- Add a contextual action menu for less frequent actions:
+  - Delete
+  - Test
+  - Tags
+  - Import/export
+  - Vault actions
+
+### 2. Route / ProxyJump UX
+
+- Rename raw `ProxyJump` handling in the UI to `Route`.
+- Support three route modes:
+  - Direct
+  - Via jump host
+  - Via chain
+- Allow selecting jump hosts from existing sshkeeper profiles.
+- Allow entering raw jump hosts manually.
+- Display route summary in the server list:
+  - `direct → target`
+  - `bastion → target`
+  - `bastion → dmz-gw → target`
+- Keep full technical ProxyJump value visible in server details.
+
+### 3. Port forwarding manager
+
+- Add per-server forwarding management screen.
+- Support:
+  - Local forwarding
+  - Remote forwarding
+  - Dynamic SOCKS forwarding
+- Show human-readable forwarding table:
+  - type
+  - listen address/port
+  - target address/port
+- Show generated OpenSSH preview for each forward.
+- Add `ExitOnForwardFailure` option.
+- Support normal SSH session with forwards.
+- Support forward-only mode using `ssh -N`.
+
+### 4. CLI support for routes and forwards
+
+- Add commands:
+  - `sshkeeper forward list <alias>`
+  - `sshkeeper forward add <alias> ...`
+  - `sshkeeper forward delete <alias> <id>`
+  - `sshkeeper tunnel <alias>`
+  - `sshkeeper tunnel <alias> --forward-only`
+  - `sshkeeper route show <alias>`
+  - `sshkeeper route set <alias> ...`
+  - `sshkeeper route clear <alias>`
+
+### 5. Search improvements
+
+- Extend search to notes, tags, proxy/jump route and forward ports.
+- Make search useful for real admin memory:
+  - host names
+  - aliases
+  - groups
+  - tags
+  - notes
+  - bastion names
+  - exposed local ports
+
+### 6. README update
+
+- Add a section explaining that sshkeeper is not Ansible.
+- Add examples for:
+  - jump host
+  - jump chain
+  - local port forward
+  - dynamic SOCKS proxy
+  - forward-only session
+- Add screenshots for route and forwarding screens.
