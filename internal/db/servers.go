@@ -172,8 +172,9 @@ func (db *DB) SearchServers(query string) ([]*model.Server, error) {
 		       created_at, updated_at, last_connected_at,
 		       last_test_at, last_test_status, last_test_error
 		FROM servers
-		WHERE alias LIKE ? OR display_name LIKE ? OR host LIKE ? OR user LIKE ? OR group_name LIKE ?
-		ORDER BY alias`, pattern, pattern, pattern, pattern, pattern)
+		WHERE alias LIKE ? OR display_name LIKE ? OR host LIKE ? OR user LIKE ?
+		       OR group_name LIKE ? OR notes LIKE ? OR proxy_jump LIKE ?
+		ORDER BY alias`, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	if err != nil {
 		return nil, err
 	}

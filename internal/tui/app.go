@@ -107,7 +107,20 @@ func (i serverItem) Description() string {
 	return fmt.Sprintf("%s  %s", routeStr, i.server.AuthMethod)
 }
 func (i serverItem) FilterValue() string {
-	return i.server.Alias + " " + i.server.DisplayName + " " + i.server.Host + " " + i.server.User
+	parts := []string{
+		i.server.Alias,
+		i.server.DisplayName,
+		i.server.Host,
+		i.server.User,
+		i.server.GroupName,
+		i.server.Notes,
+		i.server.ProxyJump,
+		strings.Join(i.server.Tags, " "),
+	}
+	for _, h := range i.server.Route.Hops {
+		parts = append(parts, h.Alias, h.Raw)
+	}
+	return strings.Join(parts, " ")
 }
 
 type templateItem struct {
