@@ -55,6 +55,9 @@ func init() {
 	rootCmd.AddCommand(groupCmd)
 	rootCmd.AddCommand(templateCmd)
 	rootCmd.AddCommand(runTemplateCmd)
+	rootCmd.AddCommand(routeCmd)
+	rootCmd.AddCommand(forwardCmd)
+	rootCmd.AddCommand(tunnelCmd)
 }
 
 func initApp() {
@@ -172,7 +175,7 @@ func commandRequiresStartupVaultUnlock(args []string) bool {
 	}
 
 	switch args[0] {
-	case "connect", "c", "run", "run-template", "test", "edit", "delete":
+	case "connect", "c", "run", "run-template", "test", "edit", "delete", "tunnel":
 		return true
 	default:
 		return false

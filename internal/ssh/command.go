@@ -178,7 +178,33 @@ func testWithPassword(cfg *config.Config, args []string, password string) (bool,
 	return false, result
 }
 
-// BuildForwardArgs builds SSH port forwarding arguments.
+func ConnectWithArgs(cfg *config.Config, args []string, vaultFunc VaultFunc, server *model.Server) error {
+	switch server.AuthMethod {
+	case model.AuthPassword:
+		password, err := vaultFunc(server.Alias, "ssh_password")
+		if err != nil {
+			return fmt.Errorf("get password from vault: %w", err)
+		}
+		return ConnectWithPassword(cfg.SSH.Binary, args, password)
+
+	case model.AuthKeyPassphrase:
+		passphrase, err := vaultFunc(server.Alias, "key_passphrase")
+		if err != nil {
+			return fmt.Errorf("get key passphrase from vault: %w", err)
+		}
+		return ConnectWithPassword(cfg.SSH.Binary, args, passphrase)
+
+	default:
+		cmd := exec.Command(cfg.SSH.Binary, args...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start ssh: %w", err)
+		}
+		return cmd.Wait()
+	}
+}
 func BuildForwardArgs(forwards []*model.Forward, exitOnForwardFailure bool) []string {
 	var args []string
 	for _, f := range forwards {
