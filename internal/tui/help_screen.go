@@ -25,6 +25,8 @@ func newHelpScreenModel(w, h int) *helpScreenModel {
 		helpScreenItem{key: "Esc", action: "Back / Cancel", section: "Navigation"},
 		helpScreenItem{key: "Ctrl+A", action: "Add server", section: "Actions"},
 		helpScreenItem{key: "Ctrl+E", action: "Edit server", section: "Actions"},
+		helpScreenItem{key: "Ctrl+W", action: "Manage port forwards", section: "Actions"},
+		helpScreenItem{key: "Ctrl+X", action: "Action menu (delete, test, tags, tunnel)", section: "Actions"},
 		helpScreenItem{key: "Ctrl+D", action: "Delete server", section: "Actions"},
 		helpScreenItem{key: "Ctrl+T", action: "Test connection", section: "Actions"},
 		helpScreenItem{key: "Ctrl+F", action: "Search", section: "Actions"},

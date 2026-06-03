@@ -1564,12 +1564,10 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 	}
 	items = append(items,
 		helpItem{Key: "Enter", Action: "connect"},
+		helpItem{Key: "Ctrl+X", Action: "actions"},
 		helpItem{Key: "Ctrl+A", Action: "add"},
 		helpItem{Key: "Ctrl+E", Action: "edit"},
 		helpItem{Key: "Ctrl+F", Action: "search"},
-		helpItem{Key: "Ctrl+P", Action: "tmpl"},
-		helpItem{Key: "Ctrl+G", Action: "tags"},
-		helpItem{Key: "Ctrl+W", Action: "forwards"},
 		helpItem{Key: "Ins", Action: insAction},
 		helpItem{Key: "?", Action: "help"},
 		helpItem{Key: "Ctrl+Q", Action: "quit"},
