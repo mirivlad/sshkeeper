@@ -14,11 +14,11 @@ import (
 // --- Tunnel manager screen ---
 
 type tunnelScreenModel struct {
-	list     list.Model
-	tunnels  []*model.TunnelState
-	width    int
-	height   int
-	err      error
+	list    list.Model
+	tunnels []*model.TunnelState
+	width   int
+	height  int
+	err     error
 }
 
 type tunnelItem struct {

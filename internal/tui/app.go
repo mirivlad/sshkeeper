@@ -223,7 +223,7 @@ type tuiModel struct {
 	tagMode         string
 	tagOldName      string
 	selected        map[string]bool
-	tunnelScreen   *tunnelScreenModel
+	tunnelScreen    *tunnelScreenModel
 	bgResults       []templateRunResult
 	err             error
 	success         string

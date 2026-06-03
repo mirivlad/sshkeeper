@@ -22,8 +22,9 @@ port forwarding management.
   secrets in command-line arguments.
 - Key, SSH-agent, password, and key+passphrase auth modes.
 - **Routes / ProxyJump** — manage bastion hosts and jump chains with human-readable display.
-- **Port forwarding** — local, remote, and dynamic (SOCKS) forwards with OpenSSH preview.
-- **Tunnel mode** — `ssh -N` for forward-only sessions.
+- **Port forwarding** — named local/remote/SOCKS forwards with type selector, validation, and OpenSSH preview.
+- **Tunnel management** — start/stop/restart tunnels, PID tracking, background tunnels, runtime state.
+- **Tunnel vs Forward** — clear separation: forward = saved rule, tunnel = running SSH process.
 - Groups, tags, command templates, search, and OpenSSH config generation.
 - Import from `~/.ssh/config`.
 
@@ -125,44 +126,62 @@ sshkeeper route show prod
 # ProxyJump: bastion,dmz-gw
 ```
 
-### Local port forward
+### Port forwards
+
+A **port forward** is a saved rule that describes how to tunnel traffic through SSH.
+It does not start any process — it is just configuration.
 
 ```bash
-sshkeeper forward add web --type local --local-port 8080 --remote-addr internal.web --remote-port 80
+# Local forward: access a remote service from your machine
+sshkeeper forward add web --name "Local PostgreSQL" --type local --local-port 15432 --remote-addr 127.0.0.1 --remote-port 5432
+
+# SOCKS proxy: route browser traffic through SSH server
+sshkeeper forward add bastion --name "SOCKS Proxy" --type dynamic --local-port 1080
+
+# List forwards for a server
 sshkeeper forward list web
-# [1] -L 0.0.0.0:8080:internal.web:80
+# [1] Local PostgreSQL  Local   127.0.0.1:15432  127.0.0.1:5432  yes
+# [2] SOCKS Proxy       SOCKS  127.0.0.1:1080   SOCKS           yes
 ```
 
-### Dynamic SOCKS proxy
+Forward types:
+- **Local** — port on your machine → service reachable from SSH server
+- **Remote** — port on SSH server → service on your machine
+- **SOCKS** — local dynamic SOCKS proxy through SSH
+
+Default listen address is `127.0.0.1` (localhost only). Use `0.0.0.0` with caution — the port will be accessible from the network.
+
+### Tunnels
+
+A **tunnel** is a running SSH process that activates one or more port forwards.
 
 ```bash
-sshkeeper forward add bastion --type dynamic --local-port 1080
-sshkeeper forward list bastion
-# [1] -D 0.0.0.0:1080
-```
-
-### Forward-only tunnel (ssh -N)
-
-```bash
-sshkeeper tunnel web --forward-only
-# Starting tunnel to web with 1 forward(s)...
-# Tunnel mode (ssh -N). Press Ctrl+C to exit.
-```
-
-### Session with forwards
-
-```bash
+# Connect with all enabled forwards active (interactive session)
 sshkeeper tunnel web
-# Starts SSH session with all configured forwards active.
+
+# Start tunnels only (foreground, no shell)
+sshkeeper tunnel web --forward-only
+
+# Start tunnels in background (detached process)
+sshkeeper tunnel web --background
+
+# List running tunnels
+sshkeeper tunnel list
+
+# Stop a tunnel
+sshkeeper tunnel stop <id>
 ```
 
-## Connect vs Tunnel
+### Connect vs Tunnel
 
-- **`sshkeeper connect <alias>`** (or `Enter` in TUI) — standard SSH session, no port forwards.
-- **`sshkeeper forward`** (or `Ctrl+W` in TUI) — manage port forwards for a server.
-- **`sshkeeper tunnel <alias>`** — start SSH session **with** all configured forwards active.
-- **`sshkeeper tunnel <alias> --forward-only`** — start tunnel only (`ssh -N`), useful for background port forwarding.
-- **TUI Action Menu** (`Ctrl+X`) — offers Connect, Start tunnel, and Tunnel mode for the selected server.
+| Action | Command | TUI | Description |
+|---|---|---|---|
+| Connect | `sshkeeper connect <alias>` | `Enter` | Standard SSH session, no port forwards |
+| Connect with tunnels | `sshkeeper tunnel <alias>` | Action menu → Connect with tunnels | SSH session with all enabled forwards active |
+| Start tunnels only | `sshkeeper tunnel <alias> --forward-only` | Action menu → Start tunnels only | Foreground tunnel, no shell |
+| Start tunnels in background | `sshkeeper tunnel <alias> --background` | Action menu → Start tunnels in background | Detached tunnel process with PID tracking |
+| Manage port forwards | `sshkeeper forward` | Action menu → Manage port forwards | Add/edit/delete forward rules |
+| Manage tunnels | `sshkeeper tunnel list/stop` | Action menu → Manage tunnels | View running tunnels, stop, restart |
 
 Commands that only read profile metadata, such as `list`, `show`, `search`,
 `config path`, `group list`, and `export`, do not require the master password.
@@ -200,18 +219,11 @@ Running `sshkeeper` without arguments opens the TUI.
 | Key | Action |
 | --- | --- |
 | Enter | Connect to selected server |
-| Ctrl+R | Pick and run a command template on the selected servers |
-| Insert | Select or unselect a server, then move to the next row |
 | Ctrl+A | Add server |
 | Ctrl+E | Edit server |
-| Ctrl+D | Delete server |
-| Ctrl+T | Test connection |
 | Ctrl+F | Search |
-| Ctrl+G | Manage tags |
-| Ctrl+P | Manage global command templates |
-| Ctrl+W | Manage port forwards for selected server |
+| Ctrl+X | Action menu (connect, tunnels, forwards, route, test, edit, delete) |
 | ? / F1 | Full help screen |
-| Ctrl+X | Action menu (delete, test, tags, vault) |
 | Ctrl+Q / Ctrl+C | Quit |
 
 Templates are global entities and can run on any server. Foreground template
@@ -294,7 +306,8 @@ sshkeeper/
 ├── internal/ssh/        # OpenSSH command building, PTY prompt handling
 ├── internal/tui/        # Bubble Tea UI
 ├── internal/vault/      # Encrypted vault
-└── main.go
+├── build.sh             # Build binary to bin/
+├── release.sh           # Build release tarballs to dist/
 ```
 
 ## License

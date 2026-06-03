@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	mu       sync.Mutex
-	states   = map[int64]*model.TunnelState{}
-	dataDir  string
+	mu      sync.Mutex
+	states  = map[int64]*model.TunnelState{}
+	dataDir string
 )
 
 // Init initializes the tunnel state manager with the data directory.

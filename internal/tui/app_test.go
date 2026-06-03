@@ -711,11 +711,12 @@ func TestForwardSaveSuccessReturnsToList(t *testing.T) {
 	m.screen = screenForwardForm
 
 	// Fill in form
-	m.forwardForm.inputs[0].SetValue("local")
-	m.forwardForm.inputs[1].SetValue("0.0.0.0")
-	m.forwardForm.inputs[2].SetValue("8080")
-	m.forwardForm.inputs[3].SetValue("internal.web")
-	m.forwardForm.inputs[4].SetValue("80")
+	m.forwardForm.nameInput.SetValue("Test Forward")
+	m.forwardForm.descInput.SetValue("test")
+	m.forwardForm.inputs[0].SetValue("127.0.0.1")
+	m.forwardForm.inputs[1].SetValue("8080")
+	m.forwardForm.inputs[2].SetValue("internal.web")
+	m.forwardForm.inputs[3].SetValue("80")
 
 	// Simulate saveDoneMsg arriving through tuiModel.Update (as async cmd would)
 	updated, cmd := m.Update(saveDoneMsg{err: nil})
@@ -783,23 +784,22 @@ func TestActionMenuClosesOnAllActions(t *testing.T) {
 		t.Fatal("expected actionMenu nil after delete")
 	}
 
-	// Test tags closes menu and goes to tags screen
+	// Test forwards closes menu and goes to forward list
 	m.actionMenu = newActionMenuModel(m.width, m.height)
 	m.screen = screenActionMenu
-	// Find "Tags" item
 	for i := 0; i < 10; i++ {
 		m.actionMenu.list.Select(i)
-		if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "tags" {
+		if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "forwards" {
 			break
 		}
 	}
-	ListTags = func() ([]string, error) { return []string{}, nil }
+	ListForwards = func(serverID int64) ([]*model.Forward, error) { return []*model.Forward{}, nil }
 	updated, _ = m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(*tuiModel)
 	if m.actionMenu != nil {
-		t.Fatal("expected actionMenu nil after tags")
+		t.Fatal("expected actionMenu nil after forwards")
 	}
-	if m.screen != screenTags {
-		t.Fatalf("expected screenTags, got %v", m.screen)
+	if m.screen != screenForwardList {
+		t.Fatalf("expected screenForwardList, got %v", m.screen)
 	}
 }
