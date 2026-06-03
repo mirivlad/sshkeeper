@@ -159,6 +159,8 @@ const (
 	screenTemplatePicker
 	screenTemplateMode
 	screenBackgroundResults
+	screenHelp
+	screenActionMenu
 )
 
 // --- Result type — returned from TUI to caller ---
@@ -195,6 +197,8 @@ type tuiModel struct {
 	width           int
 	height          int
 	result          *TUIResult
+	helpScreen      *helpScreenModel
+	actionMenu      *actionMenuModel
 }
 
 func New(servers []*model.Server) *tuiModel {
@@ -389,6 +393,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateTemplateMode(msg)
 		case screenBackgroundResults:
 			return m.updateBackgroundResults(msg)
+		case screenHelp:
+			return m.updateHelp(msg)
+		case screenActionMenu:
+			return m.updateActionMenu(msg)
 		}
 	}
 
@@ -473,6 +481,23 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlR:
 		return m.openTemplatePicker()
+
+	case tea.KeyRunes:
+		if msg.String() == "?" {
+			m.helpScreen = newHelpScreenModel(m.width, m.height)
+			m.screen = screenHelp
+			return m, nil
+		}
+
+	case tea.KeyF1:
+		m.helpScreen = newHelpScreenModel(m.width, m.height)
+		m.screen = screenHelp
+		return m, nil
+
+	case tea.KeyCtrlX:
+		m.actionMenu = newActionMenuModel(m.width, m.height)
+		m.screen = screenActionMenu
+		return m, nil
 
 	default:
 		var cmd tea.Cmd
@@ -813,6 +838,16 @@ func (m *tuiModel) View() string {
 
 	case screenBackgroundResults:
 		b.WriteString(m.viewBackgroundResults())
+
+	case screenHelp:
+		if m.helpScreen != nil {
+			b.WriteString(m.helpScreen.View())
+		}
+
+	case screenActionMenu:
+		if m.actionMenu != nil {
+			b.WriteString(m.actionMenu.View())
+		}
 	}
 
 	if m.err != nil {
@@ -825,6 +860,73 @@ func (m *tuiModel) View() string {
 	}
 
 	return b.String()
+}
+
+func (m *tuiModel) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	updated, cmd := m.helpScreen.Update(msg)
+	if hs, ok := updated.(*helpScreenModel); ok {
+		m.helpScreen = hs
+	}
+	// Esc or Enter closes help
+	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter {
+		m.screen = screenList
+		m.helpScreen = nil
+		return m, nil
+	}
+	return m, cmd
+}
+
+func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	updated, action := m.actionMenu.Update(msg)
+	m.actionMenu = updated
+
+	if msg.Type == tea.KeyEsc || action == nil && msg.Type != tea.KeyDown && msg.Type != tea.KeyUp && msg.Type != tea.KeyLeft && msg.Type != tea.KeyRight {
+		if msg.Type == tea.KeyEsc {
+			m.screen = screenList
+			m.actionMenu = nil
+			return m, nil
+		}
+	}
+
+	if action != nil {
+		m.screen = screenList
+		m.actionMenu = nil
+		// Handle known actions
+		switch *action {
+		case "delete":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				return m, func() tea.Msg {
+					err := DeleteServer(item.server.Alias)
+					if err != nil {
+						return saveDoneMsg{err: err}
+					}
+					servers, err := ListServers()
+					return serversLoadedMsg{servers: servers, err: err}
+				}
+			}
+		case "test":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				return m, func() tea.Msg {
+					ok, testErr := TestConnection(item.server)
+					return testDoneMsg{ok: ok, err: testErr}
+				}
+			}
+		case "tags":
+			m.screen = screenTags
+			return m, m.loadTagsCmd()
+		case "import":
+			m.err = fmt.Errorf("import not yet implemented")
+		case "export":
+			m.err = fmt.Errorf("export not yet implemented")
+		case "vault_lock":
+			m.err = fmt.Errorf("vault lock not yet implemented")
+		case "vault_change_pw":
+			m.err = fmt.Errorf("vault change password not yet implemented")
+		}
+		return m, nil
+	}
+
+	return m, nil
 }
 
 func (m *tuiModel) viewServerList() string {
@@ -1258,24 +1360,22 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 	if selectedCount > 0 {
 		insAction = fmt.Sprintf("select (%d selected)", selectedCount)
 	}
-	items := []helpItem{
-		{Key: "Enter", Action: "connect"},
-		{Key: "Ctrl+R", Action: "run tpl"},
-		{Key: "Ins", Action: insAction},
-	}
+	var items []helpItem
 	if hasBackgroundResult {
 		items = append(items, helpItem{Key: "Esc", Action: "clear result"})
 	}
-	return append(items,
-		helpItem{Key: "Ctrl+P", Action: "tpl mgr"},
-		helpItem{Key: "Ctrl+G", Action: "tags"},
+	items = append(items,
+		helpItem{Key: "Enter", Action: "connect"},
 		helpItem{Key: "Ctrl+A", Action: "add"},
 		helpItem{Key: "Ctrl+E", Action: "edit"},
-		helpItem{Key: "Ctrl+D", Action: "del"},
-		helpItem{Key: "Ctrl+T", Action: "test"},
 		helpItem{Key: "Ctrl+F", Action: "search"},
+		helpItem{Key: "Ctrl+P", Action: "tmpl"},
+		helpItem{Key: "Ctrl+G", Action: "tags"},
+		helpItem{Key: "Ins", Action: insAction},
+		helpItem{Key: "?", Action: "help"},
 		helpItem{Key: "Ctrl+Q", Action: "quit"},
 	)
+	return items
 }
 
 // --- Utility functions ---

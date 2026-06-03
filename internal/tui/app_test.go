@@ -117,7 +117,7 @@ func TestServerListHelpWrapsOnNarrowTerminal(t *testing.T) {
 			t.Fatalf("expected help line to be bounded, got width %d: %q\nview:\n%s", lipgloss.Width(line), line, view)
 		}
 	}
-	for _, want := range []string{"Ctrl+R", "run tpl", "Ctrl+P", "tpl mgr"} {
+	for _, want := range []string{"Ctrl+P", "tmpl", "Ctrl+F", "search", "?", "help"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected help to contain %q\nview:\n%s", want, view)
 		}
@@ -148,7 +148,7 @@ func TestServerListHelpWrapsSelectionAndResultHints(t *testing.T) {
 		plainLines = append(plainLines, plainHelpLine(line))
 	}
 	joined := strings.Join(plainLines, "\n")
-	for _, want := range []string{"Ins: select (2 selected)", "Esc: clear result", "Ctrl+P: tpl mgr", "Ctrl+Q: quit"} {
+	for _, want := range []string{"Ins: select (2 selected)", "Esc: clear result", "Ctrl+P: tmpl", "Ctrl+Q: quit"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected wrapped help to contain %q\nlines:%#v", want, lines)
 		}
