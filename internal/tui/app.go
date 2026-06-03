@@ -84,6 +84,16 @@ type templateRunRequestMsg struct {
 	command      string
 }
 
+type forwardsLoadedMsg struct {
+	forwards []*model.Forward
+	err      error
+}
+
+type forwardDeletedMsg struct {
+	id  int64
+	err error
+}
+
 // --- List items ---
 
 type serverItem struct {
@@ -144,6 +154,9 @@ var (
 	SaveCommandTemplate        func(oldName string, template *model.CommandTemplate) error
 	DeleteCommandTemplate      func(name string) error
 	RunTemplateBackground      func(server *model.Server, command string) (string, error)
+	ListForwards               func(serverID int64) ([]*model.Forward, error)
+	SaveForward                func(fwd *model.Forward) error
+	DeleteForward              func(forwardID int64) error
 )
 
 // --- Screen type ---
@@ -163,6 +176,8 @@ const (
 	screenBackgroundResults
 	screenHelp
 	screenActionMenu
+	screenForwardList
+	screenForwardForm
 )
 
 // --- Result type — returned from TUI to caller ---
@@ -201,6 +216,8 @@ type tuiModel struct {
 	result          *TUIResult
 	helpScreen      *helpScreenModel
 	actionMenu      *actionMenuModel
+	forwardScreen   *forwardScreenModel
+	forwardForm     *forwardFormModel
 }
 
 func New(servers []*model.Server) *tuiModel {
@@ -317,6 +334,24 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingTemplate = nil
 		return m, nil
 
+	case forwardsLoadedMsg:
+		if m.forwardScreen != nil {
+			if msg.err != nil {
+				m.forwardScreen.err = msg.err
+			} else {
+				m.forwardScreen.forwards = msg.forwards
+				m.forwardScreen.rebuildList()
+			}
+		}
+		return m, nil
+
+	case forwardDeletedMsg:
+		if m.forwardScreen != nil && msg.err == nil {
+			// Reload forwards
+			return m, m.forwardScreen.loadForwards()
+		}
+		return m, nil
+
 	case testDoneMsg:
 		if m.form != nil {
 			m.form.testing = false
@@ -399,6 +434,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHelp(msg)
 		case screenActionMenu:
 			return m.updateActionMenu(msg)
+		case screenForwardList:
+			return m.updateForwardList(msg)
+		case screenForwardForm:
+			return m.updateForwardForm(msg)
 		}
 	}
 
@@ -495,6 +534,14 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpScreen = newHelpScreenModel(m.width, m.height)
 		m.screen = screenHelp
 		return m, nil
+
+	case tea.KeyCtrlW:
+		// Open forward manager for selected server
+		if item, ok := m.list.SelectedItem().(serverItem); ok {
+			m.forwardScreen = newForwardScreenModel(item.server.ID, item.server.Alias, m.width, m.height)
+			m.screen = screenForwardList
+			return m, m.forwardScreen.loadForwards()
+		}
 
 	case tea.KeyCtrlX:
 		m.actionMenu = newActionMenuModel(m.width, m.height)
@@ -850,6 +897,16 @@ func (m *tuiModel) View() string {
 		if m.actionMenu != nil {
 			b.WriteString(m.actionMenu.View())
 		}
+
+	case screenForwardList:
+		if m.forwardScreen != nil {
+			b.WriteString(m.forwardScreen.View())
+		}
+
+	case screenForwardForm:
+		if m.forwardForm != nil {
+			b.WriteString(m.forwardForm.View())
+		}
 	}
 
 	if m.err != nil {
@@ -929,6 +986,63 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenList
+		m.forwardScreen = nil
+		return m, nil
+	case tea.KeyCtrlA:
+		// Add forward
+		if m.forwardScreen != nil {
+			m.forwardForm = newForwardFormModel(m.forwardScreen.serverID, m.width, m.height)
+			m.screen = screenForwardForm
+			return m, nil
+		}
+	case tea.KeyCtrlD:
+		if m.forwardScreen != nil {
+			return m, m.forwardScreen.deleteSelected()
+		}
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "a", "A":
+			if m.forwardScreen != nil {
+				m.forwardForm = newForwardFormModel(m.forwardScreen.serverID, m.width, m.height)
+				m.screen = screenForwardForm
+				return m, nil
+			}
+		case "d", "D":
+			if m.forwardScreen != nil {
+				return m, m.forwardScreen.deleteSelected()
+			}
+		}
+	}
+	var cmd tea.Cmd
+	m.forwardScreen.list, cmd = m.forwardScreen.list.Update(msg)
+	return m, cmd
+}
+
+func (m *tuiModel) updateForwardForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyEsc {
+		m.screen = screenForwardList
+		m.forwardForm = nil
+		return m, nil
+	}
+	updated, cmd := m.forwardForm.Update(msg)
+	if fm, ok := updated.(*forwardFormModel); ok {
+		m.forwardForm = fm
+		if fm.saved {
+			m.screen = screenForwardList
+			m.forwardForm = nil
+			// Reload forward list
+			if m.forwardScreen != nil {
+				return m, m.forwardScreen.loadForwards()
+			}
+		}
+	}
+	return m, cmd
 }
 
 func (m *tuiModel) viewServerList() string {
@@ -1379,6 +1493,7 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 		helpItem{Key: "Ctrl+F", Action: "search"},
 		helpItem{Key: "Ctrl+P", Action: "tmpl"},
 		helpItem{Key: "Ctrl+G", Action: "tags"},
+		helpItem{Key: "Ctrl+W", Action: "forwards"},
 		helpItem{Key: "Ins", Action: insAction},
 		helpItem{Key: "?", Action: "help"},
 		helpItem{Key: "Ctrl+Q", Action: "quit"},

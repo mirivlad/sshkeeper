@@ -124,6 +124,15 @@ func runTUI() error {
 		}
 		return ssh.RunCommandOutput(cfg, fresh, vaultFunc, command)
 	}
+	tui.ListForwards = func(serverID int64) ([]*model.Forward, error) {
+		return appDB.GetForwards(serverID)
+	}
+	tui.SaveForward = func(fwd *model.Forward) error {
+		return appDB.AddForward(fwd.ServerID, fwd.Type, fwd.LocalAddr, fwd.LocalPort, fwd.RemoteAddr, fwd.RemotePort)
+	}
+	tui.DeleteForward = func(forwardID int64) error {
+		return appDB.DeleteForward(forwardID)
+	}
 	tui.UpdateTestResult = func(alias string, status model.TestStatus, testErr string) error {
 		return appDB.UpdateTestResult(alias, status, testErr)
 	}

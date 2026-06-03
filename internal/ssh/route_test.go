@@ -105,7 +105,7 @@ func TestBuildSSHArgs_WithRoute(t *testing.T) {
 			{Alias: "bastion", IsProfile: true},
 		}},
 	}
-	args := BuildSSHArgs(server)
+	args := BuildSSHArgsSimple(server)
 	// Should contain -J bastion
 	found := false
 	for i, a := range args {
@@ -126,7 +126,7 @@ func TestBuildSSHArgs_FallbackToProxyJump(t *testing.T) {
 		User:      "root",
 		ProxyJump: "old-bastion",
 	}
-	args := BuildSSHArgs(server)
+	args := BuildSSHArgsSimple(server)
 	found := false
 	for i, a := range args {
 		if a == "-J" && i+1 < len(args) && args[i+1] == "old-bastion" {

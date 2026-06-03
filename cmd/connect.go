@@ -41,6 +41,7 @@ var connectCmd = &cobra.Command{
 			AuthMethod:   server.AuthMethod,
 			IdentityFile: server.IdentityFile,
 			ProxyJump:    server.ProxyJump,
+			Route:        server.Route,
 		}, vaultFunc); err != nil {
 			return err
 		}
@@ -82,6 +83,7 @@ var testCmd = &cobra.Command{
 			AuthMethod:   server.AuthMethod,
 			IdentityFile: server.IdentityFile,
 			ProxyJump:    server.ProxyJump,
+			Route:        server.Route,
 		}, vaultFunc)
 
 		if ok {

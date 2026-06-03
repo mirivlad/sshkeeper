@@ -349,6 +349,11 @@ func (db *DB) GetForwards(serverID int64) ([]*model.Forward, error) {
 	return forwards, rows.Err()
 }
 
+func (db *DB) DeleteForward(forwardID int64) error {
+	_, err := db.conn.Exec("DELETE FROM forwards WHERE id=?", forwardID)
+	return err
+}
+
 // Ensure time import is used
 var _ time.Time
 

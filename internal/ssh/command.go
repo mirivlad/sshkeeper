@@ -13,7 +13,7 @@ import (
 type VaultFunc func(serverAlias string, secretType string) (string, error)
 
 func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error {
-	args := BuildSSHArgs(server)
+	args := BuildSSHArgsSimple(server)
 	if strings.TrimSpace(server.StartupCommand) != "" {
 		args = append(args, server.StartupCommand)
 	}
@@ -49,7 +49,7 @@ func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error
 }
 
 func RunCommand(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) error {
-	args := BuildSSHArgs(server)
+	args := BuildSSHArgsSimple(server)
 	args = append(args, command)
 
 	switch server.AuthMethod {
@@ -78,7 +78,7 @@ func RunCommand(cfg *config.Config, server *model.Server, getVault VaultFunc, co
 }
 
 func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) (string, error) {
-	args := BuildSSHArgs(server)
+	args := BuildSSHArgsSimple(server)
 	args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
 
 	switch server.AuthMethod {
@@ -116,7 +116,7 @@ func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFu
 }
 
 func Test(cfg *config.Config, server *model.Server, getVault VaultFunc) (bool, string) {
-	args := BuildSSHArgs(server)
+	args := BuildSSHArgsSimple(server)
 	args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
 
 	switch server.AuthMethod {
@@ -178,8 +178,31 @@ func testWithPassword(cfg *config.Config, args []string, password string) (bool,
 	return false, result
 }
 
+// BuildForwardArgs builds SSH port forwarding arguments.
+func BuildForwardArgs(forwards []*model.Forward, exitOnForwardFailure bool) []string {
+	var args []string
+	for _, f := range forwards {
+		switch f.Type {
+		case model.ForwardLocal:
+			listen := fmt.Sprintf("%s:%d", f.LocalAddr, f.LocalPort)
+			target := fmt.Sprintf("%s:%d", f.RemoteAddr, f.RemotePort)
+			args = append(args, "-L", listen+":"+target)
+		case model.ForwardRemote:
+			listen := fmt.Sprintf("%s:%d", f.RemoteAddr, f.RemotePort)
+			target := fmt.Sprintf("%s:%d", f.LocalAddr, f.LocalPort)
+			args = append(args, "-R", listen+":"+target)
+		case model.ForwardDynamic:
+			args = append(args, "-D", fmt.Sprintf("%s:%d", f.LocalAddr, f.LocalPort))
+		}
+	}
+	if exitOnForwardFailure && len(forwards) > 0 {
+		args = append(args, "-o", "ExitOnForwardFailure=yes")
+	}
+	return args
+}
+
 // BuildSSHArgs builds the SSH command arguments for a server profile.
-func BuildSSHArgs(server *model.Server) []string {
+func BuildSSHArgs(server *model.Server, forwards []*model.Forward, forwardOnly bool) []string {
 	var args []string
 
 	args = append(args, "-p", fmt.Sprintf("%d", server.Port))
@@ -196,10 +219,24 @@ func BuildSSHArgs(server *model.Server) []string {
 		args = append(args, "-J", server.ProxyJump)
 	}
 
+	// Port forwarding
+	if len(forwards) > 0 {
+		args = append(args, BuildForwardArgs(forwards, true)...)
+	}
+
 	args = append(args, "-o", "StrictHostKeyChecking=accept-new")
+
+	if forwardOnly {
+		args = append(args, "-N")
+	}
 
 	target := fmt.Sprintf("%s@%s", server.User, server.Host)
 	args = append(args, target)
 
 	return args
+}
+
+// BuildSSHArgsSimple builds SSH args without forwards (backward compatible).
+func BuildSSHArgsSimple(server *model.Server) []string {
+	return BuildSSHArgs(server, nil, false)
 }
