@@ -92,7 +92,9 @@ type serverItem struct {
 
 func (i serverItem) Title() string { return i.server.Alias }
 func (i serverItem) Description() string {
-	return fmt.Sprintf("%s@%s:%d  %s", i.server.User, i.server.Host, i.server.Port, i.server.AuthMethod)
+	target := fmt.Sprintf("%s@%s:%d", i.server.User, i.server.Host, i.server.Port)
+	routeStr := i.server.Route.DisplaySummary(target)
+	return fmt.Sprintf("%s  %s", routeStr, i.server.AuthMethod)
 }
 func (i serverItem) FilterValue() string {
 	return i.server.Alias + " " + i.server.DisplayName + " " + i.server.Host + " " + i.server.User
@@ -1108,6 +1110,12 @@ func (m *tuiModel) viewSelectedServer(server *model.Server) string {
 	b.WriteString(fmt.Sprintf("  Port: %d\n", server.Port))
 	b.WriteString(fmt.Sprintf("  User: %s\n", server.User))
 	b.WriteString(fmt.Sprintf("  Auth: %s\n", authLabel(server.AuthMethod)))
+	if len(server.Route.Hops) > 0 {
+		target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
+		b.WriteString(fmt.Sprintf("  Route: %s\n", server.Route.DisplaySummary(target)))
+	} else if server.ProxyJump != "" {
+		b.WriteString(fmt.Sprintf("  ProxyJump: %s\n", server.ProxyJump))
+	}
 	b.WriteString(fmt.Sprintf("  Group: %s\n", group))
 	if len(server.Tags) > 0 {
 		b.WriteString(fmt.Sprintf("  Tags: %s\n", strings.Join(server.Tags, ", ")))

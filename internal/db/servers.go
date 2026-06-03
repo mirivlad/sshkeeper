@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -9,11 +10,42 @@ import (
 	"github.com/mirivlad/sshkeeper/internal/model"
 )
 
+// --- Route marshaling helpers ---
+
+func marshalRoute(route model.Route) string {
+	if len(route.Hops) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(route.Hops)
+	return string(b)
+}
+
+func unmarshalRoute(s string) model.Route {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return model.Route{}
+	}
+	var hops []model.RouteHop
+	if err := json.Unmarshal([]byte(s), &hops); err != nil {
+		parts := strings.Split(s, ",")
+		hops = make([]model.RouteHop, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				hops = append(hops, model.RouteHop{Raw: p, IsProfile: false})
+			}
+		}
+	}
+	return model.Route{Hops: hops}
+}
+
+// --- Server CRUD ---
+
 func (db *DB) CreateServer(s *model.Server) error {
 	result, err := db.conn.Exec(`
-		INSERT INTO servers (alias, display_name, host, port, user, auth_method, identity_file, proxy_jump, group_name, notes, startup_command)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.Alias, s.DisplayName, s.Host, s.Port, s.User, s.AuthMethod, s.IdentityFile, s.ProxyJump, s.GroupName, s.Notes, s.StartupCommand)
+		INSERT INTO servers (alias, display_name, host, port, user, auth_method, identity_file, proxy_jump, route_hops, group_name, notes, startup_command)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.Alias, s.DisplayName, s.Host, s.Port, s.User, s.AuthMethod, s.IdentityFile, s.ProxyJump, marshalRoute(s.Route), s.GroupName, s.Notes, s.StartupCommand)
 	if err != nil {
 		return err
 	}
@@ -25,10 +57,10 @@ func (db *DB) UpdateServer(s *model.Server) error {
 	_, err := db.conn.Exec(`
 		UPDATE servers SET
 			display_name=?, host=?, port=?, user=?, auth_method=?,
-			identity_file=?, proxy_jump=?, group_name=?, notes=?, startup_command=?, updated_at=CURRENT_TIMESTAMP
+			identity_file=?, proxy_jump=?, route_hops=?, group_name=?, notes=?, startup_command=?, updated_at=CURRENT_TIMESTAMP
 		WHERE alias=?`,
 		s.DisplayName, s.Host, s.Port, s.User, s.AuthMethod,
-		s.IdentityFile, s.ProxyJump, s.GroupName, s.Notes, s.StartupCommand, s.Alias)
+		s.IdentityFile, s.ProxyJump, marshalRoute(s.Route), s.GroupName, s.Notes, s.StartupCommand, s.Alias)
 	return err
 }
 
@@ -36,10 +68,10 @@ func (db *DB) UpdateServerByAlias(oldAlias string, s *model.Server) error {
 	_, err := db.conn.Exec(`
 		UPDATE servers SET
 			alias=?, display_name=?, host=?, port=?, user=?, auth_method=?,
-			identity_file=?, proxy_jump=?, group_name=?, notes=?, startup_command=?, updated_at=CURRENT_TIMESTAMP
+			identity_file=?, proxy_jump=?, route_hops=?, group_name=?, notes=?, startup_command=?, updated_at=CURRENT_TIMESTAMP
 		WHERE alias=?`,
 		s.Alias, s.DisplayName, s.Host, s.Port, s.User, s.AuthMethod,
-		s.IdentityFile, s.ProxyJump, s.GroupName, s.Notes, s.StartupCommand, oldAlias)
+		s.IdentityFile, s.ProxyJump, marshalRoute(s.Route), s.GroupName, s.Notes, s.StartupCommand, oldAlias)
 	return err
 }
 
@@ -51,14 +83,15 @@ func (db *DB) DeleteServer(alias string) error {
 func (db *DB) GetServer(alias string) (*model.Server, error) {
 	var s model.Server
 	var lastConnected, lastTest sql.NullTime
+	var routeHops sql.NullString
 	err := db.conn.QueryRow(`
 		SELECT id, alias, display_name, host, port, user, auth_method,
-		       identity_file, proxy_jump, group_name, notes, startup_command,
+		       identity_file, proxy_jump, route_hops, group_name, notes, startup_command,
 		       created_at, updated_at, last_connected_at,
 		       last_test_at, last_test_status, last_test_error
 		FROM servers WHERE alias=?`, alias).Scan(
 		&s.ID, &s.Alias, &s.DisplayName, &s.Host, &s.Port, &s.User, &s.AuthMethod,
-		&s.IdentityFile, &s.ProxyJump, &s.GroupName, &s.Notes, &s.StartupCommand,
+		&s.IdentityFile, &s.ProxyJump, &routeHops, &s.GroupName, &s.Notes, &s.StartupCommand,
 		&s.CreatedAt, &s.UpdatedAt, &lastConnected,
 		&lastTest, &s.LastTestStatus, &s.LastTestError)
 	if err != nil {
@@ -69,6 +102,12 @@ func (db *DB) GetServer(alias string) (*model.Server, error) {
 	}
 	if lastTest.Valid {
 		s.LastTestAt = &lastTest.Time
+	}
+	if routeHops.Valid && routeHops.String != "" {
+		s.Route = unmarshalRoute(routeHops.String)
+	}
+	if len(s.Route.Hops) == 0 && s.ProxyJump != "" {
+		s.Route = unmarshalRoute(s.ProxyJump)
 	}
 	tags, err := db.GetServerTags(s.ID)
 	if err != nil {
@@ -81,7 +120,7 @@ func (db *DB) GetServer(alias string) (*model.Server, error) {
 func (db *DB) ListServers() ([]*model.Server, error) {
 	rows, err := db.conn.Query(`
 		SELECT id, alias, display_name, host, port, user, auth_method,
-		       identity_file, proxy_jump, group_name, notes, startup_command,
+		       identity_file, proxy_jump, route_hops, group_name, notes, startup_command,
 		       created_at, updated_at, last_connected_at,
 		       last_test_at, last_test_status, last_test_error
 		FROM servers ORDER BY alias`)
@@ -94,9 +133,10 @@ func (db *DB) ListServers() ([]*model.Server, error) {
 	for rows.Next() {
 		var s model.Server
 		var lastConnected, lastTest sql.NullTime
+		var routeHops sql.NullString
 		err := rows.Scan(
 			&s.ID, &s.Alias, &s.DisplayName, &s.Host, &s.Port, &s.User, &s.AuthMethod,
-			&s.IdentityFile, &s.ProxyJump, &s.GroupName, &s.Notes, &s.StartupCommand,
+			&s.IdentityFile, &s.ProxyJump, &routeHops, &s.GroupName, &s.Notes, &s.StartupCommand,
 			&s.CreatedAt, &s.UpdatedAt, &lastConnected,
 			&lastTest, &s.LastTestStatus, &s.LastTestError)
 		if err != nil {
@@ -107,6 +147,12 @@ func (db *DB) ListServers() ([]*model.Server, error) {
 		}
 		if lastTest.Valid {
 			s.LastTestAt = &lastTest.Time
+		}
+		if routeHops.Valid && routeHops.String != "" {
+			s.Route = unmarshalRoute(routeHops.String)
+		}
+		if len(s.Route.Hops) == 0 && s.ProxyJump != "" {
+			s.Route = unmarshalRoute(s.ProxyJump)
 		}
 		tags, err := db.GetServerTags(s.ID)
 		if err != nil {
@@ -122,7 +168,7 @@ func (db *DB) SearchServers(query string) ([]*model.Server, error) {
 	pattern := "%" + query + "%"
 	rows, err := db.conn.Query(`
 		SELECT id, alias, display_name, host, port, user, auth_method,
-		       identity_file, proxy_jump, group_name, notes, startup_command,
+		       identity_file, proxy_jump, route_hops, group_name, notes, startup_command,
 		       created_at, updated_at, last_connected_at,
 		       last_test_at, last_test_status, last_test_error
 		FROM servers
@@ -137,9 +183,10 @@ func (db *DB) SearchServers(query string) ([]*model.Server, error) {
 	for rows.Next() {
 		var s model.Server
 		var lastConnected, lastTest sql.NullTime
+		var routeHops sql.NullString
 		err := rows.Scan(
 			&s.ID, &s.Alias, &s.DisplayName, &s.Host, &s.Port, &s.User, &s.AuthMethod,
-			&s.IdentityFile, &s.ProxyJump, &s.GroupName, &s.Notes, &s.StartupCommand,
+			&s.IdentityFile, &s.ProxyJump, &routeHops, &s.GroupName, &s.Notes, &s.StartupCommand,
 			&s.CreatedAt, &s.UpdatedAt, &lastConnected,
 			&lastTest, &s.LastTestStatus, &s.LastTestError)
 		if err != nil {
@@ -150,6 +197,12 @@ func (db *DB) SearchServers(query string) ([]*model.Server, error) {
 		}
 		if lastTest.Valid {
 			s.LastTestAt = &lastTest.Time
+		}
+		if routeHops.Valid && routeHops.String != "" {
+			s.Route = unmarshalRoute(routeHops.String)
+		}
+		if len(s.Route.Hops) == 0 && s.ProxyJump != "" {
+			s.Route = unmarshalRoute(s.ProxyJump)
 		}
 		tags, err := db.GetServerTags(s.ID)
 		if err != nil {
@@ -173,7 +226,8 @@ func (db *DB) UpdateLastConnected(alias string) error {
 	return err
 }
 
-// Tag methods
+// --- Tag methods ---
+
 func (db *DB) AddTagToServer(serverID int64, tagName string) error {
 	tagName = strings.TrimSpace(tagName)
 	if tagName == "" {
@@ -265,7 +319,8 @@ func (db *DB) GetServerTags(serverID int64) ([]string, error) {
 	return tags, rows.Err()
 }
 
-// Forward methods
+// --- Forward methods ---
+
 func (db *DB) AddForward(serverID int64, fwdType model.ForwardType, localAddr string, localPort int, remoteAddr string, remotePort int) error {
 	_, err := db.conn.Exec(`
 		INSERT INTO forwards (server_id, type, local_addr, local_port, remote_addr, remote_port)
@@ -296,6 +351,8 @@ func (db *DB) GetForwards(serverID int64) ([]*model.Forward, error) {
 
 // Ensure time import is used
 var _ time.Time
+
+// --- Command template methods ---
 
 func (db *DB) CreateCommandTemplate(t *model.CommandTemplate) error {
 	result, err := db.conn.Exec(
@@ -368,12 +425,13 @@ func uniqueCleanStrings(values []string) []string {
 	return result
 }
 
-// GetGroups returns all unique group names with server count
+// --- Group methods ---
+
 func (db *DB) GetGroups() ([]string, error) {
 	rows, err := db.conn.Query(`
-		SELECT group_name FROM servers 
-		WHERE group_name != '' 
-		GROUP BY group_name 
+		SELECT group_name FROM servers
+		WHERE group_name != ''
+		GROUP BY group_name
 		ORDER BY group_name`)
 	if err != nil {
 		return nil, err
@@ -391,7 +449,6 @@ func (db *DB) GetGroups() ([]string, error) {
 	return groups, rows.Err()
 }
 
-// RenameGroup renames a group for all servers in it
 func (db *DB) RenameGroup(oldName, newName string) error {
 	_, err := db.conn.Exec(
 		"UPDATE servers SET group_name = ?, updated_at = CURRENT_TIMESTAMP WHERE group_name = ?",
@@ -399,7 +456,6 @@ func (db *DB) RenameGroup(oldName, newName string) error {
 	return err
 }
 
-// DeleteGroup removes group assignment from all servers
 func (db *DB) DeleteGroup(name string) error {
 	_, err := db.conn.Exec(
 		"UPDATE servers SET group_name = '', updated_at = CURRENT_TIMESTAMP WHERE group_name = ?",

@@ -188,7 +188,11 @@ func BuildSSHArgs(server *model.Server) []string {
 		args = append(args, "-i", server.IdentityFile)
 	}
 
-	if server.ProxyJump != "" {
+	// Use Route if available, fall back to raw ProxyJump for backward compatibility
+	routeArgs := BuildRouteArgs(server.Route)
+	if len(routeArgs) > 0 {
+		args = append(args, routeArgs...)
+	} else if server.ProxyJump != "" {
 		args = append(args, "-J", server.ProxyJump)
 	}
 

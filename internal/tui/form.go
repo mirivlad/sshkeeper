@@ -74,7 +74,7 @@ func newFormModel(w, h int) *formModel {
 		"User",
 		"Auth Method (password/key/key_passphrase/agent)",
 		"Identity File",
-		"ProxyJump",
+		"Route hops (comma-separated, or pick from profiles)",
 		"Group (type new or pick from list)",
 		"Notes",
 		"Startup Command",
@@ -114,7 +114,6 @@ func newFormModel(w, h int) *formModel {
 		string(model.AuthAgent),
 	}, "Select auth method", 34, 16)
 
-	// Load existing groups
 	if GetGroups != nil {
 		if groups, err := GetGroups(); err == nil && len(groups) > 0 {
 			fm.groups = groups
@@ -142,8 +141,8 @@ func placeholderForLabel(label string) string {
 		return "key"
 	case "Identity File":
 		return "~/.ssh/id_ed25519"
-	case "ProxyJump":
-		return "optional"
+	case "Route hops (comma-separated, or pick from profiles)":
+		return "bastion, dmz-gw"
 	case "Group (type new or pick from list)":
 		return "KP"
 	case "Notes":
@@ -168,7 +167,22 @@ func newEditFormModel(s *model.Server, w, h int) *formModel {
 	fm.inputs[4].SetValue(s.User)
 	fm.inputs[5].SetValue(string(s.AuthMethod))
 	fm.inputs[6].SetValue(s.IdentityFile)
-	fm.inputs[7].SetValue(s.ProxyJump)
+
+	// Populate Route hops
+	if len(s.Route.Hops) > 0 {
+		hopStrs := make([]string, len(s.Route.Hops))
+		for i, h := range s.Route.Hops {
+			if h.IsProfile {
+				hopStrs[i] = h.Alias
+			} else {
+				hopStrs[i] = h.Raw
+			}
+		}
+		fm.inputs[7].SetValue(strings.Join(hopStrs, ", "))
+	} else if s.ProxyJump != "" {
+		fm.inputs[7].SetValue(s.ProxyJump)
+	}
+
 	fm.inputs[8].SetValue(s.GroupName)
 	fm.inputs[9].SetValue(s.Notes)
 	fm.inputs[10].SetValue(s.StartupCommand)
@@ -196,7 +210,6 @@ func (fm *formModel) Init() tea.Cmd {
 }
 
 func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Handle test/save completion
 	switch msg := msg.(type) {
 	case testDoneMsg:
 		fm.testing = false
@@ -223,7 +236,6 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return fm, nil
 	}
 
-	// Handle spinner tick while testing/saving
 	if fm.testing || fm.saving {
 		var cmd tea.Cmd
 		fm.spinner, cmd = fm.spinner.Update(msg)
@@ -233,7 +245,6 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return fm, cmd
 	}
 
-	// Handle group dropdown
 	if fm.showGroupList {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
@@ -445,6 +456,31 @@ func (fm *formModel) runSave() tea.Cmd {
 	)
 }
 
+// parseRouteHops parses the route hops input string into a model.Route.
+// Format: comma-separated list of aliases or raw addresses.
+func parseRouteHops(input string) model.Route {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return model.Route{}
+	}
+	parts := strings.Split(input, ",")
+	hops := make([]model.RouteHop, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		// Heuristic: if it contains @ or :, treat as raw address
+		if strings.Contains(p, "@") || strings.Contains(p, ":") {
+			hops = append(hops, model.RouteHop{Raw: p, IsProfile: false})
+		} else {
+			// Treat as profile alias
+			hops = append(hops, model.RouteHop{Alias: p, IsProfile: true})
+		}
+	}
+	return model.Route{Hops: hops}
+}
+
 func (fm *formModel) buildServer() *model.Server {
 	port := 22
 	fmt.Sscanf(fm.inputs[3].Value(), "%d", &port)
@@ -452,6 +488,9 @@ func (fm *formModel) buildServer() *model.Server {
 	if authMethod == "" {
 		authMethod = model.AuthKey
 	}
+
+	route := parseRouteHops(fm.inputs[7].Value())
+
 	return &model.Server{
 		Alias:          fm.inputs[0].Value(),
 		DisplayName:    fm.inputs[1].Value(),
@@ -460,7 +499,8 @@ func (fm *formModel) buildServer() *model.Server {
 		User:           fm.inputs[4].Value(),
 		AuthMethod:     authMethod,
 		IdentityFile:   fm.inputs[6].Value(),
-		ProxyJump:      fm.inputs[7].Value(),
+		ProxyJump:      route.ProxyJumpString(),
+		Route:          route,
 		GroupName:      fm.inputs[8].Value(),
 		Notes:          fm.inputs[9].Value(),
 		StartupCommand: fm.inputs[10].Value(),
