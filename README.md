@@ -5,6 +5,14 @@ OpenSSH launches. It does not replace OpenSSH; it keeps connection metadata in a
 local SQLite database, keeps passwords/passphrases in an encrypted vault, and
 starts the system `ssh` client with the right options.
 
+## sshkeeper is not Ansible
+
+sshkeeper does not configure servers, push files, or manage infrastructure.
+It is an SSH connection manager: it remembers how to reach your servers
+(bastions, jump chains, port forwards) and launches the system `ssh` client.
+Think of it as a smart `~/.ssh/config` with a TUI, encrypted secrets, and
+port forwarding management.
+
 ## Features
 
 - Bubble Tea TUI for daily interactive use.
@@ -13,6 +21,9 @@ starts the system `ssh` client with the right options.
 - Password and key-passphrase auth through a PTY prompt handler, without putting
   secrets in command-line arguments.
 - Key, SSH-agent, password, and key+passphrase auth modes.
+- **Routes / ProxyJump** — manage bastion hosts and jump chains with human-readable display.
+- **Port forwarding** — local, remote, and dynamic (SOCKS) forwards with OpenSSH preview.
+- **Tunnel mode** — `ssh -N` for forward-only sessions.
 - Groups, tags, command templates, search, and OpenSSH config generation.
 - Import from `~/.ssh/config`.
 
@@ -91,6 +102,58 @@ sshkeeper edit web --tags prod,web --startup-command "tmux attach -t ops"
 # OpenSSH config
 sshkeeper ssh-config generate
 sshkeeper ssh-config install-include
+
+## Routes, Tunnels, and Port Forwards
+
+### Jump host (single bastion)
+
+```bash
+sshkeeper route set web --jumps bastion
+sshkeeper route show web
+# Route: bastion → web@10.0.0.10:22
+# Mode: via
+# ProxyJump: bastion
+```
+
+### Jump chain (multiple hops)
+
+```bash
+sshkeeper route set prod --jumps bastion,dmz-gw
+sshkeeper route show prod
+# Route: bastion → dmz-gw → prod@10.0.0.20:22
+# Mode: chain
+# ProxyJump: bastion,dmz-gw
+```
+
+### Local port forward
+
+```bash
+sshkeeper forward add web --type local --local-port 8080 --remote-addr internal.web --remote-port 80
+sshkeeper forward list web
+# [1] -L 0.0.0.0:8080:internal.web:80
+```
+
+### Dynamic SOCKS proxy
+
+```bash
+sshkeeper forward add bastion --type dynamic --local-port 1080
+sshkeeper forward list bastion
+# [1] -D 0.0.0.0:1080
+```
+
+### Forward-only tunnel (ssh -N)
+
+```bash
+sshkeeper tunnel web --forward-only
+# Starting tunnel to web with 1 forward(s)...
+# Tunnel mode (ssh -N). Press Ctrl+C to exit.
+```
+
+### Session with forwards
+
+```bash
+sshkeeper tunnel web
+# Starts SSH session with all configured forwards active.
 ```
 
 Commands that only read profile metadata, such as `list`, `show`, `search`,
@@ -120,6 +183,12 @@ Running `sshkeeper` without arguments opens the TUI.
 
 ![sshkeeper template manager](docs/screenshots/screen_4.png)
 
+### Route and Forwarding
+
+![sshkeeper route screen](docs/screenshots/screen_5_route.png)
+
+![sshkeeper port forwards](docs/screenshots/screen_6_forwards.png)
+
 | Key | Action |
 | --- | --- |
 | Enter | Connect to selected server |
@@ -132,6 +201,9 @@ Running `sshkeeper` without arguments opens the TUI.
 | Ctrl+F | Search |
 | Ctrl+G | Manage tags |
 | Ctrl+P | Manage global command templates |
+| Ctrl+W | Manage port forwards for selected server |
+| ? / F1 | Full help screen |
+| Ctrl+X | Action menu (delete, test, tags, vault) |
 | Ctrl+Q / Ctrl+C | Quit |
 
 Templates are global entities and can run on any server. Foreground template
