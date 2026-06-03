@@ -65,6 +65,47 @@ var forwardAddCmd = &cobra.Command{
 		remoteAddr, _ := cmd.Flags().GetString("remote-addr")
 		remotePort, _ := cmd.Flags().GetInt("remote-port")
 
+		// Validate type
+		if fwdType != "local" && fwdType != "remote" && fwdType != "dynamic" {
+			return fmt.Errorf("invalid forward type %q: must be local, remote, or dynamic", fwdType)
+		}
+
+		// Validate ports
+		if localPort < 1 || localPort > 65535 {
+			return fmt.Errorf("invalid local port %d: must be 1-65535", localPort)
+		}
+
+		// Validate fields based on type
+		switch fwdType {
+		case "local":
+			if localAddr == "" || localAddr == "0.0.0.0" {
+				localAddr = "0.0.0.0"
+			}
+			if remoteAddr == "" {
+				return fmt.Errorf("remote-addr is required for local forward")
+			}
+			if remotePort < 1 || remotePort > 65535 {
+				return fmt.Errorf("invalid remote port %d: must be 1-65535", remotePort)
+			}
+		case "remote":
+			if remoteAddr == "" {
+				return fmt.Errorf("remote-addr is required for remote forward")
+			}
+			if remotePort < 1 || remotePort > 65535 {
+				return fmt.Errorf("invalid remote port %d: must be 1-65535", remotePort)
+			}
+			if localAddr == "" {
+				localAddr = "0.0.0.0"
+			}
+		case "dynamic":
+			if localAddr == "" || localAddr == "0.0.0.0" {
+				localAddr = "0.0.0.0"
+			}
+			// dynamic doesn't use target fields — clear them
+			remoteAddr = ""
+			remotePort = 0
+		}
+
 		fwd := &model.Forward{
 			ServerID:   server.ID,
 			Type:       model.ForwardType(fwdType),
@@ -74,10 +115,11 @@ var forwardAddCmd = &cobra.Command{
 			RemotePort: remotePort,
 		}
 
-		if err := appDB.AddForward(fwd.ServerID, fwd.Type, fwd.LocalAddr, fwd.LocalPort, fwd.RemoteAddr, fwd.RemotePort); err != nil {
+		fwdID, err := appDB.AddForward(fwd.ServerID, fwd.Type, fwd.LocalAddr, fwd.LocalPort, fwd.RemoteAddr, fwd.RemotePort)
+		if err != nil {
 			return fmt.Errorf("add forward: %w", err)
 		}
-		fmt.Printf("✓ Forward added [%d]\n", fwd.ID)
+		fmt.Printf("✓ Forward added [%d]\n", fwdID)
 		return nil
 	},
 }
@@ -92,9 +134,24 @@ var forwardDeleteCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("invalid forward ID: %s", args[1])
 		}
-		// Verify server exists
-		if _, err := appDB.GetServer(alias); err != nil {
+		server, err := appDB.GetServer(alias)
+		if err != nil {
 			return fmt.Errorf("server not found: %s", alias)
+		}
+		// Verify forward belongs to this server
+		forwards, err := appDB.GetForwards(server.ID)
+		if err != nil {
+			return fmt.Errorf("load forwards: %w", err)
+		}
+		found := false
+		for _, f := range forwards {
+			if f.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("forward %d does not belong to server %s", id, alias)
 		}
 		if err := appDB.DeleteForward(id); err != nil {
 			return fmt.Errorf("delete forward: %w", err)

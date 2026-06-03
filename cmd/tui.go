@@ -128,7 +128,8 @@ func runTUI() error {
 		return appDB.GetForwards(serverID)
 	}
 	tui.SaveForward = func(fwd *model.Forward) error {
-		return appDB.AddForward(fwd.ServerID, fwd.Type, fwd.LocalAddr, fwd.LocalPort, fwd.RemoteAddr, fwd.RemotePort)
+		_, err := appDB.AddForward(fwd.ServerID, fwd.Type, fwd.LocalAddr, fwd.LocalPort, fwd.RemoteAddr, fwd.RemotePort)
+		return err
 	}
 	tui.DeleteForward = func(forwardID int64) error {
 		return appDB.DeleteForward(forwardID)
@@ -199,6 +200,46 @@ func runTUI() error {
 				}
 				appDB.UpdateLastConnected(fresh.Alias)
 			}
+
+			fmt.Println("\n[Press Enter to return to sshkeeper]")
+			buf := make([]byte, 1)
+			os.Stdin.Read(buf)
+
+			servers, _ = appDB.ListServers()
+			continue
+		}
+
+		if result != nil && (result.Action == "tunnel" || result.Action == "tunnel_n") && result.Server != nil {
+			server := result.Server
+			fresh, err := appDB.GetServer(server.Alias)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Server not found: %s\n", server.Alias)
+				servers, _ = appDB.ListServers()
+				continue
+			}
+
+			// Load forwards
+			forwards, err := appDB.GetForwards(fresh.ID)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Load forwards: %v\n", err)
+				servers, _ = appDB.ListServers()
+				continue
+			}
+
+			forwardOnly := result.Action == "tunnel_n"
+			if len(forwards) > 0 {
+				fmt.Printf("Starting tunnel to %s with %d forward(s)...\n", fresh.Alias, len(forwards))
+			} else {
+				fmt.Printf("Starting session to %s...\n", fresh.Alias)
+			}
+
+			sshArgs := ssh.BuildSSHArgs(fresh, forwards, forwardOnly)
+			if err := ssh.ConnectWithArgs(cfg, sshArgs, vaultFunc, fresh); err != nil {
+				fmt.Fprintf(os.Stderr, "Tunnel error: %v\n", err)
+			} else {
+				fmt.Println("Tunnel closed.")
+			}
+			appDB.UpdateLastConnected(fresh.Alias)
 
 			fmt.Println("\n[Press Enter to return to sshkeeper]")
 			buf := make([]byte, 1)

@@ -89,9 +89,9 @@ type Tag struct {
 // RouteHop represents a single jump host in a route.
 // IsProfile: true = use Alias (references a sshkeeper profile), false = use Raw (literal address).
 type RouteHop struct {
-	Alias    string `json:"alias"`
-	Raw      string `json:"raw"`
-	IsProfile bool  `json:"is_profile"`
+	Alias     string `json:"alias"`
+	Raw       string `json:"raw"`
+	IsProfile bool   `json:"is_profile"`
 }
 
 // Route represents the SSH jump route for a server.

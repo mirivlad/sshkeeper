@@ -281,19 +281,59 @@ func (fm *forwardFormModel) runSave() tea.Cmd {
 	return func() tea.Msg {
 		fwdType := model.ForwardType(strings.TrimSpace(fm.inputs[0].Value()))
 		if fwdType == "" {
-			fwdType = model.ForwardLocal
+			return saveDoneMsg{err: fmt.Errorf("forward type is required (local/remote/dynamic)")}
 		}
+		if fwdType != model.ForwardLocal && fwdType != model.ForwardRemote && fwdType != model.ForwardDynamic {
+			return saveDoneMsg{err: fmt.Errorf("invalid forward type %q", fwdType)}
+		}
+
 		localPort := 0
 		fmt.Sscanf(fm.inputs[2].Value(), "%d", &localPort)
 		remotePort := 0
 		fmt.Sscanf(fm.inputs[4].Value(), "%d", &remotePort)
 
+		localAddr := strings.TrimSpace(fm.inputs[1].Value())
+		remoteAddr := strings.TrimSpace(fm.inputs[3].Value())
+
+		if localPort < 1 || localPort > 65535 {
+			return saveDoneMsg{err: fmt.Errorf("invalid listen port %d: must be 1-65535", localPort)}
+		}
+
+		switch fwdType {
+		case model.ForwardLocal:
+			if localAddr == "" {
+				localAddr = "0.0.0.0"
+			}
+			if remoteAddr == "" {
+				return saveDoneMsg{err: fmt.Errorf("target address is required for local forward")}
+			}
+			if remotePort < 1 || remotePort > 65535 {
+				return saveDoneMsg{err: fmt.Errorf("invalid target port %d: must be 1-65535", remotePort)}
+			}
+		case model.ForwardRemote:
+			if remoteAddr == "" {
+				return saveDoneMsg{err: fmt.Errorf("target address is required for remote forward")}
+			}
+			if remotePort < 1 || remotePort > 65535 {
+				return saveDoneMsg{err: fmt.Errorf("invalid target port %d: must be 1-65535", remotePort)}
+			}
+			if localAddr == "" {
+				localAddr = "0.0.0.0"
+			}
+		case model.ForwardDynamic:
+			if localAddr == "" {
+				localAddr = "0.0.0.0"
+			}
+			remoteAddr = ""
+			remotePort = 0
+		}
+
 		fwd := &model.Forward{
 			ServerID:   fm.serverID,
 			Type:       fwdType,
-			LocalAddr:  fm.inputs[1].Value(),
+			LocalAddr:  localAddr,
 			LocalPort:  localPort,
-			RemoteAddr: fm.inputs[3].Value(),
+			RemoteAddr: remoteAddr,
 			RemotePort: remotePort,
 		}
 

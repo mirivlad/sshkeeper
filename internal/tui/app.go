@@ -961,10 +961,34 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if action != nil {
-		m.screen = screenList
-		m.actionMenu = nil
 		// Handle known actions
 		switch *action {
+		case "connect":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.screen = screenList
+				m.actionMenu = nil
+				return m, func() tea.Msg {
+					return connectRequestMsg{server: item.server}
+				}
+			}
+		case "tunnel":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.result = &TUIResult{
+					Server:  item.server,
+					Action:  "tunnel",
+					Servers: []*model.Server{item.server},
+				}
+				return m, tea.Quit
+			}
+		case "tunnel_n":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.result = &TUIResult{
+					Server:  item.server,
+					Action:  "tunnel_n",
+					Servers: []*model.Server{item.server},
+				}
+				return m, tea.Quit
+			}
 		case "delete":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
 				return m, func() tea.Msg {
@@ -1069,7 +1093,7 @@ func (m *tuiModel) viewServerList() string {
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render(fmt.Sprintf("Vault unlocked | %s", testSummary(m.servers))))
 	b.WriteString("\n\n")
-	b.WriteString(listHeaderStyle.Render(fmt.Sprintf("  %-20s %-20s %-34s %-12s %-10s %s", "NAME", "ALIAS", "TARGET", "AUTH", "GROUP", "STATUS")))
+	b.WriteString(listHeaderStyle.Render(fmt.Sprintf("  %-20s %-20s %-34s %-12s %-10s %s", "NAME", "ALIAS", "ROUTE", "AUTH", "GROUP", "STATUS")))
 	b.WriteString("\n")
 
 	if len(m.servers) == 0 {
@@ -1096,6 +1120,16 @@ func (m *tuiModel) viewServerList() string {
 				name = server.Alias
 			}
 			target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
+			routeStr := server.Route.DisplaySummary(target)
+			// If too long, collapse middle hops
+			if len(routeStr) > 34 && len(server.Route.Hops) > 2 {
+				first := server.Route.Hops[0]
+				firstName := first.Alias
+				if !first.IsProfile {
+					firstName = first.Raw
+				}
+				routeStr = fmt.Sprintf("%s → … → %s", firstName, truncate(target, 34-len(firstName)-6))
+			}
 			group := server.GroupName
 			if group == "" {
 				group = "-"
@@ -1104,7 +1138,7 @@ func (m *tuiModel) viewServerList() string {
 				marker,
 				truncate(name, 20),
 				truncate(server.Alias, 20),
-				truncate(target, 34),
+				truncate(routeStr, 34),
 				authLabel(server.AuthMethod),
 				truncate(group, 10),
 				testStatusLabel(server),
@@ -1236,9 +1270,10 @@ func (m *tuiModel) viewSelectedServer(server *model.Server) string {
 	b.WriteString(fmt.Sprintf("  Host: %s\n", server.Host))
 	b.WriteString(fmt.Sprintf("  Port: %d\n", server.Port))
 	b.WriteString(fmt.Sprintf("  User: %s\n", server.User))
+	target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
+	b.WriteString(fmt.Sprintf("  Target: %s\n", target))
 	b.WriteString(fmt.Sprintf("  Auth: %s\n", authLabel(server.AuthMethod)))
 	if len(server.Route.Hops) > 0 {
-		target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
 		b.WriteString(fmt.Sprintf("  Route: %s\n", server.Route.DisplaySummary(target)))
 	} else if server.ProxyJump != "" {
 		b.WriteString(fmt.Sprintf("  ProxyJump: %s\n", server.ProxyJump))

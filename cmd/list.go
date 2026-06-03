@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mirivlad/sshkeeper/internal/model"
+	"github.com/spf13/cobra"
 )
 
 var listCmd = &cobra.Command{

@@ -322,12 +322,15 @@ func (db *DB) GetServerTags(serverID int64) ([]string, error) {
 
 // --- Forward methods ---
 
-func (db *DB) AddForward(serverID int64, fwdType model.ForwardType, localAddr string, localPort int, remoteAddr string, remotePort int) error {
-	_, err := db.conn.Exec(`
+func (db *DB) AddForward(serverID int64, fwdType model.ForwardType, localAddr string, localPort int, remoteAddr string, remotePort int) (int64, error) {
+	result, err := db.conn.Exec(`
 		INSERT INTO forwards (server_id, type, local_addr, local_port, remote_addr, remote_port)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		serverID, fwdType, localAddr, localPort, remoteAddr, remotePort)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
 }
 
 func (db *DB) GetForwards(serverID int64) ([]*model.Forward, error) {

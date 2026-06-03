@@ -120,6 +120,9 @@ type actionMenuModel struct {
 
 func newActionMenuModel(w, h int) *actionMenuModel {
 	items := []list.Item{
+		actionMenuItem{label: "Connect", action: "connect"},
+		actionMenuItem{label: "Start tunnel", action: "tunnel"},
+		actionMenuItem{label: "Tunnel mode (-N)", action: "tunnel_n"},
 		actionMenuItem{label: "Delete", action: "delete"},
 		actionMenuItem{label: "Test connection", action: "test"},
 		actionMenuItem{label: "Tags", action: "tags"},

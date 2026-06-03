@@ -36,7 +36,7 @@ Download the latest Linux x86_64 release from:
 https://github.com/mirivlad/sshkeeper/releases/latest
 
 ```bash
-tar -xzf sshkeeper_v0.1.0_linux_amd64.tar.gz
+tar -xzf sshkeeper_v0.2.0_linux_amd64.tar.gz
 chmod +x sshkeeper-linux-amd64
 sudo install -m 0755 sshkeeper-linux-amd64 /usr/local/bin/sshkeeper
 sshkeeper
@@ -155,6 +155,14 @@ sshkeeper tunnel web --forward-only
 sshkeeper tunnel web
 # Starts SSH session with all configured forwards active.
 ```
+
+## Connect vs Tunnel
+
+- **`sshkeeper connect <alias>`** (or `Enter` in TUI) — standard SSH session, no port forwards.
+- **`sshkeeper forward`** (or `Ctrl+W` in TUI) — manage port forwards for a server.
+- **`sshkeeper tunnel <alias>`** — start SSH session **with** all configured forwards active.
+- **`sshkeeper tunnel <alias> --forward-only`** — start tunnel only (`ssh -N`), useful for background port forwarding.
+- **TUI Action Menu** (`Ctrl+X`) — offers Connect, Start tunnel, and Tunnel mode for the selected server.
 
 Commands that only read profile metadata, such as `list`, `show`, `search`,
 `config path`, `group list`, and `export`, do not require the master password.

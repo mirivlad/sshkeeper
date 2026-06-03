@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/mirivlad/sshkeeper/internal/ssh"
+	"github.com/spf13/cobra"
 )
 
 var sshConfigCmd = &cobra.Command{
