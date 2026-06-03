@@ -64,9 +64,29 @@ func (db *DB) ensureSchema() error {
 		if _, err := db.conn.Exec("ALTER TABLE servers ADD COLUMN route_hops TEXT NOT NULL DEFAULT ''"); err != nil {
 			return fmt.Errorf("add route_hops: %w", err)
 		}
-		// Migrate existing ProxyJump values into route_hops
 		if _, err := db.conn.Exec("UPDATE servers SET route_hops = proxy_jump WHERE proxy_jump != ''"); err != nil {
 			return fmt.Errorf("migrate proxy_jump to route_hops: %w", err)
+		}
+	}
+
+	// Add forwards name/description/enabled columns
+	for _, col := range []struct {
+		name string
+		typ  string
+		def  string
+	}{
+		{"name", "TEXT", "NOT NULL DEFAULT ''"},
+		{"description", "TEXT", "NOT NULL DEFAULT ''"},
+		{"enabled", "INTEGER", "NOT NULL DEFAULT 1"},
+	} {
+		has, err := db.hasColumn("forwards", col.name)
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.conn.Exec(fmt.Sprintf("ALTER TABLE forwards ADD COLUMN %s %s %s", col.name, col.typ, col.def)); err != nil {
+				return fmt.Errorf("add forwards.%s: %w", col.name, err)
+			}
 		}
 	}
 

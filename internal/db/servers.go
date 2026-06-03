@@ -322,20 +322,28 @@ func (db *DB) GetServerTags(serverID int64) ([]string, error) {
 
 // --- Forward methods ---
 
-func (db *DB) AddForward(serverID int64, fwdType model.ForwardType, localAddr string, localPort int, remoteAddr string, remotePort int) (int64, error) {
+func (db *DB) AddForward(fwd *model.Forward) (int64, error) {
 	result, err := db.conn.Exec(`
-		INSERT INTO forwards (server_id, type, local_addr, local_port, remote_addr, remote_port)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		serverID, fwdType, localAddr, localPort, remoteAddr, remotePort)
+		INSERT INTO forwards (server_id, name, description, type, local_addr, local_port, remote_addr, remote_port, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		fwd.ServerID, fwd.Name, fwd.Description, fwd.Type, fwd.LocalAddr, fwd.LocalPort, fwd.RemoteAddr, fwd.RemotePort, fwd.Enabled)
 	if err != nil {
 		return 0, err
 	}
 	return result.LastInsertId()
 }
 
+func (db *DB) UpdateForward(fwd *model.Forward) error {
+	_, err := db.conn.Exec(`
+		UPDATE forwards SET name=?, description=?, type=?, local_addr=?, local_port=?, remote_addr=?, remote_port=?, enabled=?
+		WHERE id=?`,
+		fwd.Name, fwd.Description, fwd.Type, fwd.LocalAddr, fwd.LocalPort, fwd.RemoteAddr, fwd.RemotePort, fwd.Enabled, fwd.ID)
+	return err
+}
+
 func (db *DB) GetForwards(serverID int64) ([]*model.Forward, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, server_id, type, local_addr, local_port, remote_addr, remote_port
+		SELECT id, server_id, name, description, type, local_addr, local_port, remote_addr, remote_port, enabled
 		FROM forwards WHERE server_id=?`, serverID)
 	if err != nil {
 		return nil, err
@@ -345,7 +353,7 @@ func (db *DB) GetForwards(serverID int64) ([]*model.Forward, error) {
 	var forwards []*model.Forward
 	for rows.Next() {
 		var f model.Forward
-		if err := rows.Scan(&f.ID, &f.ServerID, &f.Type, &f.LocalAddr, &f.LocalPort, &f.RemoteAddr, &f.RemotePort); err != nil {
+		if err := rows.Scan(&f.ID, &f.ServerID, &f.Name, &f.Description, &f.Type, &f.LocalAddr, &f.LocalPort, &f.RemoteAddr, &f.RemotePort, &f.Enabled); err != nil {
 			return nil, err
 		}
 		forwards = append(forwards, &f)

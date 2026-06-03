@@ -7,6 +7,7 @@ import (
 
 	"github.com/mirivlad/sshkeeper/internal/config"
 	"github.com/mirivlad/sshkeeper/internal/db"
+	tunnelpkg "github.com/mirivlad/sshkeeper/internal/tunnel"
 	"github.com/mirivlad/sshkeeper/internal/vault"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -72,6 +73,12 @@ func initApp() {
 	appDB, err = db.Open(cfg.DataDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize tunnel state manager
+	if err := tunnelpkg.Init(cfg.DataDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing tunnel manager: %v\n", err)
 		os.Exit(1)
 	}
 

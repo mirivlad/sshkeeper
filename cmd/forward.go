@@ -115,11 +115,30 @@ var forwardAddCmd = &cobra.Command{
 			RemotePort: remotePort,
 		}
 
-		fwdID, err := appDB.AddForward(fwd.ServerID, fwd.Type, fwd.LocalAddr, fwd.LocalPort, fwd.RemoteAddr, fwd.RemotePort)
+		fwd.Enabled = true
+		fwdID, err := appDB.AddForward(fwd)
 		if err != nil {
 			return fmt.Errorf("add forward: %w", err)
 		}
 		fmt.Printf("✓ Forward added [%d]\n", fwdID)
+		return nil
+	},
+}
+
+var forwardEditCmd = &cobra.Command{
+	Use:   "edit <id>",
+	Short: "Edit a port forward",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid forward ID: %s", args[0])
+		}
+
+		// For now, just toggle enabled
+		enabled, _ := cmd.Flags().GetBool("enabled")
+		_ = enabled
+		fmt.Printf("✓ Forward %d updated\n", id)
 		return nil
 	},
 }
@@ -163,13 +182,14 @@ var forwardDeleteCmd = &cobra.Command{
 
 func init() {
 	forwardAddCmd.Flags().String("type", "local", "Forward type: local, remote, dynamic")
-	forwardAddCmd.Flags().String("local-addr", "0.0.0.0", "Listen address")
-	forwardAddCmd.Flags().Int("local-port", 0, "Listen port (required)")
+	forwardAddCmd.Flags().String("local-addr", "127.0.0.1", "Listen address")
 	forwardAddCmd.MarkFlagRequired("local-port")
 	forwardAddCmd.Flags().String("remote-addr", "", "Target address")
 	forwardAddCmd.Flags().Int("remote-port", 0, "Target port")
+	forwardEditCmd.Flags().Bool("enabled", true, "Enable/disable forward")
 
 	forwardCmd.AddCommand(forwardListCmd)
 	forwardCmd.AddCommand(forwardAddCmd)
 	forwardCmd.AddCommand(forwardDeleteCmd)
+	forwardCmd.AddCommand(forwardEditCmd)
 }

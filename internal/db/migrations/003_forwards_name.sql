@@ -1,0 +1,3 @@
+-- v0.2.0: Add name, description, enabled to forwards table.
+-- These columns are added programmatically in ensureSchema() in db.go.
+-- This file is kept for reference.

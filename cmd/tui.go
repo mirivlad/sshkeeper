@@ -8,6 +8,7 @@ import (
 	"github.com/mirivlad/sshkeeper/internal/model"
 	"github.com/mirivlad/sshkeeper/internal/ssh"
 	"github.com/mirivlad/sshkeeper/internal/tui"
+	tunnelpkg "github.com/mirivlad/sshkeeper/internal/tunnel"
 )
 
 func runTUI() error {
@@ -128,8 +129,11 @@ func runTUI() error {
 		return appDB.GetForwards(serverID)
 	}
 	tui.SaveForward = func(fwd *model.Forward) error {
-		_, err := appDB.AddForward(fwd.ServerID, fwd.Type, fwd.LocalAddr, fwd.LocalPort, fwd.RemoteAddr, fwd.RemotePort)
+		_, err := appDB.AddForward(fwd)
 		return err
+	}
+	tui.UpdateForward = func(fwd *model.Forward) error {
+		return appDB.UpdateForward(fwd)
 	}
 	tui.DeleteForward = func(forwardID int64) error {
 		return appDB.DeleteForward(forwardID)
@@ -209,7 +213,7 @@ func runTUI() error {
 			continue
 		}
 
-		if result != nil && (result.Action == "tunnel" || result.Action == "tunnel_n") && result.Server != nil {
+		if result != nil && (result.Action == "tunnel" || result.Action == "tunnel_n" || result.Action == "tunnel_bg") && result.Server != nil {
 			server := result.Server
 			fresh, err := appDB.GetServer(server.Alias)
 			if err != nil {
@@ -218,7 +222,6 @@ func runTUI() error {
 				continue
 			}
 
-			// Load forwards
 			forwards, err := appDB.GetForwards(fresh.ID)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Load forwards: %v\n", err)
@@ -226,7 +229,21 @@ func runTUI() error {
 				continue
 			}
 
-			forwardOnly := result.Action == "tunnel_n"
+			forwardOnly := result.Action == "tunnel_n" || result.Action == "tunnel_bg"
+			background := result.Action == "tunnel_bg"
+
+			if background {
+				// Start detached tunnel process
+				state, err := tunnelpkg.Start(cfg, fresh, forwards, forwardOnly)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Start tunnel: %v\n", err)
+				} else {
+					fmt.Printf("✓ Tunnel started [%d] PID %d → %s\n", state.ID, state.PID, fresh.Alias)
+				}
+				servers, _ = appDB.ListServers()
+				continue
+			}
+
 			if len(forwards) > 0 {
 				fmt.Printf("Starting tunnel to %s with %d forward(s)...\n", fresh.Alias, len(forwards))
 			} else {

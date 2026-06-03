@@ -169,6 +169,7 @@ var (
 	RunTemplateBackground      func(server *model.Server, command string) (string, error)
 	ListForwards               func(serverID int64) ([]*model.Forward, error)
 	SaveForward                func(fwd *model.Forward) error
+	UpdateForward              func(fwd *model.Forward) error
 	DeleteForward              func(forwardID int64) error
 )
 
@@ -191,6 +192,7 @@ const (
 	screenActionMenu
 	screenForwardList
 	screenForwardForm
+	screenTunnelManager
 )
 
 // --- Result type — returned from TUI to caller ---
@@ -221,6 +223,7 @@ type tuiModel struct {
 	tagMode         string
 	tagOldName      string
 	selected        map[string]bool
+	tunnelScreen   *tunnelScreenModel
 	bgResults       []templateRunResult
 	err             error
 	success         string
@@ -360,8 +363,34 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case forwardDeletedMsg:
 		if m.forwardScreen != nil && msg.err == nil {
-			// Reload forwards
 			return m, m.forwardScreen.loadForwards()
+		}
+		return m, nil
+
+	case forwardEditSignal:
+		if m.forwardScreen != nil {
+			if item, ok := m.forwardScreen.list.SelectedItem().(forwardListItem); ok {
+				m.forwardForm = newForwardEditModel(m.forwardScreen.serverID, item.forward, m.width, m.height)
+				m.screen = screenForwardForm
+			}
+		}
+		return m, nil
+
+	case tunnelsLoadedMsg:
+		if m.tunnelScreen != nil {
+			m.tunnelScreen.tunnels = nil
+			for _, item := range msg.items {
+				if ti, ok := item.(tunnelItem); ok {
+					m.tunnelScreen.tunnels = append(m.tunnelScreen.tunnels, ti.state)
+				}
+			}
+			m.tunnelScreen.rebuildList()
+		}
+		return m, nil
+
+	case tunnelStoppedMsg:
+		if m.tunnelScreen != nil && msg.err == nil {
+			return m, m.tunnelScreen.loadTunnels()
 		}
 		return m, nil
 
@@ -467,6 +496,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForwardList(msg)
 		case screenForwardForm:
 			return m.updateForwardForm(msg)
+		case screenTunnelManager:
+			return m.updateTunnelManager(msg)
 		}
 	}
 
@@ -936,6 +967,11 @@ func (m *tuiModel) View() string {
 		if m.forwardForm != nil {
 			b.WriteString(m.forwardForm.View())
 		}
+
+	case screenTunnelManager:
+		if m.tunnelScreen != nil {
+			b.WriteString(m.tunnelScreen.View())
+		}
 	}
 
 	if m.err != nil {
@@ -1004,6 +1040,48 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.Quit
 			}
+		case "tunnel_bg":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.actionMenu = nil
+				m.result = &TUIResult{
+					Server:  item.server,
+					Action:  "tunnel_bg",
+					Servers: []*model.Server{item.server},
+				}
+				return m, tea.Quit
+			}
+		case "forwards":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.forwardScreen = newForwardScreenModel(item.server.ID, item.server.Alias, m.width, m.height)
+				m.screen = screenForwardList
+				m.actionMenu = nil
+				return m, m.forwardScreen.loadForwards()
+			}
+		case "tunnels":
+			m.tunnelScreen = newTunnelScreenModel(m.width, m.height)
+			m.screen = screenTunnelManager
+			m.actionMenu = nil
+			return m, m.tunnelScreen.loadTunnels()
+		case "route":
+			m.err = fmt.Errorf("route management not yet implemented in TUI")
+			m.screen = screenList
+			m.actionMenu = nil
+		case "test":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.screen = screenList
+				m.actionMenu = nil
+				return m, func() tea.Msg {
+					ok, testErr := TestConnection(item.server)
+					return testDoneMsg{ok: ok, err: testErr}
+				}
+			}
+		case "edit":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.form = newEditFormModel(item.server, m.width, m.height)
+				m.screen = screenForm
+				m.actionMenu = nil
+				return m, nil
+			}
 		case "delete":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
 				m.screen = screenList
@@ -1017,19 +1095,6 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return serversLoadedMsg{servers: servers, err: err}
 				}
 			}
-		case "test":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
-				m.screen = screenList
-				m.actionMenu = nil
-				return m, func() tea.Msg {
-					ok, testErr := TestConnection(item.server)
-					return testDoneMsg{ok: ok, err: testErr}
-				}
-			}
-		case "tags":
-			m.screen = screenTags
-			m.actionMenu = nil
-			return m, m.loadTagsCmd()
 		case "import":
 			m.screen = screenList
 			m.actionMenu = nil
@@ -1070,6 +1135,10 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.forwardScreen != nil {
 			return m, m.forwardScreen.deleteSelected()
 		}
+	case tea.KeyCtrlE, tea.KeyEnter:
+		if m.forwardScreen != nil {
+			return m, m.forwardScreen.editSelected()
+		}
 	case tea.KeyRunes:
 		switch msg.String() {
 		case "a", "A":
@@ -1086,6 +1155,37 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.forwardScreen.list, cmd = m.forwardScreen.list.Update(msg)
+	return m, cmd
+}
+
+func (m *tuiModel) updateTunnelManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenList
+		m.tunnelScreen = nil
+		return m, nil
+	case tea.KeyCtrlD:
+		if m.tunnelScreen != nil {
+			return m, m.tunnelScreen.stopSelected()
+		}
+	case tea.KeyCtrlR:
+		if m.tunnelScreen != nil {
+			return m, m.tunnelScreen.loadTunnels()
+		}
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "d", "D", "s", "S":
+			if m.tunnelScreen != nil {
+				return m, m.tunnelScreen.stopSelected()
+			}
+		case "r", "R":
+			if m.tunnelScreen != nil {
+				return m, m.tunnelScreen.loadTunnels()
+			}
+		}
+	}
+	var cmd tea.Cmd
+	m.tunnelScreen.list, cmd = m.tunnelScreen.list.Update(msg)
 	return m, cmd
 }
 
