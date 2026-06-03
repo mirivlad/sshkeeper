@@ -44,6 +44,7 @@ func Open(dataDir string) (*DB, error) {
 }
 
 func (db *DB) ensureSchema() error {
+	// Add startup_command column
 	hasStartupCommand, err := db.hasColumn("servers", "startup_command")
 	if err != nil {
 		return err
@@ -51,6 +52,21 @@ func (db *DB) ensureSchema() error {
 	if !hasStartupCommand {
 		if _, err := db.conn.Exec("ALTER TABLE servers ADD COLUMN startup_command TEXT NOT NULL DEFAULT ''"); err != nil {
 			return fmt.Errorf("add startup_command: %w", err)
+		}
+	}
+
+	// Add route_hops column
+	hasRouteHops, err := db.hasColumn("servers", "route_hops")
+	if err != nil {
+		return err
+	}
+	if !hasRouteHops {
+		if _, err := db.conn.Exec("ALTER TABLE servers ADD COLUMN route_hops TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("add route_hops: %w", err)
+		}
+		// Migrate existing ProxyJump values into route_hops
+		if _, err := db.conn.Exec("UPDATE servers SET route_hops = proxy_jump WHERE proxy_jump != ''"); err != nil {
+			return fmt.Errorf("migrate proxy_jump to route_hops: %w", err)
 		}
 	}
 
