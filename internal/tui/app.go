@@ -394,6 +394,22 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case saveDoneMsg:
+		if m.forwardForm != nil {
+			if msg.err != nil {
+				m.forwardForm.err = msg.err
+				m.forwardForm.saved = false
+				// Stay on screenForwardForm to show error
+				return m, nil
+			}
+			m.forwardForm.saved = true
+			// Return to forward list and reload
+			m.forwardForm = nil
+			m.screen = screenForwardList
+			if m.forwardScreen != nil {
+				return m, m.forwardScreen.loadForwards()
+			}
+			return m, nil
+		}
 		if m.templateForm != nil {
 			if msg.err != nil {
 				m.templateForm.err = msg.err
@@ -952,16 +968,13 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	updated, action := m.actionMenu.Update(msg)
 	m.actionMenu = updated
 
-	if msg.Type == tea.KeyEsc || action == nil && msg.Type != tea.KeyDown && msg.Type != tea.KeyUp && msg.Type != tea.KeyLeft && msg.Type != tea.KeyRight {
-		if msg.Type == tea.KeyEsc {
-			m.screen = screenList
-			m.actionMenu = nil
-			return m, nil
-		}
+	if msg.Type == tea.KeyEsc {
+		m.screen = screenList
+		m.actionMenu = nil
+		return m, nil
 	}
 
 	if action != nil {
-		// Handle known actions
 		switch *action {
 		case "connect":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
@@ -973,6 +986,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "tunnel":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.actionMenu = nil
 				m.result = &TUIResult{
 					Server:  item.server,
 					Action:  "tunnel",
@@ -982,6 +996,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "tunnel_n":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.actionMenu = nil
 				m.result = &TUIResult{
 					Server:  item.server,
 					Action:  "tunnel_n",
@@ -991,6 +1006,8 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "delete":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.screen = screenList
+				m.actionMenu = nil
 				return m, func() tea.Msg {
 					err := DeleteServer(item.server.Alias)
 					if err != nil {
@@ -1002,6 +1019,8 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "test":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.screen = screenList
+				m.actionMenu = nil
 				return m, func() tea.Msg {
 					ok, testErr := TestConnection(item.server)
 					return testDoneMsg{ok: ok, err: testErr}
@@ -1009,14 +1028,23 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "tags":
 			m.screen = screenTags
+			m.actionMenu = nil
 			return m, m.loadTagsCmd()
 		case "import":
+			m.screen = screenList
+			m.actionMenu = nil
 			m.err = fmt.Errorf("import not yet implemented")
 		case "export":
+			m.screen = screenList
+			m.actionMenu = nil
 			m.err = fmt.Errorf("export not yet implemented")
 		case "vault_lock":
+			m.screen = screenList
+			m.actionMenu = nil
 			m.err = fmt.Errorf("vault lock not yet implemented")
 		case "vault_change_pw":
+			m.screen = screenList
+			m.actionMenu = nil
 			m.err = fmt.Errorf("vault change password not yet implemented")
 		}
 		return m, nil

@@ -695,3 +695,111 @@ func TestBackgroundOutputLinesArePaddedAndTabsExpanded(t *testing.T) {
 		}
 	}
 }
+
+func TestForwardSaveSuccessReturnsToList(t *testing.T) {
+	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root"}
+	m := New([]*model.Server{server})
+	m.width = 100
+	m.height = 30
+
+	// Create both forwardScreen and forwardForm to simulate real flow
+	m.forwardScreen = newForwardScreenModel(server.ID, server.Alias, m.width, m.height)
+	m.forwardScreen.forwards = []*model.Forward{}
+	m.forwardScreen.rebuildList()
+	m.forwardForm = newForwardFormModel(server.ID, m.width, m.height)
+	m.forwardForm.serverID = server.ID
+	m.screen = screenForwardForm
+
+	// Fill in form
+	m.forwardForm.inputs[0].SetValue("local")
+	m.forwardForm.inputs[1].SetValue("0.0.0.0")
+	m.forwardForm.inputs[2].SetValue("8080")
+	m.forwardForm.inputs[3].SetValue("internal.web")
+	m.forwardForm.inputs[4].SetValue("80")
+
+	// Simulate saveDoneMsg arriving through tuiModel.Update (as async cmd would)
+	updated, cmd := m.Update(saveDoneMsg{err: nil})
+	m = updated.(*tuiModel)
+
+	// After successful save, forwardForm should be cleared and screen reset
+	if m.forwardForm != nil {
+		t.Fatal("expected forwardForm to be nil after save")
+	}
+	if m.screen != screenForwardList {
+		t.Fatalf("expected screenForwardList, got %v", m.screen)
+	}
+	// cmd should trigger reload
+	if cmd == nil {
+		t.Fatal("expected reload command after save")
+	}
+}
+
+func TestForwardSaveErrorStaysOnForm(t *testing.T) {
+	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root"}
+	m := New([]*model.Server{server})
+	m.width = 100
+	m.height = 30
+
+	// Open forward form directly
+	m.forwardForm = newForwardFormModel(server.ID, m.width, m.height)
+	m.forwardForm.serverID = server.ID
+	m.screen = screenForwardForm
+
+	// Simulate saveDoneMsg with error through tuiModel.Update
+	testErr := fmt.Errorf("save failed")
+	updated, _ := m.Update(saveDoneMsg{err: testErr})
+	m = updated.(*tuiModel)
+
+	// Should stay on form screen with error
+	if m.screen != screenForwardForm {
+		t.Fatalf("expected screenForwardForm after error, got %v", m.screen)
+	}
+	if m.forwardForm == nil {
+		t.Fatal("expected forwardForm to still exist")
+	}
+	if m.forwardForm.err == nil {
+		t.Fatal("expected error to be set")
+	}
+	if m.forwardForm.saved {
+		t.Fatal("expected saved to be false")
+	}
+}
+
+func TestActionMenuClosesOnAllActions(t *testing.T) {
+	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root"}
+	m := New([]*model.Server{server})
+	m.width = 100
+	m.height = 30
+
+	// Test delete closes menu
+	m.actionMenu = newActionMenuModel(m.width, m.height)
+	m.screen = screenActionMenu
+	m.actionMenu.list.Select(3) // Delete
+	DeleteServer = func(alias string) error { return nil }
+	ListServers = func() ([]*model.Server, error) { return []*model.Server{server}, nil }
+	updated, _ := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*tuiModel)
+	if m.actionMenu != nil {
+		t.Fatal("expected actionMenu nil after delete")
+	}
+
+	// Test tags closes menu and goes to tags screen
+	m.actionMenu = newActionMenuModel(m.width, m.height)
+	m.screen = screenActionMenu
+	// Find "Tags" item
+	for i := 0; i < 10; i++ {
+		m.actionMenu.list.Select(i)
+		if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "tags" {
+			break
+		}
+	}
+	ListTags = func() ([]string, error) { return []string{}, nil }
+	updated, _ = m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*tuiModel)
+	if m.actionMenu != nil {
+		t.Fatal("expected actionMenu nil after tags")
+	}
+	if m.screen != screenTags {
+		t.Fatalf("expected screenTags, got %v", m.screen)
+	}
+}
