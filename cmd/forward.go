@@ -60,6 +60,8 @@ var forwardAddCmd = &cobra.Command{
 		}
 
 		fwdType, _ := cmd.Flags().GetString("type")
+		name, _ := cmd.Flags().GetString("name")
+		description, _ := cmd.Flags().GetString("description")
 		localAddr, _ := cmd.Flags().GetString("local-addr")
 		localPort, _ := cmd.Flags().GetInt("local-port")
 		remoteAddr, _ := cmd.Flags().GetString("remote-addr")
@@ -107,12 +109,14 @@ var forwardAddCmd = &cobra.Command{
 		}
 
 		fwd := &model.Forward{
-			ServerID:   server.ID,
-			Type:       model.ForwardType(fwdType),
-			LocalAddr:  localAddr,
-			LocalPort:  localPort,
-			RemoteAddr: remoteAddr,
-			RemotePort: remotePort,
+			ServerID:    server.ID,
+			Name:        name,
+			Description: description,
+			Type:        model.ForwardType(fwdType),
+			LocalAddr:   localAddr,
+			LocalPort:   localPort,
+			RemoteAddr:  remoteAddr,
+			RemotePort:  remotePort,
 		}
 
 		fwd.Enabled = true
@@ -192,6 +196,8 @@ var forwardDeleteCmd = &cobra.Command{
 
 func init() {
 	forwardAddCmd.Flags().String("type", "local", "Forward type: local, remote, dynamic")
+	forwardAddCmd.Flags().String("name", "", "Forward name")
+	forwardAddCmd.Flags().String("description", "", "Forward description")
 	forwardAddCmd.Flags().String("local-addr", "127.0.0.1", "Listen address")
 	forwardAddCmd.MarkFlagRequired("local-port")
 	forwardAddCmd.Flags().String("remote-addr", "", "Target address")
