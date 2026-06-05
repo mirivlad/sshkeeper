@@ -18,6 +18,10 @@ func TestCommandRequiresStartupVaultUnlock(t *testing.T) {
 		{name: "list only reads database", args: []string{"list"}, want: false},
 		{name: "show only reads database", args: []string{"show", "prod"}, want: false},
 		{name: "search only reads database", args: []string{"search", "prod"}, want: false},
+		{name: "tunnel list only reads state", args: []string{"tunnel", "list"}, want: false},
+		{name: "tunnel stop only edits state", args: []string{"tunnel", "stop", "1"}, want: false},
+		{name: "tunnel stop all only edits state", args: []string{"tunnel", "stop-all"}, want: false},
+		{name: "background tunnel does not need startup vault", args: []string{"tunnel", "prod", "--background"}, want: false},
 		{name: "config path only reads config", args: []string{"config", "path"}, want: false},
 		{name: "help", args: []string{"--help"}, want: false},
 	}

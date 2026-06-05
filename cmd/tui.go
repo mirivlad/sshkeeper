@@ -234,6 +234,11 @@ func runTUI() error {
 
 			if background {
 				// Start detached tunnel process
+				if err := validateBackgroundTunnel(fresh, forwards); err != nil {
+					fmt.Fprintf(os.Stderr, "Start tunnel: %v\n", err)
+					servers, _ = appDB.ListServers()
+					continue
+				}
 				state, err := tunnelpkg.Start(cfg, fresh, forwards, forwardOnly)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Start tunnel: %v\n", err)

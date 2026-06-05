@@ -183,8 +183,27 @@ func commandRequiresStartupVaultUnlock(args []string) bool {
 
 	switch args[0] {
 	case "connect", "c", "run", "run-template", "test", "edit", "delete", "tunnel":
+		if args[0] == "tunnel" && tunnelCommandSkipsStartupVaultUnlock(args[1:]) {
+			return false
+		}
 		return true
 	default:
 		return false
 	}
+}
+
+func tunnelCommandSkipsStartupVaultUnlock(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "list", "stop", "stop-all":
+		return true
+	}
+	for _, arg := range args[1:] {
+		if arg == "--background" {
+			return true
+		}
+	}
+	return false
 }

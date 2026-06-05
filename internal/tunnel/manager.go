@@ -2,11 +2,13 @@ package tunnel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/mirivlad/sshkeeper/internal/config"
@@ -22,7 +24,11 @@ var (
 
 // Init initializes the tunnel state manager with the data directory.
 func Init(dir string) error {
+	mu.Lock()
+	defer mu.Unlock()
+
 	dataDir = dir
+	states = map[int64]*model.TunnelState{}
 	return loadStates()
 }
 
@@ -100,6 +106,7 @@ func Start(cfg *config.Config, server *model.Server, forwards []*model.Forward, 
 	copy(args, sshArgs)
 
 	cmd := exec.Command(cfg.SSH.Binary, args...)
+	cmd.Env = os.Environ()
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -126,8 +133,13 @@ func Start(cfg *config.Config, server *model.Server, forwards []*model.Forward, 
 
 	states[id] = state
 	if err := saveStates(); err != nil {
-		// Non-fatal: log but don't fail
-		_ = err
+		delete(states, id)
+		_ = cmd.Process.Kill()
+		return nil, fmt.Errorf("save tunnel state: %w", err)
+	}
+	if err := cmd.Process.Release(); err != nil {
+		delete(states, id)
+		return nil, fmt.Errorf("release tunnel process: %w", err)
 	}
 
 	return state, nil
@@ -188,5 +200,6 @@ func IsRunning(id int64) bool {
 		return false
 	}
 	// Signal 0 just checks if process exists
-	return proc.Signal(os.Signal(nil)) == nil
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
