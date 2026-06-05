@@ -30,11 +30,28 @@ port forwarding management.
 
 ## Install
 
-### Install from release
+### Build from source
 
-Download the latest Linux x86_64 release from:
+```bash
+git clone git@git.mirv.top:mirivlad/sshkeeper.git
+cd sshkeeper
+go build -o ~/.local/bin/sshkeeper .
+```
 
-https://github.com/mirivlad/sshkeeper/releases/latest
+Or use the build scripts:
+
+```bash
+./build.sh          # Build binary to bin/
+./release.sh        # Build release tarballs to dist/
+```
+
+Requirements: Go 1.25+, Linux x86_64, system OpenSSH.
+
+**Source repositories:**
+- Main public: [github.com/mirivlad/sshkeeper](https://github.com/mirivlad/sshkeeper)
+- Mirror/dev: `git@git.mirv.top:mirivlad/sshkeeper`
+
+### Install from release (after v0.2.0 publication)
 
 ```bash
 tar -xzf sshkeeper_v0.2.0_linux_amd64.tar.gz
@@ -42,16 +59,6 @@ chmod +x sshkeeper-linux-amd64
 sudo install -m 0755 sshkeeper-linux-amd64 /usr/local/bin/sshkeeper
 sshkeeper
 ```
-
-### Build from source
-
-```bash
-git clone https://github.com/mirivlad/sshkeeper.git
-cd sshkeeper
-go build -o ~/.local/bin/sshkeeper .
-```
-
-Requirements: Go 1.25+, Linux x86_64, system OpenSSH.
 
 ## First Run
 
@@ -68,41 +75,62 @@ You can also initialize explicitly:
 sshkeeper init
 ```
 
-## Common CLI Commands
+## TUI
 
-```bash
-# Add profiles with flags
-sshkeeper add web --host 10.0.0.10 --user deploy --auth key
-sshkeeper add prod --host 10.0.0.20 --user root --auth password
-sshkeeper add bastion --host bastion.example.org --user admin --auth key_passphrase --identity-file ~/.ssh/id_rsa
+Running `sshkeeper` without arguments opens the TUI.
 
-# Or use the interactive CLI prompt
-sshkeeper add
+### Main Window
 
-# Inspect profiles
-sshkeeper list
-sshkeeper show web
-sshkeeper search prod
+```
+sshkeeper  0 servers
+Vault unlocked | 0 OK | 0 FAIL
 
-# Connect and test
-sshkeeper connect web
-sshkeeper c web
-sshkeeper test web
-sshkeeper run web "uptime"
+  NAME                 ALIAS                ROUTE                              AUTH         GROUP      STATUS
 
-# Groups and templates
-sshkeeper group list
-sshkeeper template list
-sshkeeper template add uptime "uptime"
-sshkeeper run-template web uptime
+  No servers yet. Press Ctrl+A to add one.
 
-# Tags and startup command
-sshkeeper add web --host 10.0.0.10 --user deploy --auth key --tags prod,web --startup-command "tmux attach -t ops"
-sshkeeper edit web --tags prod,web --startup-command "tmux attach -t ops"
+  Enter: connect | Ctrl+X: actions | Ctrl+A: add | Ctrl+E: edit
+  Ctrl+F: search | Ins: select | ?: hotkeys | F1: help | Ctrl+Q: quit
+```
 
-# OpenSSH config
-sshkeeper ssh-config generate
-sshkeeper ssh-config install-include
+### Quick Help (?)
+
+Press `?` on any screen for a compact hotkey reference.
+
+### Full Help (F1)
+
+Press `F1` on any screen for full documentation including routes, port
+forwarding, tunnels, and vault.
+
+### Key Reference
+
+| Key | Action |
+|-----|--------|
+| Enter | Connect to selected server |
+| Ctrl+A | Add server |
+| Ctrl+E | Edit server |
+| Ctrl+F | Search |
+| Ctrl+W | Manage port forwards for selected server |
+| Ctrl+X | Action menu (connect, tunnels, forwards, route, test, edit, delete) |
+| Ins | Select / deselect a server |
+| ? | Quick help (hotkeys) |
+| F1 | Full documentation |
+| Ctrl+Q / Ctrl+C | Quit |
+
+Templates are global entities and can run on any server. Foreground template
+runs leave the TUI, show the SSH session in the terminal, and then return to the
+TUI. Background runs execute the command and show per-server output in a result
+screen.
+
+In add/edit forms:
+
+| Key | Action |
+|-----|--------|
+| Tab / Down | Next field |
+| Shift+Tab / Up | Previous field |
+| `/` on Auth Method or Group | Pick from list |
+| Enter | Move to action / activate |
+| Esc | Back |
 
 ## Routes, Tunnels, and Port Forwards
 
@@ -145,9 +173,12 @@ sshkeeper forward list web
 ```
 
 Forward types:
-- **Local** — port on your machine → service reachable from SSH server
-- **Remote** — port on SSH server → service on your machine
-- **SOCKS** — local dynamic SOCKS proxy through SSH
+
+| Type | Description |
+|------|-------------|
+| **Local** | Port on your machine → service reachable from SSH server |
+| **Remote** | Port on SSH server → service on your machine |
+| **SOCKS** | Local dynamic SOCKS proxy through SSH |
 
 Default listen address is `127.0.0.1` (localhost only). Use `0.0.0.0` with caution — the port will be accessible from the network.
 
@@ -175,75 +206,13 @@ sshkeeper tunnel stop <id>
 ### Connect vs Tunnel
 
 | Action | Command | TUI | Description |
-|---|---|---|---|
+|--------|---------|-----|-------------|
 | Connect | `sshkeeper connect <alias>` | `Enter` | Standard SSH session, no port forwards |
 | Connect with tunnels | `sshkeeper tunnel <alias>` | Action menu → Connect with tunnels | SSH session with all enabled forwards active |
 | Start tunnels only | `sshkeeper tunnel <alias> --forward-only` | Action menu → Start tunnels only | Foreground tunnel, no shell |
 | Start tunnels in background | `sshkeeper tunnel <alias> --background` | Action menu → Start tunnels in background | Detached tunnel process with PID tracking |
 | Manage port forwards | `sshkeeper forward` | Action menu → Manage port forwards | Add/edit/delete forward rules |
 | Manage tunnels | `sshkeeper tunnel list/stop` | Action menu → Manage tunnels | View running tunnels, stop, restart |
-
-Commands that only read profile metadata, such as `list`, `show`, `search`,
-`config path`, `group list`, and `export`, do not require the master password.
-Commands that need secrets ask for the master password in that process. Adding
-`key` or `agent` profiles does not require unlocking the vault; adding
-`password` or `key_passphrase` profiles asks for the master password before
-storing the secret.
-
-## Руководство
-
-Подробная инструкция с примерами сценариев: [docs/guide.md](docs/guide.md)
-
-## TUI
-
-Running `sshkeeper` without arguments opens the TUI.
-
-## Screenshots
-
-### Main Window
-
-![sshkeeper main window](docs/screenshots/screen_1.png)
-
-### Edit Server
-
-![sshkeeper edit server form](docs/screenshots/screen_2.png)
-
-![sshkeeper group picker](docs/screenshots/screen_3.png)
-
-### Template Manager
-
-![sshkeeper template manager](docs/screenshots/screen_4.png)
-
-### Route and Forwarding
-
-![sshkeeper route screen](docs/screenshots/screen_5_route.png)
-
-![sshkeeper port forwards](docs/screenshots/screen_6_forwards.png)
-
-| Key | Action |
-| --- | --- |
-| Enter | Connect to selected server |
-| Ctrl+A | Add server |
-| Ctrl+E | Edit server |
-| Ctrl+F | Search |
-| Ctrl+X | Action menu (connect, tunnels, forwards, route, test, edit, delete) |
-| ? / F1 | Full help screen |
-| Ctrl+Q / Ctrl+C | Quit |
-
-Templates are global entities and can run on any server. Foreground template
-runs leave the TUI, show the SSH session in the terminal, and then return to the
-TUI. Background runs execute the command and show per-server output in a result
-screen.
-
-In add/edit forms:
-
-| Key | Action |
-| --- | --- |
-| Tab / Down | Next field |
-| Shift+Tab / Up | Previous field |
-| `/` on Auth Method or Group | Pick from list |
-| Enter | Move to action / activate |
-| Esc | Back |
 
 ## Vault
 
@@ -281,7 +250,7 @@ before using it for high-risk environments.
 `sshkeeper` uses XDG-style app directories:
 
 | Data | Default path |
-| --- | --- |
+|------|-------------|
 | Config | `~/.config/sshkeeper/config.toml` |
 | Database | `~/.local/share/sshkeeper/sshkeeper.db` |
 | Vault | `~/.local/share/sshkeeper/vault.bin` |
@@ -310,8 +279,11 @@ sshkeeper/
 ├── internal/ssh/        # OpenSSH command building, PTY prompt handling
 ├── internal/tui/        # Bubble Tea UI
 ├── internal/vault/      # Encrypted vault
+├── internal/tunnel/     # Tunnel state management
+├── docs/guide.md        # User guide
 ├── build.sh             # Build binary to bin/
 ├── release.sh           # Build release tarballs to dist/
+└── main.go
 ```
 
 ## License

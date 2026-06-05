@@ -194,6 +194,7 @@ const (
 	screenForwardForm
 	screenTunnelManager
 	screenConfirm
+	screenFullHelp
 )
 
 // --- Result type — returned from TUI to caller ---
@@ -237,6 +238,7 @@ type tuiModel struct {
 	forwardForm     *forwardFormModel
 	confirmMsg      string
 	confirmAction   func() tea.Cmd
+	fullHelp        *fullHelpModel
 }
 func New(servers []*model.Server) *tuiModel {
 	items := make([]list.Item, len(servers))
@@ -516,6 +518,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateTunnelManager(msg)
 		case screenConfirm:
 			return m.updateConfirm(msg)
+		case screenFullHelp:
+			return m.updateFullHelp(msg)
 		}
 	}
 
@@ -609,8 +613,8 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyF1:
-		m.helpScreen = newHelpScreenModel(m.width, m.height)
-		m.screen = screenHelp
+		m.fullHelp = newFullHelpModel(m.width, m.height)
+		m.screen = screenFullHelp
 		return m, nil
 
 	case tea.KeyCtrlW:
@@ -971,6 +975,11 @@ func (m *tuiModel) View() string {
 			b.WriteString(m.helpScreen.View())
 		}
 
+	case screenFullHelp:
+		if m.fullHelp != nil {
+			b.WriteString(m.fullHelp.View())
+		}
+
 	case screenActionMenu:
 		if m.actionMenu != nil {
 			b.WriteString(m.actionMenu.View())
@@ -1278,6 +1287,19 @@ func (m *tuiModel) viewConfirm() string {
 		{Key: "Esc / N", Action: "no"},
 	}, m.width))
 	return b.String()
+}
+
+func (m *tuiModel) updateFullHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	updated, _ := m.fullHelp.Update(msg)
+	if fh, ok := updated.(*fullHelpModel); ok {
+		m.fullHelp = fh
+	}
+	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter {
+		m.screen = screenList
+		m.fullHelp = nil
+		return m, nil
+	}
+	return m, nil
 }
 
 func (m *tuiModel) updateForwardForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1759,14 +1781,15 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 	if hasBackgroundResult {
 		items = append(items, helpItem{Key: "Esc", Action: "clear result"})
 	}
-	items = append(items,
+		items = append(items,
 		helpItem{Key: "Enter", Action: "connect"},
 		helpItem{Key: "Ctrl+X", Action: "actions"},
 		helpItem{Key: "Ctrl+A", Action: "add"},
 		helpItem{Key: "Ctrl+E", Action: "edit"},
 		helpItem{Key: "Ctrl+F", Action: "search"},
 		helpItem{Key: "Ins", Action: insAction},
-		helpItem{Key: "?", Action: "help"},
+		helpItem{Key: "?", Action: "hotkeys"},
+		helpItem{Key: "F1", Action: "help"},
 		helpItem{Key: "Ctrl+Q", Action: "quit"},
 	)
 	return items

@@ -480,7 +480,7 @@ func (fm *forwardFormModel) View() string {
 	b.WriteString(fm.descInput.View())
 	b.WriteString("\n\n")
 
-	// Type selector — visible radio items
+	// Type selector — visible radio items with descriptions
 	b.WriteString(sectionStyle.Render("Type"))
 	b.WriteString("\n")
 	for i, t := range forwardTypes {
@@ -493,6 +493,17 @@ func (fm *forwardFormModel) View() string {
 		line := fmt.Sprintf("%s%d. %-8s  %s", prefix, i+1, t.label, t.description)
 		b.WriteString(style.Render(line))
 		b.WriteString("\n")
+	}
+	// Show human-readable explanation for selected type
+	if fm.typeIdx >= 0 && fm.typeIdx < len(forwardTypes) {
+		explanations := map[model.ForwardType]string{
+			model.ForwardLocal:   "Opens a local port on this machine and forwards it through SSH to the target address.",
+			model.ForwardRemote:  "Opens a port on the remote SSH server and forwards it back to this machine.",
+			model.ForwardDynamic: "Creates a local SOCKS proxy that routes all traffic through the SSH server.",
+		}
+		if exp, ok := explanations[forwardTypes[fm.typeIdx].value]; ok {
+			b.WriteString(helpStyle.Render(fmt.Sprintf("  %s\n", exp)))
+		}
 	}
 	b.WriteString("\n")
 

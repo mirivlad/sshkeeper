@@ -40,21 +40,15 @@ sshkeeper — это консольный менеджер SSH-подключе�
 - XChaCha20-Poly1305 (шифрование vault)
 - Argon2id (KDF для мастер-пароля)
 
-**Исходники:** `git.mirv.top:mirivlad/sshkeeper`
+**Исходники:**
+- Основной публичный репозиторий: [github.com/mirivlad/sshkeeper](https://github.com/mirivlad/sshkeeper)
+- Зеркало/рабочий репозиторий: `git@git.mirv.top:mirivlad/sshkeeper`
 
 ---
 
 ## Установка
 
-### Из релиза
-
-```bash
-tar -xzf sshkeeper_v0.2.0_linux_amd64.tar.gz
-chmod +x sshkeeper-linux-amd64
-sudo install -m 0755 sshkeeper-linux-amd64 /usr/local/bin/sshkeeper
-```
-
-### Из исходников
+### Из исходников (основной способ)
 
 ```bash
 git clone git@git.mirv.top:mirivlad/sshkeeper.git
@@ -63,12 +57,21 @@ go build -o ~/.local/bin/sshkeeper .
 ```
 
 Или через скрипт:
+
 ```bash
 ./build.sh          # сборка в bin/
 ./release.sh        # сборка релизных архивов в dist/
 ```
 
 **Требования:** Go 1.25+, Linux x86_64, системный OpenSSH.
+
+### Из релиза (после публикации v0.2.0)
+
+```bash
+tar -xzf sshkeeper_v0.2.0_linux_amd64.tar.gz
+chmod +x sshkeeper-linux-amd64
+sudo install -m 0755 sshkeeper-linux-amd64 /usr/local/bin/sshkeeper
+```
 
 ---
 
@@ -113,51 +116,118 @@ Vault unlocked | 0 OK | 0 FAIL
   No servers yet. Press Ctrl+A to add one.
 
   Enter: connect | Ctrl+X: actions | Ctrl+A: add | Ctrl+E: edit
-  Ctrl+F: search | Ins: select | ?: help | Ctrl+Q: quit
+  Ctrl+F: search | Ins: select | ?: hotkeys | F1: help | Ctrl+Q: quit
 ```
 
 **Столбцы:**
-- **NAME** — отображаемое имя сервера
-- **ALIAS** — уникальный идентификатор
-- **ROUTE** — маршрут подключения:
-  - `  direct → user@host:port` — прямое подключение
-  - `→ bastion → user@host:port` — через бастион
-  - `→ bastion → … → user@host:port` — через цепочку
-- **AUTH** — метод аутентификации (key/password/agent/key+phrase)
-- **GROUP** — группа сервера
-- **STATUS** — результат последнего теста (OK/FAIL/?)
+
+| Столбец | Описание |
+|---------|----------|
+| NAME | Отображаемое имя сервера |
+| ALIAS | Уникальный идентификатор |
+| ROUTE | Маршрут подключения (● direct, → via, ⇒ chain) |
+| AUTH | Метод аутентификации (key/password/agent/key+phrase) |
+| GROUP | Группа сервера |
+| STATUS | Результат последнего теста (OK/FAIL/?) |
 
 **Навигация:**
-- `↑/↓` — перемещение по списку
-- `Enter` — подключиться к серверу
-- `Ctrl+A` — добавить сервер
-- `Ctrl+E` — редактировать сервер
-- `Ctrl+X` — меню действий
-- `Ctrl+F` — поиск
-- `Ins` — выбрать/снять выбор (для групповых операций)
-- `?` или `F1` — полная справка
-- `Ctrl+Q` — выход
 
-### Экран помощи
+| Клавиша | Действие |
+|---------|----------|
+| `↑/↓` | Перемещение по списку |
+| `Enter` | Подключиться к серверу |
+| `Ctrl+A` | Добавить сервер |
+| `Ctrl+E` | Редактировать сервер |
+| `Ctrl+X` | Меню действий |
+| `Ctrl+F` | Поиск |
+| `Ins` | Выбрать/снять выбор |
+| `?` | Краткая справка по клавишам |
+| `F1` | Полная справка по приложению |
+| `Ctrl+Q` | Выход |
 
-Нажмите `?` или `F1` на любом экране:
+### Быстрая справка по клавишам
+
+Нажмите `?` на любом экране:
 
 ```
-sshkeeper — Help
+sshkeeper — Quick Help
 
-  Enter         Connect to server
-  ↑/↓           Navigate list
-  Tab/↓         Next field
-  Shift+Tab/↑   Previous field
-  /             Open dropdown picker
-  Esc           Back / Cancel
-  Ctrl+A        Add server
-  Ctrl+E        Edit server
-  Ctrl+W        Manage port forwards
-  Ctrl+X        Action menu
-  ?             This help screen
-  Ctrl+Q        Quit
+  Navigation
+  ↑/↓             Move through list
+  PgUp/PgDn       Scroll page
+  Home/End        Jump to start/end
+
+  Actions
+  Enter           Select / Confirm / Open
+  Esc             Back / Cancel / Close
+  Tab / ↓         Next field
+  Shift+Tab / ↑   Previous field
+  /               Open dropdown picker
+
+  Server list
+  Enter           Connect to server
+  Ctrl+A          Add server
+  Ctrl+E          Edit server
+  Ctrl+F          Search
+  Ctrl+X          Action menu
+  Ins             Select / deselect
+
+  Port forwards
+  Ctrl+A          Add forward
+  Enter / Ctrl+E  Edit forward
+  Ctrl+D          Delete forward
+
+  Other
+  ?               This quick help
+  F1              Full documentation
+
+  Esc / Enter / ? / q — close
 ```
+
+### Полная справка по приложению
+
+Нажмите `F1` на любом экране. Это полная документация по sshkeeper:
+
+```
+sshkeeper — Full Help
+
+  What is sshkeeper
+  sshkeeper is a Linux console SSH connection manager.
+  It stores server profiles, secrets, and launches the system ssh client.
+
+  Navigation
+  ↑/↓             Move through list
+  Tab/↓           Next field
+  Shift+Tab/↑     Previous field
+  /               Open dropdown picker
+
+  Global actions
+  Enter           Select / Confirm / Open
+  Esc             Back / Cancel / Close
+  ?               Quick help (hotkeys)
+  F1              Full documentation
+  Ctrl+Q          Quit
+
+  Server list
+  Enter           Connect to server
+  Ctrl+A          Add server
+  Ctrl+E          Edit server
+  Ctrl+F          Search
+  Ctrl+X          Action menu
+  Ins             Select / deselect
+
+  ...
+
+  ↑/↓ scroll — q/Esc/Enter close
+```
+
+**Навигация по полной справке:**
+
+| Клавиша | Действие |
+|---------|----------|
+| `↑/↓` | Прокрутка |
+| `PgUp/PgDn` | Прокрутка по странице |
+| `q` / `Esc` / `Enter` | Закрыть справку |
 
 ---
 
@@ -190,13 +260,16 @@ Add Server
 ```
 
 **Навигация по форме:**
-- `Tab` или `↓` — следующее поле
-- `Shift+Tab` или `↑` — предыдущее поле
-- `/` на поле Auth Method — выбрать из списка (password/key/key_passphrase/agent)
-- `/` на поле Group — выбрать из существующих групп
-- `Enter` на кнопке Test — проверить подключение
-- `Enter` на кнопке Save — сохранить
-- `Esc` — отмена
+
+| Клавиша | Действие |
+|---------|----------|
+| `Tab` или `↓` | Следующее поле |
+| `Shift+Tab` или `↑` | Предыдущее поле |
+| `/` на Auth Method | Выбрать из списка (password/key/key_passphrase/agent) |
+| `/` на Group | Выбрать из существующих групп |
+| `Enter` на Test | Проверить подключение |
+| `Enter` на Save | Сохранить |
+| `Esc` | Отмена |
 
 ### Редактирование сервера
 
@@ -234,7 +307,7 @@ Add Server
 Сервер подключается напрямую:
 
 ```
-ROUTE:   direct → root@web.example.org:22
+ROUTE:   ● direct → root@web.example.org:22
 ```
 
 ### Через бастион
@@ -250,7 +323,7 @@ ROUTE:   → bastion → root@internal.web:22
 Сервер доступен через несколько jump hosts:
 
 ```
-ROUTE:   → bastion → dmz-gw → … → root@secure.internal:22
+ROUTE:   ⇒ bastion → dmz-gw → … → root@secure.internal:22
 ```
 
 ### Настройка маршрута
@@ -261,6 +334,7 @@ ROUTE:   → bastion → dmz-gw → … → root@secure.internal:22
 3. Или введите адрес напрямую: `user@bastion.example.com:2222`
 
 **Через CLI:**
+
 ```bash
 sshkeeper route set web --jumps bastion
 sshkeeper route set prod --jumps bastion,dmz-gw
@@ -274,7 +348,7 @@ sshkeeper route clear web
 
 ### Ключевое различие
 
-- **Port Forward** — сохранённое правило проброса порода. Просто конфигурация, не запускает процесс.
+- **Port Forward** — сохранённое правило проброса порта. Просто конфигурация, не запускает процесс.
 - **Tunnel** — запущенный SSH-процесс, который активирует один или несколько forwards.
 
 Аналогия: forward — это рецепт, tunnel — это готовое блюдо.
@@ -310,10 +384,13 @@ Port Forwards — web
 ```
 
 **Действия:**
-- `Ctrl+A` — добавить forward
-- `Enter` или `Ctrl+E` — редактировать выбранный
-- `Ctrl+D` — удалить (с подтверждением)
-- `Esc` — назад
+
+| Клавиша | Действие |
+|---------|----------|
+| `Ctrl+A` | Добавить forward |
+| `Enter` или `Ctrl+E` | Редактировать выбранный |
+| `Ctrl+D` | Удалить (с подтверждением) |
+| `Esc` | Назад |
 
 ### Добавление forward
 
@@ -331,6 +408,8 @@ Add Port Forward
     2. Remote   port on SSH server → service on my machine
     3. SOCKS    local dynamic SOCKS proxy through SSH
 
+  Opens a local port on this machine and forwards it through SSH to the target address.
+
   Listen Address:     127.0.0.1
   Listen Port:        15432
   Target Host:        127.0.0.1
@@ -346,9 +425,12 @@ Add Port Forward
 ```
 
 **Поля зависят от типа:**
-- **Local:** Listen Address, Listen Port, Target Host, Target Port
-- **Remote:** Remote Listen Addr, Remote Listen Port, Local Target Host, Local Target Port
-- **SOCKS:** Listen Address, Listen Port (target поля скрыты)
+
+| Тип | Поля |
+|-----|------|
+| Local | Listen Address, Listen Port, Target Host, Target Port |
+| Remote | Remote Listen Addr, Remote Listen Port, Local Target Host, Local Target Port |
+| SOCKS | Listen Address, Listen Port (target поля скрыты) |
 
 **По умолчанию Listen Address = `127.0.0.1`** (только локальный доступ). Если введёте `0.0.0.0`, появится предупреждение.
 
@@ -362,6 +444,7 @@ Add Port Forward
    - **Start tunnels in background** — туннель в фоне с PID
 
 **Через CLI:**
+
 ```bash
 # SSH-сессия с туннелями
 sshkeeper tunnel web
@@ -389,6 +472,7 @@ Tunnel Manager
 ```
 
 **Через CLI:**
+
 ```bash
 sshkeeper tunnel list
 sshkeeper tunnel stop <id>
@@ -602,21 +686,24 @@ sshkeeper connect secure
 | `Ctrl+F` | Поиск |
 | `Ctrl+X` | Меню действий |
 | `Ins` | Выбрать/снять выбор |
-| `?` / `F1` | Помощь |
+| `?` | Краткая справка по клавишам |
+| `F1` | Полная справка по приложению |
 | `Ctrl+Q` | Выход |
 
 ### Меню действий (Ctrl+X)
 
-- **Connect** — стандартное SSH-подключение
-- **Connect with tunnels** — SSH + все активные forwards
-- **Start tunnels only** — туннель без shell
-- **Start tunnels in background** — фоновый туннель
-- **Manage port forwards** — управление forwards
-- **Manage tunnels** — список туннелей
-- **Manage route** — настройка маршрута
-- **Test connection** — проверка подключения
-- **Edit** — редактирование сервера
-- **Delete** — удаление (с подтверждением)
+| Действие | Описание |
+|----------|----------|
+| Connect | Стандартное SSH-подключение |
+| Connect with tunnels | SSH + все активные forwards |
+| Start tunnels only | Туннель без shell |
+| Start tunnels in background | Фоновый туннель |
+| Manage port forwards | Управление forwards |
+| Manage tunnels | Список туннелей |
+| Manage route | Настройка маршрута |
+| Test connection | Проверка подключения |
+| Edit | Редактирование сервера |
+| Delete | Удаление (с подтверждением) |
 
 ### Формы (добавление/редактирование)
 
