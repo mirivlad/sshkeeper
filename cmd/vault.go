@@ -118,40 +118,7 @@ var vaultChangePasswordCmd = &cobra.Command{
 	Use:   "change-password",
 	Short: "Change master password",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		v := getOrCreateVault()
-
-		if err := unlockVaultForCommand(v); err != nil {
-			return err
-		}
-
-		fmt.Print("New master password: ")
-		pw1, err := term.ReadPassword(int(syscall.Stdin))
-		fmt.Println()
-		if err != nil {
-			return fmt.Errorf("read password: %w", err)
-		}
-
-		if len(pw1) == 0 {
-			return fmt.Errorf("password cannot be empty")
-		}
-
-		fmt.Print("Repeat new master password: ")
-		pw2, err := term.ReadPassword(int(syscall.Stdin))
-		fmt.Println()
-		if err != nil {
-			return fmt.Errorf("read password: %w", err)
-		}
-
-		if string(pw1) != string(pw2) {
-			return fmt.Errorf("passwords do not match")
-		}
-
-		if err := v.ChangePassword(string(pw1)); err != nil {
-			return fmt.Errorf("change password: %w", err)
-		}
-
-		fmt.Println("Master password changed.")
-		return nil
+		return changeVaultPasswordInteractive()
 	},
 }
 
@@ -217,6 +184,43 @@ func unlockVaultForCommand(v *vault.Vault) error {
 	if err := v.Unlock(string(pw)); err != nil {
 		return fmt.Errorf("unlock vault: %w", err)
 	}
+	return nil
+}
+
+func changeVaultPasswordInteractive() error {
+	v := getOrCreateVault()
+
+	if err := unlockVaultForCommand(v); err != nil {
+		return err
+	}
+
+	fmt.Print("New master password: ")
+	pw1, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return fmt.Errorf("read password: %w", err)
+	}
+
+	if len(pw1) == 0 {
+		return fmt.Errorf("password cannot be empty")
+	}
+
+	fmt.Print("Repeat new master password: ")
+	pw2, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println()
+	if err != nil {
+		return fmt.Errorf("read password: %w", err)
+	}
+
+	if string(pw1) != string(pw2) {
+		return fmt.Errorf("passwords do not match")
+	}
+
+	if err := v.ChangePassword(string(pw1)); err != nil {
+		return fmt.Errorf("change password: %w", err)
+	}
+
+	fmt.Println("Master password changed.")
 	return nil
 }
 

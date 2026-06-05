@@ -819,3 +819,138 @@ func TestActionMenuClosesOnAllActions(t *testing.T) {
 		t.Fatalf("expected screenForwardList, got %v", m.screen)
 	}
 }
+
+func TestActionMenuManageRouteOpensRouteField(t *testing.T) {
+	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root", AuthMethod: model.AuthKey}
+	m := New([]*model.Server{server})
+	m.width = 100
+	m.height = 30
+	m.actionMenu = newActionMenuModel(m.width, m.height)
+	m.screen = screenActionMenu
+	for i := 0; i < len(m.actionMenu.list.Items()); i++ {
+		m.actionMenu.list.Select(i)
+		if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "route" {
+			break
+		}
+	}
+
+	updated, _ := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*tuiModel)
+
+	if m.err != nil && strings.Contains(m.err.Error(), "not yet implemented") {
+		t.Fatalf("route action should not be a stub: %v", m.err)
+	}
+	if m.screen != screenForm || m.form == nil {
+		t.Fatalf("expected route action to open edit form, screen=%v form=%v", m.screen, m.form)
+	}
+	if m.form.focusIdx != 7 {
+		t.Fatalf("expected route field focus index 7, got %d", m.form.focusIdx)
+	}
+}
+
+func TestActionMenuImportUsesCallbackAndRefreshesList(t *testing.T) {
+	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root", AuthMethod: model.AuthKey}
+	imported := false
+	ImportServers = func() (int, error) {
+		imported = true
+		return 2, nil
+	}
+	ListServers = func() ([]*model.Server, error) {
+		return []*model.Server{server}, nil
+	}
+	defer func() {
+		ImportServers = nil
+		ListServers = nil
+	}()
+
+	m := New([]*model.Server{})
+	m.width = 100
+	m.height = 30
+	m.actionMenu = newActionMenuModel(m.width, m.height)
+	m.screen = screenActionMenu
+	for i := 0; i < len(m.actionMenu.list.Items()); i++ {
+		m.actionMenu.list.Select(i)
+		if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "import" {
+			break
+		}
+	}
+
+	updated, cmd := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*tuiModel)
+	if cmd == nil {
+		t.Fatal("expected import command")
+	}
+	msg := cmd()
+	updated, _ = m.Update(msg)
+	m = updated.(*tuiModel)
+
+	if !imported {
+		t.Fatal("expected import callback to run")
+	}
+	if len(m.servers) != 1 || m.servers[0].Alias != "web" {
+		t.Fatalf("expected refreshed server list, got %#v", m.servers)
+	}
+	if !strings.Contains(m.success, "Imported 2") {
+		t.Fatalf("expected import success message, got %q", m.success)
+	}
+}
+
+func TestActionMenuExportAndVaultChangePasswordExitTUI(t *testing.T) {
+	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root", AuthMethod: model.AuthKey}
+	for _, action := range []string{"export", "vault_change_pw"} {
+		t.Run(action, func(t *testing.T) {
+			m := New([]*model.Server{server})
+			m.width = 100
+			m.height = 30
+			m.actionMenu = newActionMenuModel(m.width, m.height)
+			m.screen = screenActionMenu
+			for i := 0; i < len(m.actionMenu.list.Items()); i++ {
+				m.actionMenu.list.Select(i)
+				if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == action {
+					break
+				}
+			}
+
+			updated, cmd := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+			m = updated.(*tuiModel)
+			if cmd == nil {
+				t.Fatalf("expected %s to quit TUI", action)
+			}
+			if m.result == nil || m.result.Action != action {
+				t.Fatalf("expected result action %q, got %#v", action, m.result)
+			}
+		})
+	}
+}
+
+func TestActionMenuVaultLockUsesCallback(t *testing.T) {
+	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root", AuthMethod: model.AuthKey}
+	locked := false
+	LockVault = func() error {
+		locked = true
+		return nil
+	}
+	defer func() { LockVault = nil }()
+
+	m := New([]*model.Server{server})
+	m.width = 100
+	m.height = 30
+	m.actionMenu = newActionMenuModel(m.width, m.height)
+	m.screen = screenActionMenu
+	for i := 0; i < len(m.actionMenu.list.Items()); i++ {
+		m.actionMenu.list.Select(i)
+		if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "vault_lock" {
+			break
+		}
+	}
+
+	updated, _ := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*tuiModel)
+
+	if !locked {
+		t.Fatal("expected vault lock callback to run")
+	}
+	if !strings.Contains(m.success, "Vault locked") {
+		t.Fatalf("expected vault lock success, got %q", m.success)
+	}
+}

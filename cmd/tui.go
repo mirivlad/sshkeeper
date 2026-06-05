@@ -138,6 +138,14 @@ func runTUI() error {
 	tui.DeleteForward = func(forwardID int64) error {
 		return appDB.DeleteForward(forwardID)
 	}
+	tui.ImportServers = func() (int, error) {
+		return importServersFromSSHConfig(nil)
+	}
+	tui.LockVault = func() error {
+		v := getOrCreateVault()
+		v.Lock()
+		return nil
+	}
 	tui.UpdateTestResult = func(alias string, status model.TestStatus, testErr string) error {
 		return appDB.UpdateTestResult(alias, status, testErr)
 	}
@@ -203,6 +211,35 @@ func runTUI() error {
 					fmt.Fprintf(os.Stderr, "Command error on %s: %v\n", fresh.Alias, err)
 				}
 				appDB.UpdateLastConnected(fresh.Alias)
+			}
+
+			fmt.Println("\n[Press Enter to return to sshkeeper]")
+			buf := make([]byte, 1)
+			os.Stdin.Read(buf)
+
+			servers, _ = appDB.ListServers()
+			continue
+		}
+
+		if result != nil && result.Action == "export" {
+			servers, err := appDB.ListServers()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Export error: %v\n", err)
+			} else {
+				fmt.Print(formatServersExport(servers))
+			}
+
+			fmt.Println("\n[Press Enter to return to sshkeeper]")
+			buf := make([]byte, 1)
+			os.Stdin.Read(buf)
+
+			servers, _ = appDB.ListServers()
+			continue
+		}
+
+		if result != nil && result.Action == "vault_change_pw" {
+			if err := changeVaultPasswordInteractive(); err != nil {
+				fmt.Fprintf(os.Stderr, "Vault password change error: %v\n", err)
 			}
 
 			fmt.Println("\n[Press Enter to return to sshkeeper]")

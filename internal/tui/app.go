@@ -94,6 +94,12 @@ type forwardDeletedMsg struct {
 	err error
 }
 
+type importDoneMsg struct {
+	servers []*model.Server
+	count   int
+	err     error
+}
+
 // --- List items ---
 
 type serverItem struct {
@@ -171,6 +177,8 @@ var (
 	SaveForward                func(fwd *model.Forward) error
 	UpdateForward              func(fwd *model.Forward) error
 	DeleteForward              func(forwardID int64) error
+	ImportServers              func() (int, error)
+	LockVault                  func() error
 )
 
 // --- Screen type ---
@@ -240,6 +248,7 @@ type tuiModel struct {
 	confirmAction   func() tea.Cmd
 	fullHelp        *fullHelpModel
 }
+
 func New(servers []*model.Server) *tuiModel {
 	items := make([]list.Item, len(servers))
 	for i, s := range servers {
@@ -352,6 +361,20 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bgResults = msg.results
 		m.screen = screenList
 		m.pendingTemplate = nil
+		return m, nil
+
+	case importDoneMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.servers = msg.servers
+		items := make([]list.Item, len(msg.servers))
+		for i, s := range msg.servers {
+			items[i] = serverItem{server: s}
+		}
+		m.list.SetItems(items)
+		m.success = fmt.Sprintf("Imported %d server(s).", msg.count)
 		return m, nil
 
 	case forwardsLoadedMsg:
@@ -1093,9 +1116,13 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.actionMenu = nil
 			return m, m.tunnelScreen.loadTunnels()
 		case "route":
-			m.err = fmt.Errorf("route management not yet implemented in TUI")
-			m.screen = screenList
-			m.actionMenu = nil
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.form = newEditFormModel(item.server, m.width, m.height)
+				m.form.focusIdx = 7
+				m.form.updateFocus()
+				m.screen = screenForm
+				m.actionMenu = nil
+			}
 		case "test":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
 				m.screen = screenList
@@ -1128,19 +1155,35 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "import":
 			m.screen = screenList
 			m.actionMenu = nil
-			m.err = fmt.Errorf("import not yet implemented")
+			return m, func() tea.Msg {
+				if ImportServers == nil {
+					return importDoneMsg{err: fmt.Errorf("import is unavailable")}
+				}
+				count, err := ImportServers()
+				if err != nil {
+					return importDoneMsg{err: err}
+				}
+				servers, err := ListServers()
+				return importDoneMsg{servers: servers, count: count, err: err}
+			}
 		case "export":
-			m.screen = screenList
 			m.actionMenu = nil
-			m.err = fmt.Errorf("export not yet implemented")
+			m.result = &TUIResult{Action: "export"}
+			return m, tea.Quit
 		case "vault_lock":
 			m.screen = screenList
 			m.actionMenu = nil
-			m.err = fmt.Errorf("vault lock not yet implemented")
+			if LockVault == nil {
+				m.err = fmt.Errorf("vault lock is unavailable")
+			} else if err := LockVault(); err != nil {
+				m.err = err
+			} else {
+				m.success = "Vault locked."
+			}
 		case "vault_change_pw":
-			m.screen = screenList
 			m.actionMenu = nil
-			m.err = fmt.Errorf("vault change password not yet implemented")
+			m.result = &TUIResult{Action: "vault_change_pw"}
+			return m, tea.Quit
 		}
 		return m, nil
 	}
@@ -1781,7 +1824,7 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 	if hasBackgroundResult {
 		items = append(items, helpItem{Key: "Esc", Action: "clear result"})
 	}
-		items = append(items,
+	items = append(items,
 		helpItem{Key: "Enter", Action: "connect"},
 		helpItem{Key: "Ctrl+X", Action: "actions"},
 		helpItem{Key: "Ctrl+A", Action: "add"},
