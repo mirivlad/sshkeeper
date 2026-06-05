@@ -1,0 +1,688 @@
+# sshkeeper — Руководство пользователя
+
+## Содержание
+
+1. [Что такое sshkeeper](#что-такое-sshkeeper)
+2. [Установка](#установка)
+3. [Первый запуск](#первый-запуск)
+4. [TUI — основной интерфейс](#tui--основной-интерфейс)
+5. [Управление серверами](#управление-серверами)
+6. [Маршруты и бастионы](#маршруты-и-бастионы)
+7. [Port Forwards и Tunnels](#port-forwards-и-tunnels)
+8. [CLI команды](#cli-команды)
+9. [Vault — хранилище секретов](#vault--хранилище-секретов)
+10. [Сценарии использования](#сценарии-использования)
+11. [Справка по клавишам](#справка-по-клавишам)
+
+---
+
+## Что такое sshkeeper
+
+sshkeeper — это консольный менеджер SSH-подключений для Linux. Он хранит профили серверов, секреты (пароли, фразы от ключей) и запускает системный `ssh` с нужными опциями.
+
+**Чем sshkeeper НЕ является:**
+- Это не Ansible — он не настраивает серверы и не пушит файлы
+- Это не замена SSH — он использует системный `/usr/bin/ssh`
+
+**Что он делает:**
+- Хранит профили серверов в локальной SQLite-базе
+- Хранит пароли в зашифрованном vault (XChaCha20-Poly1305)
+- Управляет маршрутами (бастионы, цепочки прыжков)
+- Управляет port forwards (локальные, удалённые, SOCKS)
+- Запускает туннели в фоне с отслеживанием PID
+- Предоставляет TUI (текстовый интерфейс) и CLI
+
+**Стек технологий:**
+- Go 1.25+
+- Bubble Tea (TUI framework)
+- Cobra (CLI framework)
+- SQLite (modernc.org/sqlite)
+- XChaCha20-Poly1305 (шифрование vault)
+- Argon2id (KDF для мастер-пароля)
+
+**Исходники:** `git.mirv.top:mirivlad/sshkeeper`
+
+---
+
+## Установка
+
+### Из релиза
+
+```bash
+tar -xzf sshkeeper_v0.2.0_linux_amd64.tar.gz
+chmod +x sshkeeper-linux-amd64
+sudo install -m 0755 sshkeeper-linux-amd64 /usr/local/bin/sshkeeper
+```
+
+### Из исходников
+
+```bash
+git clone git@git.mirv.top:mirivlad/sshkeeper.git
+cd sshkeeper
+go build -o ~/.local/bin/sshkeeper .
+```
+
+Или через скрипт:
+```bash
+./build.sh          # сборка в bin/
+./release.sh        # сборка релизных архивов в dist/
+```
+
+**Требования:** Go 1.25+, Linux x86_64, системный OpenSSH.
+
+---
+
+## Первый запуск
+
+При первом запуске sshkeeper создаёт конфигурацию, базу данных и vault:
+
+```bash
+sshkeeper
+```
+
+Вы увидите приветствие и запрос на создание мастер-пароля:
+
+```
+Welcome to sshkeeper!
+No vault found. Let's create one.
+
+Create master password: ********
+Repeat master password: ********
+
+Vault created and unlocked for this command. You're ready to go!
+```
+
+**Важно:** запомните мастер-пароль. Без него секреты не восстановить.
+
+После создания vault откроется главный экран TUI со списком серверов (пока пустым).
+
+---
+
+## TUI — основной интерфейс
+
+Запуск TUI — просто `sshkeeper` без аргументов.
+
+### Главный экран
+
+```
+sshkeeper  0 servers
+Vault unlocked | 0 OK | 0 FAIL
+
+  NAME                 ALIAS                ROUTE                              AUTH         GROUP      STATUS
+
+  No servers yet. Press Ctrl+A to add one.
+
+  Enter: connect | Ctrl+X: actions | Ctrl+A: add | Ctrl+E: edit
+  Ctrl+F: search | Ins: select | ?: help | Ctrl+Q: quit
+```
+
+**Столбцы:**
+- **NAME** — отображаемое имя сервера
+- **ALIAS** — уникальный идентификатор
+- **ROUTE** — маршрут подключения:
+  - `  direct → user@host:port` — прямое подключение
+  - `→ bastion → user@host:port` — через бастион
+  - `→ bastion → … → user@host:port` — через цепочку
+- **AUTH** — метод аутентификации (key/password/agent/key+phrase)
+- **GROUP** — группа сервера
+- **STATUS** — результат последнего теста (OK/FAIL/?)
+
+**Навигация:**
+- `↑/↓` — перемещение по списку
+- `Enter` — подключиться к серверу
+- `Ctrl+A` — добавить сервер
+- `Ctrl+E` — редактировать сервер
+- `Ctrl+X` — меню действий
+- `Ctrl+F` — поиск
+- `Ins` — выбрать/снять выбор (для групповых операций)
+- `?` или `F1` — полная справка
+- `Ctrl+Q` — выход
+
+### Экран помощи
+
+Нажмите `?` или `F1` на любом экране:
+
+```
+sshkeeper — Help
+
+  Enter         Connect to server
+  ↑/↓           Navigate list
+  Tab/↓         Next field
+  Shift+Tab/↑   Previous field
+  /             Open dropdown picker
+  Esc           Back / Cancel
+  Ctrl+A        Add server
+  Ctrl+E        Edit server
+  Ctrl+W        Manage port forwards
+  Ctrl+X        Action menu
+  ?             This help screen
+  Ctrl+Q        Quit
+```
+
+---
+
+## Управление серверами
+
+### Добавление сервера
+
+1. Нажмите `Ctrl+A` на главном экране
+2. Заполните поля:
+
+```
+Add Server
+
+  Alias:              mail.kp
+  Display Name:       Production mail
+  Host:               mail.example.org
+  Port:               22
+  User:               root
+  Auth Method:        key
+  Identity File:      ~/.ssh/id_ed25519
+  Route hops:         bastion
+  Group:              KP
+  Notes:              Main mail server
+  Startup Command:    tmux attach -t ops
+  Tags:               prod, mail
+
+  [ Test ]  [ Save ]
+
+  Tab/↓: next | ↑: prev | /: pick list | Enter: select | Esc: back
+```
+
+**Навигация по форме:**
+- `Tab` или `↓` — следующее поле
+- `Shift+Tab` или `↑` — предыдущее поле
+- `/` на поле Auth Method — выбрать из списка (password/key/key_passphrase/agent)
+- `/` на поле Group — выбрать из существующих групп
+- `Enter` на кнопке Test — проверить подключение
+- `Enter` на кнопке Save — сохранить
+- `Esc` — отмена
+
+### Редактирование сервера
+
+1. Выберите сервер стрелками
+2. Нажмите `Ctrl+E`
+3. Отредактируйте поля
+4. Нажмите `Enter` на Save
+
+### Удаление сервера
+
+1. Выберите сервер стрелками
+2. Нажмите `Ctrl+X` (меню действий)
+3. Выберите "Delete"
+4. Подтвердите: `Enter` или `Y` — да, `Esc` или `N` — нет
+
+### Тест подключения
+
+1. Выберите сервер стрелками
+2. Нажмите `Ctrl+X` → "Test connection"
+3. Результат отобразится в столбце STATUS (OK/FAIL)
+
+### Поиск
+
+1. Нажмите `Ctrl+F`
+2. Введите запрос (поиск по alias, name, host, user, group, notes, tags)
+3. `Enter` — применить фильтр
+4. `Esc` — сбросить
+
+---
+
+## Маршруты и бастионы
+
+### Прямое подключение
+
+Сервер подключается напрямую:
+
+```
+ROUTE:   direct → root@web.example.org:22
+```
+
+### Через бастион
+
+Сервер доступен через один jump host:
+
+```
+ROUTE:   → bastion → root@internal.web:22
+```
+
+### Цепочка прыжков
+
+Сервер доступен через несколько jump hosts:
+
+```
+ROUTE:   → bastion → dmz-gw → … → root@secure.internal:22
+```
+
+### Настройка маршрута
+
+**Через TUI:**
+1. Добавьте/редактируйте сервер
+2. В поле "Route hops" введите бастионы через запятую: `bastion,dmz-gw`
+3. Или введите адрес напрямую: `user@bastion.example.com:2222`
+
+**Через CLI:**
+```bash
+sshkeeper route set web --jumps bastion
+sshkeeper route set prod --jumps bastion,dmz-gw
+sshkeeper route show web
+sshkeeper route clear web
+```
+
+---
+
+## Port Forwards и Tunnels
+
+### Ключевое различие
+
+- **Port Forward** — сохранённое правило проброса порода. Просто конфигурация, не запускает процесс.
+- **Tunnel** — запущенный SSH-процесс, который активирует один или несколько forwards.
+
+Аналогия: forward — это рецепт, tunnel — это готовое блюдо.
+
+### Типы forwards
+
+| Тип | Описание | Пример |
+|-----|----------|--------|
+| **Local** | Порт на вашей машине → сервис за SSH-сервером | Локальный 5432 → удалённый PostgreSQL |
+| **Remote** | Порт на SSH-сервере → сервис на вашей машине | Удалённый 8080 → локальный dev-сервер |
+| **SOCKS** | Локальный SOCKS-прокси через SSH | Браузер → SOCKS → интернет через SSH-сервер |
+
+### Управление forwards через TUI
+
+1. Выберите сервер на главном экране
+2. Нажмите `Ctrl+X` → "Manage port forwards"
+3. Откроется список forwards:
+
+```
+Port Forwards — web
+
+  NAME                 TYPE    LISTEN               TARGET               ON
+  Local PostgreSQL     Local   127.0.0.1:15432      127.0.0.1:5432       yes
+  Web Admin            Local   127.0.0.1:18080      internal.web:80      yes
+  SOCKS Proxy          SOCKS   127.0.0.1:1080       SOCKS                yes
+
+  Selected
+  Port 127.0.0.1:15432 on this machine will be forwarded through web to 127.0.0.1:5432.
+  -L 127.0.0.1:15432:127.0.0.1:5432
+  -o ExitOnForwardFailure=yes
+
+  Ctrl+A: add | Ctrl+E/Enter: edit | Ctrl+D: delete | Esc: back
+```
+
+**Действия:**
+- `Ctrl+A` — добавить forward
+- `Enter` или `Ctrl+E` — редактировать выбранный
+- `Ctrl+D` — удалить (с подтверждением)
+- `Esc` — назад
+
+### Добавление forward
+
+1. Нажмите `Ctrl+A` на экране forwards
+2. Выберите тип (1/2/3 или Tab):
+
+```
+Add Port Forward
+
+  Name:               Local PostgreSQL
+  Description:        optional
+
+  Type
+  ▸ 1. Local    port on my machine → service on SSH server
+    2. Remote   port on SSH server → service on my machine
+    3. SOCKS    local dynamic SOCKS proxy through SSH
+
+  Listen Address:     127.0.0.1
+  Listen Port:        15432
+  Target Host:        127.0.0.1
+  Target Port:        5432
+
+  Preview
+  -L 127.0.0.1:15432:127.0.0.1:5432
+  -o ExitOnForwardFailure=yes
+
+  [ Save ]
+
+  Tab/↓: next | ↑: prev | 1/2/3: select type | Enter: save | Esc: back
+```
+
+**Поля зависят от типа:**
+- **Local:** Listen Address, Listen Port, Target Host, Target Port
+- **Remote:** Remote Listen Addr, Remote Listen Port, Local Target Host, Local Target Port
+- **SOCKS:** Listen Address, Listen Port (target поля скрыты)
+
+**По умолчанию Listen Address = `127.0.0.1`** (только локальный доступ). Если введёте `0.0.0.0`, появится предупреждение.
+
+### Запуск туннеля
+
+**Через TUI:**
+1. Выберите сервер
+2. Нажмите `Ctrl+X` → один из вариантов:
+   - **Connect with tunnels** — SSH-сессия + все активные forwards
+   - **Start tunnels only** — туннель на переднем плане, без shell
+   - **Start tunnels in background** — туннель в фоне с PID
+
+**Через CLI:**
+```bash
+# SSH-сессия с туннелями
+sshkeeper tunnel web
+
+# Только туннель (foreground)
+sshkeeper tunnel web --forward-only
+
+# Туннель в фоне
+sshkeeper tunnel web --background
+```
+
+### Управление туннелями
+
+**Через TUI:**
+1. Нажмите `Ctrl+X` → "Manage tunnels"
+2. Список запущенных туннелей:
+
+```
+Tunnel Manager
+
+  Tunnel to web              PID 12345    running   2m30s
+  Tunnel to prod             PID 12346    running   1m15s
+
+  Ctrl+D: stop | Ctrl+R: refresh | Esc: back
+```
+
+**Через CLI:**
+```bash
+sshkeeper tunnel list
+sshkeeper tunnel stop <id>
+```
+
+---
+
+## CLI команды
+
+### Серверы
+
+```bash
+# Добавление
+sshkeeper add web --host 10.0.0.10 --user deploy --auth key
+sshkeeper add prod --host 10.0.0.20 --user root --auth password
+sshkeeper add bastion --host bastion.example.org --user admin --auth key_passphrase --identity-file ~/.ssh/id_rsa
+
+# Интерактивный режим
+sshkeeper add
+
+# Просмотр
+sshkeeper list
+sshkeeper show web
+sshkeeper search prod
+
+# Подключение
+sshkeeper connect web
+sshkeeper c web          # короткая форма
+
+# Выполнение команды
+sshkeeper run web "uptime"
+
+# Тест подключения
+sshkeeper test web
+
+# Редактирование
+sshkeeper edit web --tags prod,web --startup-command "tmux attach -t ops"
+
+# Удаление
+sshkeeper delete web
+```
+
+### Маршруты
+
+```bash
+sshkeeper route set web --jumps bastion
+sshkeeper route set prod --jumps bastion,dmz-gw
+sshkeeper route show web
+sshkeeper route clear web
+```
+
+### Port Forwards
+
+```bash
+# Добавление
+sshkeeper forward add web --name "Local PostgreSQL" --type local --local-port 15432 --remote-addr 127.0.0.1 --remote-port 5432
+sshkeeper forward add bastion --name "SOCKS Proxy" --type dynamic --local-port 1080
+
+# Список
+sshkeeper forward list web
+
+# Удаление
+sshkeeper forward delete web 1
+```
+
+### Tunnels
+
+```bash
+sshkeeper tunnel web                    # SSH + туннели
+sshkeeper tunnel web --forward-only     # Только туннель
+sshkeeper tunnel web --background       # Фоновый туннель
+sshkeeper tunnel list                   # Список туннелей
+sshkeeper tunnel stop <id>              # Остановить
+```
+
+### Группы и шаблоны
+
+```bash
+sshkeeper group list
+sshkeeper group rename old new
+sshkeeper group delete name
+
+sshkeeper template list
+sshkeeper template add uptime "uptime"
+sshkeeper template delete uptime
+sshkeeper run-template web uptime
+```
+
+### Vault
+
+```bash
+sshkeeper vault status
+sshkeeper vault unlock
+sshkeeper vault list
+sshkeeper vault delete web ssh_password
+sshkeeper vault change-password
+```
+
+### Импорт/Экспорт
+
+```bash
+sshkeeper import              # Импорт из ~/.ssh/config
+sshkeeper export              # Экспорт в stdout
+```
+
+---
+
+## Vault — хранилище секретов
+
+Vault хранит SSH-пароли и фразы от ключей в зашифрованном виде.
+
+**Шифрование:** XChaCha20-Poly1305, KDF: Argon2id (64 MiB, 3 iterations)
+
+**Когда нужен мастер-пароль:**
+- `connect`, `c` — для подключения с password/key_passphrase аутентификацией
+- `run`, `run-template` — для выполнения команд
+- `test` — для тестирования
+- `edit`, `delete` — для редактирования секретов
+- `vault` команды
+
+**Когда НЕ нужен:**
+- `list`, `show`, `search` — только метаданные
+- `add` с auth=key или auth=agent
+- `export`, `ssh-config`
+
+---
+
+## Сценарии использования
+
+### Сценарий 1: Подключение к серверу через бастион
+
+```bash
+# 1. Добавляем бастион
+sshkeeper add bastion --host bastion.example.org --user admin --auth key
+
+# 2. Добавляем внутренний сервер с маршрутом через бастион
+sshkeeper add web --host 10.0.0.10 --user deploy --auth key
+sshkeeper route set web --jumps bastion
+
+# 3. Подключаемся
+sshkeeper connect web
+# Автоматически: ssh -J bastion deploy@10.0.0.10
+```
+
+### Сценарий 2: Локальный доступ к удалённой базе данных
+
+```bash
+# 1. Добавляем сервер
+sshkeeper add db --host db.internal --user postgres --auth key
+
+# 2. Создаём forward
+sshkeeper forward add db --name "PostgreSQL" --type local --local-port 15432 --remote-addr 127.0.0.1 --remote-port 5432
+
+# 3. Запускаем туннель в фоне
+sshkeeper tunnel db --background
+# ✓ Tunnel started [12345] PID 67890 → db
+
+# 4. Подключаемся локально
+psql -h 127.0.0.1 -p 15432 -U myuser mydb
+
+# 5. Когда не нужен — останавливаем
+sshkeeper tunnel stop 12345
+```
+
+### Сценарий 3: SOCKS-прокси для браузера
+
+```bash
+# 1. Добавляем сервер
+sshkeeper add jump --host jump.example.org --user me --auth key
+
+# 2. Создаём SOCKS forward
+sshkeeper forward add jump --name "SOCKS" --type dynamic --local-port 1080
+
+# 3. Запускаем туннель
+sshkeeper tunnel jump --background
+
+# 4. Настраиваем браузер: SOCKS5 127.0.0.1:1080
+```
+
+### Сценарий 4: Цепочка прыжков
+
+```bash
+# Сервер за двумя бастионами
+sshkeeper add secure --host 10.10.10.10 --user root --auth key
+sshkeeper route set secure --jumps bastion,dmz-gw
+
+# Подключение
+sshkeeper connect secure
+# Автоматически: ssh -J bastion,dmz-gw root@10.10.10.10
+```
+
+### Сценарий 5: Групповые операции
+
+```bash
+# В TUI: выбрать несколько серверов (Ins), затем:
+# Ctrl+X → Run template → выбрать шаблон
+# Команда выполнится на всех выбранных серверах
+```
+
+---
+
+## Справка по клавишам
+
+### Главный экран
+
+| Клавиша | Действие |
+|---------|----------|
+| `Enter` | Подключиться к серверу |
+| `Ctrl+A` | Добавить сервер |
+| `Ctrl+E` | Редактировать сервер |
+| `Ctrl+F` | Поиск |
+| `Ctrl+X` | Меню действий |
+| `Ins` | Выбрать/снять выбор |
+| `?` / `F1` | Помощь |
+| `Ctrl+Q` | Выход |
+
+### Меню действий (Ctrl+X)
+
+- **Connect** — стандартное SSH-подключение
+- **Connect with tunnels** — SSH + все активные forwards
+- **Start tunnels only** — туннель без shell
+- **Start tunnels in background** — фоновый туннель
+- **Manage port forwards** — управление forwards
+- **Manage tunnels** — список туннелей
+- **Manage route** — настройка маршрута
+- **Test connection** — проверка подключения
+- **Edit** — редактирование сервера
+- **Delete** — удаление (с подтверждением)
+
+### Формы (добавление/редактирование)
+
+| Клавиша | Действие |
+|---------|----------|
+| `Tab` / `↓` | Следующее поле |
+| `Shift+Tab` / `↑` | Предыдущее поле |
+| `/` | Выбрать из списка (Auth Method, Group) |
+| `Enter` | Действие / переход |
+| `Esc` | Назад / отмена |
+
+### Список forwards
+
+| Клавиша | Действие |
+|---------|----------|
+| `↑/↓` | Навигация |
+| `Ctrl+A` | Добавить |
+| `Enter` / `Ctrl+E` | Редактировать |
+| `Ctrl+D` | Удалить (с подтверждением) |
+| `Esc` | Назад |
+
+### Список туннелей
+
+| Клавиша | Действие |
+|---------|----------|
+| `Ctrl+D` / `s` | Остановить туннель |
+| `Ctrl+R` / `r` | Обновить список |
+| `Esc` | Назад |
+
+### Диалог подтверждения
+
+| Клавиша | Действие |
+|---------|----------|
+| `Enter` / `Y` | Да |
+| `Esc` / `N` | Нет |
+
+---
+
+## Расположение данных
+
+| Данные | Путь |
+|--------|------|
+| Конфиг | `~/.config/sshkeeper/config.toml` |
+| База данных | `~/.local/share/sshkeeper/sshkeeper.db` |
+| Vault | `~/.local/share/sshkeeper/vault.bin` |
+| Туннели | `~/.local/share/sshkeeper/tunnels.json` |
+| OpenSSH config | `~/.ssh/config.d/sshkeeper.conf` |
+
+Если заданы `XDG_CONFIG_HOME` или `XDG_DATA_HOME`, данные хранятся в соответствующих поддиректориях.
+
+---
+
+## Сборка и тестирование
+
+```bash
+# Тесты
+go test ./...
+
+# Сборка
+go build -o bin/sshkeeper .
+
+# Или через скрипты
+./build.sh          # сборка в bin/
+./release.sh        # релизные архивы в dist/
+```
+
+## Лицензия
+
+MIT. См. [LICENSE](LICENSE).

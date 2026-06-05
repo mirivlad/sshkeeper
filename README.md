@@ -190,6 +190,10 @@ Commands that need secrets ask for the master password in that process. Adding
 `password` or `key_passphrase` profiles asks for the master password before
 storing the secret.
 
+## Руководство
+
+Подробная инструкция с примерами сценариев: [docs/guide.md](docs/guide.md)
+
 ## TUI
 
 Running `sshkeeper` without arguments opens the TUI.
