@@ -704,8 +704,8 @@ func TestForwardSaveSuccessReturnsToList(t *testing.T) {
 
 	// Create both forwardScreen and forwardForm to simulate real flow
 	m.forwardScreen = newForwardScreenModel(server.ID, server.Alias, m.width, m.height)
-	m.forwardScreen.forwards = []*model.Forward{}
-	m.forwardScreen.rebuildList()
+	m.forwardScreen.list = []*model.Forward{}
+	m.forwardScreen.selected = 0
 	m.forwardForm = newForwardFormModel(server.ID, m.width, m.height)
 	m.forwardForm.serverID = server.ID
 	m.screen = screenForwardForm

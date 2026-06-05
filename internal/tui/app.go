@@ -193,6 +193,7 @@ const (
 	screenForwardList
 	screenForwardForm
 	screenTunnelManager
+	screenConfirm
 )
 
 // --- Result type — returned from TUI to caller ---
@@ -234,8 +235,9 @@ type tuiModel struct {
 	actionMenu      *actionMenuModel
 	forwardScreen   *forwardScreenModel
 	forwardForm     *forwardFormModel
+	confirmMsg      string
+	confirmAction   func() tea.Cmd
 }
-
 func New(servers []*model.Server) *tuiModel {
 	items := make([]list.Item, len(servers))
 	for i, s := range servers {
@@ -355,8 +357,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.err != nil {
 				m.forwardScreen.err = msg.err
 			} else {
-				m.forwardScreen.forwards = msg.forwards
-				m.forwardScreen.rebuildList()
+				m.forwardScreen.list = msg.forwards
+				if len(msg.forwards) > 0 && m.forwardScreen.selected < 0 {
+					m.forwardScreen.selected = 0
+				}
 			}
 		}
 		return m, nil
@@ -367,10 +371,22 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case forwardDeleteConfirmMsg:
+		// Show confirmation screen
+		m.confirmMsg = fmt.Sprintf("Delete forward %q?", msg.name)
+		m.confirmAction = func() tea.Cmd {
+			return func() tea.Msg {
+				return forwardDeletedMsg{id: msg.id, err: DeleteForward(msg.id)}
+			}
+		}
+		m.screen = screenConfirm
+		return m, nil
+
 	case forwardEditSignal:
 		if m.forwardScreen != nil {
-			if item, ok := m.forwardScreen.list.SelectedItem().(forwardListItem); ok {
-				m.forwardForm = newForwardEditModel(m.forwardScreen.serverID, item.forward, m.width, m.height)
+			if m.forwardScreen.selected >= 0 && m.forwardScreen.selected < len(m.forwardScreen.list) {
+				fwd := m.forwardScreen.list[m.forwardScreen.selected]
+				m.forwardForm = newForwardEditModel(m.forwardScreen.serverID, fwd, m.width, m.height)
 				m.screen = screenForwardForm
 			}
 		}
@@ -498,6 +514,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForwardForm(msg)
 		case screenTunnelManager:
 			return m.updateTunnelManager(msg)
+		case screenConfirm:
+			return m.updateConfirm(msg)
 		}
 	}
 
@@ -972,6 +990,9 @@ func (m *tuiModel) View() string {
 		if m.tunnelScreen != nil {
 			b.WriteString(m.tunnelScreen.View())
 		}
+
+	case screenConfirm:
+		b.WriteString(m.viewConfirm())
 	}
 
 	if m.err != nil {
@@ -1132,8 +1153,16 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case tea.KeyCtrlD:
-		if m.forwardScreen != nil {
-			return m, m.forwardScreen.deleteSelected()
+		if m.forwardScreen != nil && m.forwardScreen.selected >= 0 && m.forwardScreen.selected < len(m.forwardScreen.list) {
+			fwd := m.forwardScreen.list[m.forwardScreen.selected]
+			m.confirmMsg = fmt.Sprintf("Delete forward %q?", fwd.Name)
+			m.confirmAction = func() tea.Cmd {
+				return func() tea.Msg {
+					return forwardDeletedMsg{id: fwd.ID, err: DeleteForward(fwd.ID)}
+				}
+			}
+			m.screen = screenConfirm
+			return m, nil
 		}
 	case tea.KeyCtrlE, tea.KeyEnter:
 		if m.forwardScreen != nil {
@@ -1148,14 +1177,30 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "d", "D":
-			if m.forwardScreen != nil {
-				return m, m.forwardScreen.deleteSelected()
+			if m.forwardScreen != nil && m.forwardScreen.selected >= 0 && m.forwardScreen.selected < len(m.forwardScreen.list) {
+				fwd := m.forwardScreen.list[m.forwardScreen.selected]
+				m.confirmMsg = fmt.Sprintf("Delete forward %q?", fwd.Name)
+				m.confirmAction = func() tea.Cmd {
+					return func() tea.Msg {
+						return forwardDeletedMsg{id: fwd.ID, err: DeleteForward(fwd.ID)}
+					}
+				}
+				m.screen = screenConfirm
+				return m, nil
 			}
 		}
+	case tea.KeyDown:
+		if m.forwardScreen != nil && m.forwardScreen.selected < len(m.forwardScreen.list)-1 {
+			m.forwardScreen.selected++
+		}
+		return m, nil
+	case tea.KeyUp:
+		if m.forwardScreen != nil && m.forwardScreen.selected > 0 {
+			m.forwardScreen.selected--
+		}
+		return m, nil
 	}
-	var cmd tea.Cmd
-	m.forwardScreen.list, cmd = m.forwardScreen.list.Update(msg)
-	return m, cmd
+	return m, nil
 }
 
 func (m *tuiModel) updateTunnelManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1187,6 +1232,52 @@ func (m *tuiModel) updateTunnelManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.tunnelScreen.list, cmd = m.tunnelScreen.list.Update(msg)
 	return m, cmd
+}
+
+func (m *tuiModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenList
+		m.confirmMsg = ""
+		m.confirmAction = nil
+		return m, nil
+	case tea.KeyEnter:
+		if m.confirmAction != nil {
+			action := m.confirmAction
+			m.confirmMsg = ""
+			m.confirmAction = nil
+			return m, action()
+		}
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "y", "Y":
+			if m.confirmAction != nil {
+				action := m.confirmAction
+				m.confirmMsg = ""
+				m.confirmAction = nil
+				return m, action()
+			}
+		case "n", "N":
+			m.screen = screenList
+			m.confirmMsg = ""
+			m.confirmAction = nil
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m *tuiModel) viewConfirm() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Confirm"))
+	b.WriteString("\n\n")
+	b.WriteString("  " + m.confirmMsg)
+	b.WriteString("\n\n")
+	b.WriteString(renderHelp([]helpItem{
+		{Key: "Enter / Y", Action: "yes"},
+		{Key: "Esc / N", Action: "no"},
+	}, m.width))
+	return b.String()
 }
 
 func (m *tuiModel) updateForwardForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1249,6 +1340,12 @@ func (m *tuiModel) viewServerList() string {
 			}
 			target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
 			routeStr := server.Route.DisplaySummary(target)
+			// Add visual icon prefix based on connection type
+			if len(server.Route.Hops) == 0 {
+				routeStr = "  " + routeStr // direct
+			} else {
+				routeStr = "→ " + routeStr // via/chain
+			}
 			// If too long, collapse middle hops
 			if len(routeStr) > 34 && len(server.Route.Hops) > 2 {
 				first := server.Route.Hops[0]
@@ -1256,7 +1353,7 @@ func (m *tuiModel) viewServerList() string {
 				if !first.IsProfile {
 					firstName = first.Raw
 				}
-				routeStr = fmt.Sprintf("%s → … → %s", firstName, truncate(target, 34-len(firstName)-6))
+				routeStr = fmt.Sprintf("→ %s → … → %s", firstName, truncate(target, 34-len(firstName)-8))
 			}
 			group := server.GroupName
 			if group == "" {
