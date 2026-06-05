@@ -294,7 +294,7 @@ Add Server
 ### Поиск
 
 1. Нажмите `Ctrl+F`
-2. Введите запрос (поиск по alias, name, host, user, group, notes, tags)
+2. Введите запрос (поиск по alias, name, host, user, group, notes, tags, route hops, forward ports)
 3. `Enter` — применить фильтр
 4. `Esc` — сбросить
 
@@ -329,7 +329,7 @@ ROUTE:   ⇒ bastion → dmz-gw → … → root@secure.internal:22
 ### Настройка маршрута
 
 **Через TUI:**
-1. Добавьте/редактируйте сервер
+1. Добавьте/редактируйте сервер или выберите `Ctrl+X` → "Manage route"
 2. В поле "Route hops" введите бастионы через запятую: `bastion,dmz-gw`
 3. Или введите адрес напрямую: `user@bastion.example.com:2222`
 
@@ -456,6 +456,12 @@ sshkeeper tunnel web --forward-only
 sshkeeper tunnel web --background
 ```
 
+Фоновый туннель запускается как `ssh -N`, требует хотя бы один включённый
+forward и сейчас поддерживает только `key` или `agent` auth. Для
+`password`/`key_passphrase` используйте foreground-режим (`sshkeeper tunnel web`
+или `--forward-only`), чтобы sshkeeper мог обработать PTY prompt и передать
+секрет из vault.
+
 ### Управление туннелями
 
 **Через TUI:**
@@ -476,6 +482,7 @@ Tunnel Manager
 ```bash
 sshkeeper tunnel list
 sshkeeper tunnel stop <id>
+sshkeeper tunnel stop-all
 ```
 
 ---
@@ -534,6 +541,9 @@ sshkeeper forward add bastion --name "SOCKS Proxy" --type dynamic --local-port 1
 # Список
 sshkeeper forward list web
 
+# Включить/выключить
+sshkeeper forward edit 1 --enabled=false
+
 # Удаление
 sshkeeper forward delete web 1
 ```
@@ -546,6 +556,7 @@ sshkeeper tunnel web --forward-only     # Только туннель
 sshkeeper tunnel web --background       # Фоновый туннель
 sshkeeper tunnel list                   # Список туннелей
 sshkeeper tunnel stop <id>              # Остановить
+sshkeeper tunnel stop-all               # Остановить все tracked туннели
 ```
 
 ### Группы и шаблоны
@@ -596,6 +607,8 @@ Vault хранит SSH-пароли и фразы от ключей в заши�
 **Когда НЕ нужен:**
 - `list`, `show`, `search` — только метаданные
 - `add` с auth=key или auth=agent
+- `tunnel list`, `tunnel stop`, `tunnel stop-all`
+- `tunnel <alias> --background`
 - `export`, `ssh-config`
 
 ---
@@ -704,6 +717,10 @@ sshkeeper connect secure
 | Test connection | Проверка подключения |
 | Edit | Редактирование сервера |
 | Delete | Удаление (с подтверждением) |
+| Import | Импорт из `~/.ssh/config` и обновление списка |
+| Export | Выход в терминал и печать экспорта |
+| Vault: lock | Заблокировать vault в текущем процессе |
+| Vault: change password | Выход в терминал и смена master password |
 
 ### Формы (добавление/редактирование)
 

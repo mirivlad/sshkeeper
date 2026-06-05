@@ -23,10 +23,10 @@ port forwarding management.
 - Key, SSH-agent, password, and key+passphrase auth modes.
 - **Routes / ProxyJump** — manage bastion hosts and jump chains with human-readable display.
 - **Port forwarding** — named local/remote/SOCKS forwards with type selector, validation, and OpenSSH preview.
-- **Tunnel management** — start/stop/restart tunnels, PID tracking, background tunnels, runtime state.
+- **Tunnel management** — start/stop/list background tunnels, PID tracking, runtime state.
 - **Tunnel vs Forward** — clear separation: forward = saved rule, tunnel = running SSH process.
-- Groups, tags, command templates, search, and OpenSSH config generation.
-- Import from `~/.ssh/config`.
+- Groups, tags, command templates, search by metadata/routes/forward ports, and OpenSSH config generation.
+- Import from `~/.ssh/config` and simple tab-separated export.
 
 ## Install
 
@@ -102,6 +102,16 @@ Press `?` on any screen for a compact hotkey reference.
 Press `F1` on any screen for full documentation including routes, port
 forwarding, tunnels, and vault.
 
+### Screenshots
+
+| Main list | Actions | Route edit |
+|-----------|---------|------------|
+| ![Main list](docs/screenshots/screen_1.png) | ![Actions](docs/screenshots/screen_2.png) | ![Route edit](docs/screenshots/screen_3.png) |
+
+| Port forwards | Tunnel manager |
+|---------------|----------------|
+| ![Port forwards](docs/screenshots/screen_4.png) | ![Tunnel manager](docs/screenshots/screen_5.png) |
+
 ### Key Reference
 
 | Key | Action |
@@ -111,7 +121,7 @@ forwarding, tunnels, and vault.
 | Ctrl+E | Edit server |
 | Ctrl+F | Search |
 | Ctrl+W | Manage port forwards for selected server |
-| Ctrl+X | Action menu (connect, tunnels, forwards, route, test, edit, delete) |
+| Ctrl+X | Action menu (connect, tunnels, forwards, route, test, edit, delete, import/export, vault actions) |
 | Ins | Select / deselect a server |
 | ? | Quick help (hotkeys) |
 | F1 | Full documentation |
@@ -166,6 +176,9 @@ sshkeeper forward add web --name "Local PostgreSQL" --type local --local-port 15
 # SOCKS proxy: route browser traffic through SSH server
 sshkeeper forward add bastion --name "SOCKS Proxy" --type dynamic --local-port 1080
 
+# Disable a saved forward
+sshkeeper forward edit 1 --enabled=false
+
 # List forwards for a server
 sshkeeper forward list web
 # [1] Local PostgreSQL  Local   127.0.0.1:15432  127.0.0.1:5432  yes
@@ -201,7 +214,15 @@ sshkeeper tunnel list
 
 # Stop a tunnel
 sshkeeper tunnel stop <id>
+
+# Stop every tracked tunnel
+sshkeeper tunnel stop-all
 ```
+
+Background tunnels run detached with `ssh -N`, require at least one enabled
+forward, and currently support key or SSH-agent authentication only. Use
+foreground `sshkeeper tunnel <alias>` or `--forward-only` for password and
+key-passphrase authentication so the PTY prompt handler can provide the secret.
 
 ### Connect vs Tunnel
 
@@ -212,7 +233,7 @@ sshkeeper tunnel stop <id>
 | Start tunnels only | `sshkeeper tunnel <alias> --forward-only` | Action menu → Start tunnels only | Foreground tunnel, no shell |
 | Start tunnels in background | `sshkeeper tunnel <alias> --background` | Action menu → Start tunnels in background | Detached tunnel process with PID tracking |
 | Manage port forwards | `sshkeeper forward` | Action menu → Manage port forwards | Add/edit/delete forward rules |
-| Manage tunnels | `sshkeeper tunnel list/stop` | Action menu → Manage tunnels | View running tunnels, stop, restart |
+| Manage tunnels | `sshkeeper tunnel list/stop/stop-all` | Action menu → Manage tunnels | View running tunnels and stop them |
 
 ## Vault
 
