@@ -135,9 +135,19 @@ var forwardEditCmd = &cobra.Command{
 			return fmt.Errorf("invalid forward ID: %s", args[0])
 		}
 
-		// For now, just toggle enabled
+		fwd, err := appDB.GetForward(id)
+		if err != nil {
+			return fmt.Errorf("forward not found: %d", id)
+		}
+
 		enabled, _ := cmd.Flags().GetBool("enabled")
-		_ = enabled
+		if cmd.Flags().Changed("enabled") {
+			fwd.Enabled = enabled
+		}
+		if err := appDB.UpdateForward(fwd); err != nil {
+			return fmt.Errorf("update forward: %w", err)
+		}
+
 		fmt.Printf("✓ Forward %d updated\n", id)
 		return nil
 	},

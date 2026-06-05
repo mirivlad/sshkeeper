@@ -232,3 +232,53 @@ func TestTagManagementCRUD(t *testing.T) {
 		t.Fatalf("tags after delete: %#v", got.Tags)
 	}
 }
+
+func TestSearchServersMatchesTagsRoutesAndForwardPorts(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	server := &model.Server{
+		Alias:      "db",
+		Host:       "db.internal",
+		Port:       22,
+		User:       "postgres",
+		AuthMethod: model.AuthKey,
+		Route: model.Route{Hops: []model.RouteHop{
+			{Alias: "bastion", IsProfile: true},
+			{Raw: "dmz.example.org", IsProfile: false},
+		}},
+	}
+	if err := db.CreateServer(server); err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	if err := db.SetServerTags(server.ID, []string{"database"}); err != nil {
+		t.Fatalf("set tags: %v", err)
+	}
+	if _, err := db.AddForward(&model.Forward{
+		ServerID:   server.ID,
+		Name:       "Postgres",
+		Type:       model.ForwardLocal,
+		LocalAddr:  "127.0.0.1",
+		LocalPort:  15432,
+		RemoteAddr: "127.0.0.1",
+		RemotePort: 5432,
+		Enabled:    true,
+	}); err != nil {
+		t.Fatalf("add forward: %v", err)
+	}
+
+	for _, query := range []string{"database", "dmz.example.org", "15432", "5432"} {
+		t.Run(query, func(t *testing.T) {
+			results, err := db.SearchServers(query)
+			if err != nil {
+				t.Fatalf("search servers: %v", err)
+			}
+			if len(results) != 1 || results[0].Alias != "db" {
+				t.Fatalf("search %q returned %#v", query, results)
+			}
+		})
+	}
+}

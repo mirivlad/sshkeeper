@@ -240,16 +240,21 @@ func (fm *forwardFormModel) visibleFields() []int {
 }
 
 func (fm *forwardFormModel) labelForField(idx int) string {
+	var labels []string
 	switch fm.currentType {
 	case model.ForwardLocal:
-		return []string{"Listen Address", "Listen Port", "Target Host", "Target Port"}[idx]
+		labels = []string{"Listen Address", "Listen Port", "Target Host", "Target Port"}
 	case model.ForwardRemote:
-		return []string{"Remote Listen Addr", "Remote Listen Port", "Local Target Host", "Local Target Port"}[idx]
+		labels = []string{"Remote Listen Addr", "Remote Listen Port", "Local Target Host", "Local Target Port"}
 	case model.ForwardDynamic:
-		return []string{"Listen Address", "Listen Port"}[idx]
+		labels = []string{"Listen Address", "Listen Port"}
 	default:
 		return ""
 	}
+	if idx < 0 || idx >= len(labels) {
+		return ""
+	}
+	return labels[idx]
 }
 
 func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

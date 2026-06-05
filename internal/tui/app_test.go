@@ -766,6 +766,22 @@ func TestForwardSaveErrorStaysOnForm(t *testing.T) {
 	}
 }
 
+func TestForwardDynamicFormFocusDoesNotPanic(t *testing.T) {
+	fm := newForwardFormModel(1, 100, 30)
+	fm.currentType = model.ForwardDynamic
+	fm.typeIdx = typeIndex(model.ForwardDynamic)
+	fm.focusIdx = 2 + 3
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("dynamic forward focus should not panic, got %v", r)
+		}
+	}()
+
+	fm.updateFocus()
+	_ = fm.View()
+}
+
 func TestActionMenuClosesOnAllActions(t *testing.T) {
 	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root"}
 	m := New([]*model.Server{server})

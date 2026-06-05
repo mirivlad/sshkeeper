@@ -173,8 +173,26 @@ func (db *DB) SearchServers(query string) ([]*model.Server, error) {
 		       last_test_at, last_test_status, last_test_error
 		FROM servers
 		WHERE alias LIKE ? OR display_name LIKE ? OR host LIKE ? OR user LIKE ?
-		       OR group_name LIKE ? OR notes LIKE ? OR proxy_jump LIKE ?
-		ORDER BY alias`, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+		       OR group_name LIKE ? OR notes LIKE ? OR proxy_jump LIKE ? OR route_hops LIKE ?
+		       OR EXISTS (
+		           SELECT 1 FROM server_tags st
+		           JOIN tags t ON t.id = st.tag_id
+		           WHERE st.server_id = servers.id AND t.name LIKE ?
+		       )
+		       OR EXISTS (
+		           SELECT 1 FROM forwards f
+		           WHERE f.server_id = servers.id
+		             AND (
+		                 f.name LIKE ? OR f.description LIKE ?
+		                 OR f.local_addr LIKE ? OR f.remote_addr LIKE ?
+		                 OR CAST(f.local_port AS TEXT) LIKE ?
+		                 OR CAST(f.remote_port AS TEXT) LIKE ?
+		             )
+		       )
+		ORDER BY alias`,
+		pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern,
+		pattern,
+		pattern, pattern, pattern, pattern, pattern, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -359,6 +377,18 @@ func (db *DB) GetForwards(serverID int64) ([]*model.Forward, error) {
 		forwards = append(forwards, &f)
 	}
 	return forwards, rows.Err()
+}
+
+func (db *DB) GetForward(forwardID int64) (*model.Forward, error) {
+	var f model.Forward
+	err := db.conn.QueryRow(`
+		SELECT id, server_id, name, description, type, local_addr, local_port, remote_addr, remote_port, enabled
+		FROM forwards WHERE id=?`, forwardID).Scan(
+		&f.ID, &f.ServerID, &f.Name, &f.Description, &f.Type, &f.LocalAddr, &f.LocalPort, &f.RemoteAddr, &f.RemotePort, &f.Enabled)
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
 }
 
 func (db *DB) DeleteForward(forwardID int64) error {
