@@ -21,7 +21,8 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "sshkeeper",
 	Short: "sshkeeper — SSH connection manager",
-	Long: `sshkeeper is a console SSH connection manager for Linux.
+	Long: `sshkeeper is a console SSH connection manager.
+Linux is the primary target; macOS builds are available and Windows is experimental.
 It manages server profiles, secrets, and provides a convenient way
 to launch SSH sessions using the system OpenSSH client.`,
 	RunE: func(cmd *cobra.Command, args []string) error {

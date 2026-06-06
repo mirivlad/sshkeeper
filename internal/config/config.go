@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/BurntSushi/toml"
 )
@@ -34,7 +35,7 @@ type UIConfig struct {
 func defaultConfig() *Config {
 	return &Config{
 		SSH: SSHConfig{
-			Binary:            "/usr/bin/ssh",
+			Binary:            defaultSSHBinary(),
 			ConnectTimeoutSec: 10,
 			TestCommand:       "echo SSHKEEPER_OK",
 		},
@@ -45,6 +46,13 @@ func defaultConfig() *Config {
 			ShowSecurityHints: false,
 		},
 	}
+}
+
+func defaultSSHBinary() string {
+	if runtime.GOOS == "windows" {
+		return "ssh.exe"
+	}
+	return "/usr/bin/ssh"
 }
 
 func Load() (*Config, error) {

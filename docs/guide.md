@@ -18,7 +18,7 @@
 
 ## Что такое sshkeeper
 
-sshkeeper — это консольный менеджер SSH-подключений для Linux. Он хранит профили серверов, секреты (пароли, фразы от ключей) и запускает системный `ssh` с нужными опциями.
+sshkeeper — это консольный менеджер SSH-подключений. Основная целевая платформа — Linux; сборки для macOS доступны, Windows-сборка пока экспериментальная. Он хранит профили серверов, секреты (пароли, фразы от ключей) и запускает системный `ssh` с нужными опциями.
 
 **Чем sshkeeper НЕ является:**
 - Это не Ansible — он не настраивает серверы и не пушит файлы
@@ -63,14 +63,27 @@ go build -o ~/.local/bin/sshkeeper .
 ./release.sh        # сборка релизных архивов в dist/
 ```
 
-**Требования:** Go 1.25+, Linux x86_64, системный OpenSSH.
+**Требования:** Go 1.25+ и системный OpenSSH.
+
+Статус платформ:
+
+| Платформа | Статус | Примечание |
+|-----------|--------|------------|
+| Linux | Основная целевая платформа | Архивы `linux/amd64` и `linux/arm64`. |
+| macOS | Сборки доступны, требуется проверка на целевых машинах | Архивы `darwin/amd64` и `darwin/arm64`, нужен системный `ssh`. Homebrew formula запланирована. |
+| Windows | Experimental | Нужен OpenSSH Client как `ssh.exe` в `PATH`; password/key-passphrase PTY-сценарии на Windows пока не подтверждены. |
+
+На Windows OpenSSH Client можно установить через Windows Optional Features или PowerShell:
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+```
 
 ### Из релиза (после публикации v0.2.0)
 
 ```bash
 tar -xzf sshkeeper_v0.2.0_linux_amd64.tar.gz
-chmod +x sshkeeper-linux-amd64
-sudo install -m 0755 sshkeeper-linux-amd64 /usr/local/bin/sshkeeper
+sudo install -m 0755 sshkeeper_v0.2.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 ```
 
 ---
@@ -192,7 +205,8 @@ sshkeeper — Quick Help
 sshkeeper — Full Help
 
   What is sshkeeper
-  sshkeeper is a Linux console SSH connection manager.
+  sshkeeper is a console SSH connection manager.
+  Linux is the primary target; macOS builds are available and Windows is experimental.
   It stores server profiles, secrets, and launches the system ssh client.
 
   Navigation
@@ -781,6 +795,9 @@ go test ./...
 
 # Сборка
 go build -o bin/sshkeeper .
+
+# Проверка релизной кросс-сборки
+make release-check
 
 # Или через скрипты
 ./build.sh          # сборка в bin/

@@ -104,6 +104,40 @@ func TestConnectRunsStartupCommand(t *testing.T) {
 	}
 }
 
+func TestValidateSSHBinaryForWindowsRequiresOpenSSHClient(t *testing.T) {
+	err := validateSSHBinaryForOS("windows", "ssh.exe", func(name string) (string, error) {
+		if name != "ssh.exe" {
+			t.Fatalf("expected lookup for ssh.exe, got %q", name)
+		}
+		return "", os.ErrNotExist
+	})
+
+	if err == nil {
+		t.Fatal("expected missing ssh.exe error")
+	}
+	if !strings.Contains(err.Error(), "OpenSSH Client") {
+		t.Fatalf("expected OpenSSH Client guidance, got %q", err)
+	}
+	if !strings.Contains(err.Error(), "Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0") {
+		t.Fatalf("expected PowerShell install command, got %q", err)
+	}
+}
+
+func TestValidateSSHBinaryForNonWindowsChecksConfiguredBinary(t *testing.T) {
+	var lookedUp string
+	err := validateSSHBinaryForOS("linux", "/usr/bin/ssh", func(name string) (string, error) {
+		lookedUp = name
+		return "/usr/bin/ssh", nil
+	})
+
+	if err != nil {
+		t.Fatalf("validate ssh binary: %v", err)
+	}
+	if lookedUp != "/usr/bin/ssh" {
+		t.Fatalf("expected lookup for configured binary, got %q", lookedUp)
+	}
+}
+
 func TestBuildSSHArgs_Simple(t *testing.T) {
 	server := &model.Server{Host: "example.org", Port: 22, User: "root"}
 	args := BuildSSHArgsSimple(server)

@@ -1,7 +1,8 @@
 # sshkeeper
 
-`sshkeeper` is a Linux console manager for SSH profiles, secrets, and quick
-OpenSSH launches. It does not replace OpenSSH; it keeps connection metadata in a
+`sshkeeper` is a console manager for SSH profiles, secrets, and quick OpenSSH
+launches. Primary target: Linux. macOS builds are available, and Windows builds
+are experimental. It does not replace OpenSSH; it keeps connection metadata in a
 local SQLite database, keeps passwords/passphrases in an encrypted vault, and
 starts the system `ssh` client with the right options.
 
@@ -42,10 +43,24 @@ Or use the build scripts:
 
 ```bash
 ./build.sh          # Build binary to bin/
-./release.sh        # Build release tarballs to dist/
+./release.sh        # Build release archives to dist/
 ```
 
-Requirements: Go 1.25+, Linux x86_64, system OpenSSH.
+Requirements: Go 1.25+ and system OpenSSH.
+
+Platform status:
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Linux | Primary target | `linux/amd64` and `linux/arm64` release tarballs are available. |
+| macOS | Supported, needs verification on target machines | `darwin/amd64` and `darwin/arm64` release tarballs are available. Requires system `ssh` client. Homebrew formula planned. |
+| Windows | Experimental | Requires OpenSSH Client available as `ssh.exe` in `PATH`. Password/key-passphrase PTY flows are not validated on Windows. |
+
+On Windows, install OpenSSH Client via Windows Optional Features or PowerShell:
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
+```
 
 **Source repositories:**
 - Main public: [github.com/mirivlad/sshkeeper](https://github.com/mirivlad/sshkeeper)
@@ -55,8 +70,7 @@ Requirements: Go 1.25+, Linux x86_64, system OpenSSH.
 
 ```bash
 tar -xzf sshkeeper_v0.2.0_linux_amd64.tar.gz
-chmod +x sshkeeper-linux-amd64
-sudo install -m 0755 sshkeeper-linux-amd64 /usr/local/bin/sshkeeper
+sudo install -m 0755 sshkeeper_v0.2.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 sshkeeper
 ```
 
@@ -285,9 +299,12 @@ If `XDG_CONFIG_HOME` or `XDG_DATA_HOME` are set, sshkeeper stores data under
 ```bash
 go test ./...
 go build -o bin/sshkeeper .
+make release-check
 ```
 
 `bin/` is ignored by git.
+
+For release packaging details, see [docs/release.md](docs/release.md).
 
 ## Project Layout
 
@@ -302,8 +319,9 @@ sshkeeper/
 ├── internal/vault/      # Encrypted vault
 ├── internal/tunnel/     # Tunnel state management
 ├── docs/guide.md        # User guide
+├── docs/release.md      # Release packaging guide
 ├── build.sh             # Build binary to bin/
-├── release.sh           # Build release tarballs to dist/
+├── release.sh           # Build release archives to dist/
 └── main.go
 ```
 

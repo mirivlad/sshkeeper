@@ -93,6 +93,10 @@ func Start(cfg *config.Config, server *model.Server, forwards []*model.Forward, 
 	mu.Lock()
 	defer mu.Unlock()
 
+	if err := ssh.EnsureSSHBinary(cfg.SSH.Binary); err != nil {
+		return nil, err
+	}
+
 	// Filter enabled forwards
 	var active []*model.Forward
 	for _, f := range forwards {

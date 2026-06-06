@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/mirivlad/sshkeeper/internal/config"
@@ -12,7 +13,34 @@ import (
 
 type VaultFunc func(serverAlias string, secretType string) (string, error)
 
+const windowsOpenSSHInstallHint = "Install OpenSSH Client via Windows Optional Features or PowerShell:\nAdd-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0"
+
+func EnsureSSHBinary(binary string) error {
+	return validateSSHBinaryForOS(runtime.GOOS, binary, exec.LookPath)
+}
+
+func validateSSHBinaryForOS(goos string, binary string, lookPath func(string) (string, error)) error {
+	if goos == "windows" {
+		if _, err := lookPath("ssh.exe"); err != nil {
+			return fmt.Errorf("ssh.exe not found in PATH. Windows build is experimental and requires OpenSSH Client.\n%s", windowsOpenSSHInstallHint)
+		}
+		return nil
+	}
+
+	if strings.TrimSpace(binary) == "" {
+		binary = "ssh"
+	}
+	if _, err := lookPath(binary); err != nil {
+		return fmt.Errorf("ssh binary not found (%s): %w", binary, err)
+	}
+	return nil
+}
+
 func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error {
+	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
+		return err
+	}
+
 	args := BuildSSHArgsSimple(server)
 	if strings.TrimSpace(server.StartupCommand) != "" {
 		args = append(args, server.StartupCommand)
@@ -49,6 +77,10 @@ func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error
 }
 
 func RunCommand(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) error {
+	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
+		return err
+	}
+
 	args := BuildSSHArgsSimple(server)
 	args = append(args, command)
 
@@ -78,6 +110,10 @@ func RunCommand(cfg *config.Config, server *model.Server, getVault VaultFunc, co
 }
 
 func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) (string, error) {
+	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
+		return "", err
+	}
+
 	args := BuildSSHArgsSimple(server)
 	args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
 
@@ -116,6 +152,10 @@ func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFu
 }
 
 func Test(cfg *config.Config, server *model.Server, getVault VaultFunc) (bool, string) {
+	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
+		return false, err.Error()
+	}
+
 	args := BuildSSHArgsSimple(server)
 	args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
 
@@ -179,6 +219,10 @@ func testWithPassword(cfg *config.Config, args []string, password string) (bool,
 }
 
 func ConnectWithArgs(cfg *config.Config, args []string, vaultFunc VaultFunc, server *model.Server) error {
+	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
+		return err
+	}
+
 	switch server.AuthMethod {
 	case model.AuthPassword:
 		password, err := vaultFunc(server.Alias, "ssh_password")
