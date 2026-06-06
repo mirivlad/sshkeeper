@@ -18,7 +18,7 @@
 
 ## Что такое sshkeeper
 
-sshkeeper — это консольный менеджер SSH-подключений. Основная целевая платформа — Linux; сборки для macOS доступны, Windows-сборка пока экспериментальная. Он хранит профили серверов, секреты (пароли, фразы от ключей) и запускает системный `ssh` с нужными опциями.
+sshkeeper — это консольный менеджер SSH-подключений. Основные релизные платформы — Linux и macOS; Windows-сборка пока экспериментальная. Он хранит профили серверов, секреты (пароли, фразы от ключей) и запускает системный `ssh` с нужными опциями.
 
 **Чем sshkeeper НЕ является:**
 - Это не Ansible — он не настраивает серверы и не пушит файлы
@@ -42,7 +42,7 @@ sshkeeper — это консольный менеджер SSH-подключе�
 
 **Исходники:**
 - Основной публичный репозиторий: [github.com/mirivlad/sshkeeper](https://github.com/mirivlad/sshkeeper)
-- Зеркало/рабочий репозиторий: `git@git.mirv.top:mirivlad/sshkeeper`
+- Self-hosted зеркало: `git@git.mirv.top:mirivlad/sshkeeper`
 
 ---
 
@@ -51,7 +51,7 @@ sshkeeper — это консольный менеджер SSH-подключе�
 ### Из исходников (основной способ)
 
 ```bash
-git clone git@git.mirv.top:mirivlad/sshkeeper.git
+git clone git@github.com:mirivlad/sshkeeper.git
 cd sshkeeper
 go build -o ~/.local/bin/sshkeeper .
 ```
@@ -69,8 +69,8 @@ go build -o ~/.local/bin/sshkeeper .
 
 | Платформа | Статус | Примечание |
 |-----------|--------|------------|
-| Linux | Основная целевая платформа | Архивы `linux/amd64` и `linux/arm64`. |
-| macOS | Сборки доступны, требуется проверка на целевых машинах | Архивы `darwin/amd64` и `darwin/arm64`, нужен системный `ssh`. Homebrew formula запланирована. |
+| Linux | Основная релизная платформа | Архивы `linux/amd64` и `linux/arm64`. |
+| macOS | Основная релизная платформа | Архивы `darwin/amd64` и `darwin/arm64`, нужен системный `ssh`. Homebrew formula запланирована. |
 | Windows | Experimental | Нужен OpenSSH Client как `ssh.exe` в `PATH`; password/key-passphrase PTY-сценарии на Windows пока не подтверждены. |
 
 На Windows OpenSSH Client можно установить через Windows Optional Features или PowerShell:
@@ -206,7 +206,7 @@ sshkeeper — Full Help
 
   What is sshkeeper
   sshkeeper is a console SSH connection manager.
-  Linux is the primary target; macOS builds are available and Windows is experimental.
+  Linux and macOS are primary release targets; Windows is experimental.
   It stores server profiles, secrets, and launches the system ssh client.
 
   Navigation

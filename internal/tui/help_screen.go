@@ -160,7 +160,7 @@ func (m *fullHelpModel) View() string {
 	}{
 		{"What is sshkeeper", [][2]string{
 			{"", "sshkeeper is a console SSH connection manager."},
-			{"", "Linux is the primary target; macOS builds are available and Windows is experimental."},
+			{"", "Linux and macOS are primary release targets; Windows is experimental."},
 			{"", "It stores server profiles, secrets, and launches the system ssh client."},
 			{"", ""},
 		}},

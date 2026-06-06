@@ -96,7 +96,7 @@ Upload these files to the release:
 
 Release notes should mention platform status:
 
-- Linux is the primary target.
+- Linux and macOS are primary release targets.
 - macOS builds are available as tar.gz for amd64 and arm64 and require the
   system `ssh` client.
 - Windows build is experimental and requires OpenSSH Client available as

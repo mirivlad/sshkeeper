@@ -1,10 +1,10 @@
 # sshkeeper
 
 `sshkeeper` is a console manager for SSH profiles, secrets, and quick OpenSSH
-launches. Primary target: Linux. macOS builds are available, and Windows builds
-are experimental. It does not replace OpenSSH; it keeps connection metadata in a
-local SQLite database, keeps passwords/passphrases in an encrypted vault, and
-starts the system `ssh` client with the right options.
+launches. Linux and macOS are the primary release targets; Windows builds are
+experimental. It does not replace OpenSSH; it keeps connection metadata in a local
+SQLite database, keeps passwords/passphrases in an encrypted vault, and starts
+the system `ssh` client with the right options.
 
 ## sshkeeper is not Ansible
 
@@ -34,7 +34,7 @@ port forwarding management.
 ### Build from source
 
 ```bash
-git clone git@git.mirv.top:mirivlad/sshkeeper.git
+git clone git@github.com:mirivlad/sshkeeper.git
 cd sshkeeper
 go build -o ~/.local/bin/sshkeeper .
 ```
@@ -52,8 +52,8 @@ Platform status:
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Linux | Primary target | `linux/amd64` and `linux/arm64` release tarballs are available. |
-| macOS | Supported, needs verification on target machines | `darwin/amd64` and `darwin/arm64` release tarballs are available. Requires system `ssh` client. Homebrew formula planned. |
+| Linux | Primary release target | `linux/amd64` and `linux/arm64` release tarballs are available. |
+| macOS | Primary release target | `darwin/amd64` and `darwin/arm64` release tarballs are available. Requires system `ssh` client. Homebrew formula planned. |
 | Windows | Experimental | Requires OpenSSH Client available as `ssh.exe` in `PATH`. Password/key-passphrase PTY flows are not validated on Windows. |
 
 On Windows, install OpenSSH Client via Windows Optional Features or PowerShell:
@@ -63,8 +63,8 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 ```
 
 **Source repositories:**
-- Main public: [github.com/mirivlad/sshkeeper](https://github.com/mirivlad/sshkeeper)
-- Mirror/dev: `git@git.mirv.top:mirivlad/sshkeeper`
+- Primary public repository: [github.com/mirivlad/sshkeeper](https://github.com/mirivlad/sshkeeper)
+- Self-hosted mirror: `git@git.mirv.top:mirivlad/sshkeeper`
 
 ### Install from release (after v0.2.0 publication)
 
