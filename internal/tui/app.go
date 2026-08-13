@@ -185,6 +185,7 @@ var (
 	DeleteForward              func(forwardID int64) error
 	ImportServers              func() (int, error)
 	LockVault                  func() error
+	VaultUnlocked              func() bool
 )
 
 // --- Screen type ---
@@ -270,6 +271,8 @@ type tuiModel struct {
 	forwardForm     *forwardFormModel
 	confirm         *confirmState
 	fullHelp        *fullHelpModel
+	helpParent      screen
+	vaultUnlocked   bool
 }
 
 func New(servers []*model.Server) *tuiModel {
@@ -297,15 +300,21 @@ func New(servers []*model.Server) *tuiModel {
 	templateList.SetShowHelp(false)
 	tagList := newStringList(nil, "Tags", 0, 0)
 
+	vaultIsUnlocked := true
+	if VaultUnlocked != nil {
+		vaultIsUnlocked = VaultUnlocked()
+	}
+
 	return &tuiModel{
-		screen:       screenList,
-		list:         l,
-		servers:      servers,
-		searchInput:  search,
-		selected:     map[string]bool{},
-		tagInput:     tagInput,
-		templateList: templateList,
-		tagList:      tagList,
+		screen:        screenList,
+		list:          l,
+		servers:       servers,
+		searchInput:   search,
+		selected:      map[string]bool{},
+		tagInput:      tagInput,
+		templateList:  templateList,
+		tagList:       tagList,
+		vaultUnlocked: vaultIsUnlocked,
 	}
 }
 
@@ -327,6 +336,37 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.form != nil {
 			m.form.width = msg.Width
 			m.form.height = msg.Height
+		}
+		if m.templateForm != nil {
+			m.templateForm.width = msg.Width
+			m.templateForm.height = msg.Height
+		}
+		if m.forwardScreen != nil {
+			m.forwardScreen.width = msg.Width
+			m.forwardScreen.height = msg.Height
+		}
+		if m.forwardForm != nil {
+			m.forwardForm.width = msg.Width
+			m.forwardForm.height = msg.Height
+		}
+		if m.tunnelScreen != nil {
+			m.tunnelScreen.width = msg.Width
+			m.tunnelScreen.height = msg.Height
+			m.tunnelScreen.list.SetSize(msg.Width, managerListHeight(msg.Height))
+		}
+		if m.helpScreen != nil {
+			updated, _ := m.helpScreen.Update(msg)
+			if help, ok := updated.(*helpScreenModel); ok {
+				m.helpScreen = help
+			}
+		}
+		if m.fullHelp != nil {
+			m.fullHelp.width = msg.Width
+			m.fullHelp.height = msg.Height
+		}
+		if m.actionMenu != nil {
+			m.actionMenu.width = msg.Width
+			m.actionMenu.list.SetSize(msg.Width, managerListHeight(msg.Height))
 		}
 		m.templateList.SetSize(msg.Width, managerListHeight(msg.Height))
 		m.tagList.SetSize(msg.Width, managerListHeight(msg.Height))
@@ -571,6 +611,22 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.err != nil || m.success != "" {
+			m.err = nil
+			m.success = ""
+		}
+		if msg.Type == tea.KeyF1 && m.screen != screenHelp && m.screen != screenFullHelp && m.screen != screenConfirm {
+			m.helpParent = m.screen
+			m.fullHelp = newFullHelpModel(m.width, m.height)
+			m.screen = screenFullHelp
+			return m, nil
+		}
+		if msg.Type == tea.KeyRunes && msg.String() == "?" && !m.screenOwnsPrintableInput() && m.screen != screenHelp && m.screen != screenFullHelp && m.screen != screenConfirm {
+			m.helpParent = m.screen
+			m.helpScreen = newHelpScreenModel(m.width, m.height)
+			m.screen = screenHelp
+			return m, nil
+		}
 		switch m.screen {
 		case screenList:
 			return m.updateList(msg)
@@ -687,15 +743,11 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyRunes:
 		if msg.String() == "?" {
+			m.helpParent = m.screen
 			m.helpScreen = newHelpScreenModel(m.width, m.height)
 			m.screen = screenHelp
 			return m, nil
 		}
-
-	case tea.KeyF1:
-		m.fullHelp = newFullHelpModel(m.width, m.height)
-		m.screen = screenFullHelp
-		return m, nil
 
 	case tea.KeyCtrlW:
 		// Open forward manager for selected server
@@ -1118,11 +1170,9 @@ func (m *tuiModel) View() string {
 
 	if m.err != nil {
 		b.WriteString("\n" + errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
-		m.err = nil
 	}
 	if m.success != "" {
 		b.WriteString("\n" + successStyle.Render(m.success))
-		m.success = ""
 	}
 
 	return b.String()
@@ -1134,8 +1184,8 @@ func (m *tuiModel) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpScreen = hs
 	}
 	// Esc or Enter closes help
-	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter {
-		m.screen = screenList
+	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter || (msg.Type == tea.KeyRunes && (msg.String() == "q" || msg.String() == "Q" || msg.String() == "?")) {
+		m.screen = m.helpParent
 		m.helpScreen = nil
 		return m, nil
 	}
@@ -1260,6 +1310,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if err := LockVault(); err != nil {
 				m.err = err
 			} else {
+				m.vaultUnlocked = false
 				m.success = "Vault locked."
 			}
 		case "vault_change_pw":
@@ -1524,12 +1575,21 @@ func (m *tuiModel) updateFullHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if fh, ok := updated.(*fullHelpModel); ok {
 		m.fullHelp = fh
 	}
-	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter {
-		m.screen = screenList
+	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter || (msg.Type == tea.KeyRunes && (msg.String() == "q" || msg.String() == "Q")) {
+		m.screen = m.helpParent
 		m.fullHelp = nil
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *tuiModel) screenOwnsPrintableInput() bool {
+	switch m.screen {
+	case screenForm, screenSearch, screenTagInput, screenTemplateForm, screenForwardForm:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *tuiModel) updateForwardForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1562,7 +1622,11 @@ func (m *tuiModel) viewServerList() string {
 
 	b.WriteString(titleStyle.Render(fmt.Sprintf("sshkeeper  %d servers", len(m.servers))))
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render(fmt.Sprintf("Vault unlocked | %s", testSummary(m.servers))))
+	vaultStatus := "Vault locked"
+	if m.vaultUnlocked {
+		vaultStatus = "Vault unlocked"
+	}
+	b.WriteString(helpStyle.Render(fmt.Sprintf("%s | %s", vaultStatus, testSummary(m.servers))))
 	b.WriteString("\n\n")
 	b.WriteString(listHeaderStyle.Render(fmt.Sprintf("  %-20s %-20s %-34s %-12s %-10s %s", "NAME", "ALIAS", "ROUTE", "AUTH", "GROUP", "STATUS")))
 	b.WriteString("\n")

@@ -146,6 +146,9 @@ func runTUI() error {
 		v.Lock()
 		return nil
 	}
+	tui.VaultUnlocked = func() bool {
+		return getOrCreateVault().IsUnlocked()
+	}
 	tui.UpdateTestResult = func(alias string, status model.TestStatus, testErr string) error {
 		return appDB.UpdateTestResult(alias, status, testErr)
 	}
