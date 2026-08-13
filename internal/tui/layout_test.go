@@ -133,6 +133,7 @@ func TestActionMenuFitsSupportedTerminalSizes(t *testing.T) {
 		menu := newActionMenuModel(size.width, size.height)
 		view := menu.View()
 		assertViewFits(t, view, size.width, size.height)
+		assertUnifiedScreen(t, view, size.width, size.height)
 		for _, want := range []string{"Actions", "Connect", "Manage port forwards", "Esc"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("action menu at %dx%d missing %q:\n%s", size.width, size.height, want, view)
@@ -154,10 +155,27 @@ func TestConfirmationFitsSupportedTerminalSizes(t *testing.T) {
 		})
 		view := m.View()
 		assertViewFits(t, view, size.width, size.height)
+		assertUnifiedScreen(t, view, size.width, size.height)
 		for _, want := range []string{"Local PostgreSQL", "not stopped.", "> [ Cancel ]", "Esc"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("confirmation at %dx%d missing %q:\n%s", size.width, size.height, want, view)
 			}
+		}
+	}
+}
+
+func TestHelpScreensUseUnifiedShell(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
+		for name, view := range map[string]string{
+			"quick": newHelpScreenModel(size.width, size.height).View(),
+			"full":  newFullHelpModel(size.width, size.height).View(),
+		} {
+			t.Run(name+itoa(size.width), func(t *testing.T) {
+				assertUnifiedScreen(t, view, size.width, size.height)
+				if strings.Contains(view, "F1") || !strings.Contains(view, "Ctrl+H") {
+					t.Fatalf("help exposes the wrong global binding:\n%s", view)
+				}
+			})
 		}
 	}
 }
@@ -186,6 +204,28 @@ func assertViewFits(t *testing.T, view string, width, height int) {
 	for index, line := range lines {
 		if lineWidth := ansi.StringWidth(line); lineWidth > width {
 			t.Fatalf("line %d has width %d, terminal width is %d: %q", index+1, lineWidth, width, ansi.Strip(line))
+		}
+	}
+}
+
+func assertUnifiedScreen(t *testing.T, view string, width, height int) {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	if len(lines) != height {
+		t.Fatalf("unified screen has %d lines, want %d:\n%s", len(lines), height, view)
+	}
+	if !strings.HasPrefix(ansi.Strip(lines[0]), "sshkeeper / ") {
+		t.Fatalf("unified screen has no breadcrumb header: %q", ansi.Strip(lines[0]))
+	}
+	if !strings.Contains(ansi.Strip(view), "┌") || !strings.Contains(ansi.Strip(view), "┘") {
+		t.Fatalf("unified screen has no framed content:\n%s", view)
+	}
+	if strings.TrimSpace(ansi.Strip(lines[height-1])) == "" {
+		t.Fatalf("unified screen footer is not on last row:\n%s", view)
+	}
+	for index, line := range lines {
+		if got := ansi.StringWidth(line); got > width-1 {
+			t.Fatalf("line %d uses unsafe last terminal column: width=%d terminal=%d", index+1, got, width)
 		}
 	}
 }

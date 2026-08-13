@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbletea"
@@ -12,8 +11,9 @@ import (
 // --- Help screen (?) ---
 
 type helpScreenModel struct {
-	list  list.Model
-	width int
+	list   list.Model
+	width  int
+	height int
 }
 
 func newHelpScreenModel(w, h int) *helpScreenModel {
@@ -30,7 +30,7 @@ func newHelpScreenModel(w, h int) *helpScreenModel {
 		helpScreenItem{key: "Ins", action: "Select / deselect", section: "Server list"},
 		helpScreenItem{key: "Ctrl+W", action: "Manage port forwards", section: "Forwards"},
 		helpScreenItem{key: "?", action: "This quick help", section: "Other"},
-		helpScreenItem{key: "F1", action: "Full documentation", section: "Other"},
+		helpScreenItem{key: "Ctrl+H", action: "Full documentation", section: "Other"},
 		helpScreenItem{key: "Ctrl+Q", action: "Quit", section: "Other"},
 	}
 
@@ -40,7 +40,7 @@ func newHelpScreenModel(w, h int) *helpScreenModel {
 	l.SetFilteringEnabled(false)
 	l.Styles.Title = titleStyle
 
-	return &helpScreenModel{list: l, width: w}
+	return &helpScreenModel{list: l, width: w, height: h}
 }
 
 type helpScreenItem struct {
@@ -86,6 +86,7 @@ func (m *helpScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		m.list.SetSize(msg.Width, msg.Height-4)
 		return m, nil
 	}
@@ -95,10 +96,39 @@ func (m *helpScreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *helpScreenModel) View() string {
-	return m.list.View()
+	items := m.list.Items()
+	body := func(width, height int) string {
+		innerRows := max(1, height-2)
+		start, end := visibleServerRange(len(items), m.list.Index(), innerRows)
+		lines := make([]string, 0, innerRows)
+		for index := start; index < end; index++ {
+			item, ok := items[index].(helpScreenItem)
+			if !ok {
+				continue
+			}
+			marker := "  "
+			if index == m.list.Index() {
+				marker = "> "
+			}
+			lines = append(lines, marker+padCells(item.key, 12)+" "+item.action)
+		}
+		return renderPaddedPanel(width, height, lines)
+	}
+	return renderScreenShell(screenShell{
+		breadcrumb: "Quick Help",
+		status:     "Keyboard reference",
+		width:      m.width,
+		height:     m.height,
+		body:       body,
+		footer: []helpItem{
+			{Key: "↑/↓", Action: "move"},
+			{Key: "Ctrl+H", Action: "full help"},
+			{Key: "Esc", Action: "back"},
+		},
+	})
 }
 
-// --- Full help (F1) ---
+// --- Full help (Ctrl+H) ---
 
 type fullHelpModel struct {
 	width  int
@@ -149,11 +179,6 @@ func (m *fullHelpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *fullHelpModel) View() string {
-	var b strings.Builder
-
-	b.WriteString(titleStyle.Render("sshkeeper — Full Help"))
-	b.WriteString("\n\n")
-
 	sections := []struct {
 		title string
 		rows  [][2]string
@@ -174,7 +199,7 @@ func (m *fullHelpModel) View() string {
 			{"Enter", "Select / Confirm / Open"},
 			{"Esc", "Back / Cancel / Close"},
 			{"?", "Quick help (hotkeys)"},
-			{"F1", "Full documentation"},
+			{"Ctrl+H", "Full documentation"},
 			{"Ctrl+Q", "Quit"},
 		}},
 		{"Server list", [][2]string{
@@ -224,47 +249,45 @@ func (m *fullHelpModel) View() string {
 		}},
 	}
 
+	var lines []string
 	for _, sec := range sections {
-		b.WriteString(sectionStyle.Render(sec.title))
-		b.WriteString("\n")
+		lines = append(lines, sectionStyle.Copy().MarginTop(0).Render(sec.title))
 		for _, row := range sec.rows {
 			if row[0] == "" {
-				b.WriteString(fmt.Sprintf("  %s\n", row[1]))
+				lines = append(lines, "  "+row[1])
 			} else {
-				b.WriteString(fmt.Sprintf("  %-16s %s\n", row[0], row[1]))
+				lines = append(lines, fmt.Sprintf("  %-16s %s", row[0], row[1]))
 			}
 		}
-		b.WriteString("\n")
+		lines = append(lines, "")
 	}
 
-	b.WriteString(helpStyle.Render("  ↑/↓ scroll — q/Esc/Enter close"))
-
-	// Simple scroll
-	lines := strings.Split(b.String(), "\n")
-	maxLines := m.height - 1
-	if maxLines < 5 {
-		maxLines = 5
+	body := func(width, height int) string {
+		capacity := max(1, height-2)
+		start := min(m.offset, max(0, len(lines)-capacity))
+		end := min(len(lines), start+capacity)
+		return renderPaddedPanel(width, height, lines[start:end])
 	}
-	start := m.offset
-	if start > len(lines)-maxLines {
-		start = len(lines) - maxLines
-	}
-	if start < 0 {
-		start = 0
-	}
-	end := start + maxLines
-	if end > len(lines) {
-		end = len(lines)
-	}
-
-	return strings.Join(lines[start:end], "\n")
+	return renderScreenShell(screenShell{
+		breadcrumb: "Full Help",
+		status:     fmt.Sprintf("line %d/%d", min(m.offset+1, len(lines)), len(lines)),
+		width:      m.width,
+		height:     m.height,
+		body:       body,
+		footer: []helpItem{
+			{Key: "↑/↓", Action: "scroll"},
+			{Key: "Ctrl+H", Action: "full help"},
+			{Key: "Esc/Enter", Action: "close"},
+		},
+	})
 }
 
 // --- Action menu ---
 
 type actionMenuItem struct {
-	label  string
-	action string
+	label       string
+	action      string
+	description string
 }
 
 func (i actionMenuItem) Title() string       { return i.label }
@@ -279,20 +302,20 @@ type actionMenuModel struct {
 
 func newActionMenuModel(w, h int) *actionMenuModel {
 	items := []list.Item{
-		actionMenuItem{label: "Connect", action: "connect"},
-		actionMenuItem{label: "Connect with tunnels", action: "tunnel"},
-		actionMenuItem{label: "Start tunnels only", action: "tunnel_n"},
-		actionMenuItem{label: "Start tunnels in background", action: "tunnel_bg"},
-		actionMenuItem{label: "Manage port forwards", action: "forwards"},
-		actionMenuItem{label: "Manage tunnels", action: "tunnels"},
-		actionMenuItem{label: "Manage route", action: "route"},
-		actionMenuItem{label: "Test connection", action: "test"},
-		actionMenuItem{label: "Edit", action: "edit"},
-		actionMenuItem{label: "Delete", action: "delete"},
-		actionMenuItem{label: "Import", action: "import"},
-		actionMenuItem{label: "Export", action: "export"},
-		actionMenuItem{label: "Vault: lock", action: "vault_lock"},
-		actionMenuItem{label: "Vault: change password", action: "vault_change_pw"},
+		actionMenuItem{label: "Connect", action: "connect", description: "Open an interactive SSH session."},
+		actionMenuItem{label: "Connect with tunnels", action: "tunnel", description: "Open SSH and activate enabled port forwards."},
+		actionMenuItem{label: "Start tunnels only", action: "tunnel_n", description: "Activate enabled forwards without a shell."},
+		actionMenuItem{label: "Start tunnels in background", action: "tunnel_bg", description: "Run enabled forwards as a background process."},
+		actionMenuItem{label: "Manage port forwards", action: "forwards", description: "Add, edit, enable, or remove forwarding rules."},
+		actionMenuItem{label: "Manage tunnels", action: "tunnels", description: "Inspect and stop running tunnel processes."},
+		actionMenuItem{label: "Manage route", action: "route", description: "Configure direct or ProxyJump routing."},
+		actionMenuItem{label: "Test connection", action: "test", description: "Check SSH reachability for this profile."},
+		actionMenuItem{label: "Edit", action: "edit", description: "Change this server profile."},
+		actionMenuItem{label: "Delete", action: "delete", description: "Permanently remove this server profile."},
+		actionMenuItem{label: "Import", action: "import", description: "Import profiles from a supported source."},
+		actionMenuItem{label: "Export", action: "export", description: "Export selected server profiles."},
+		actionMenuItem{label: "Vault: lock", action: "vault_lock", description: "Lock secrets for the current session."},
+		actionMenuItem{label: "Vault: change password", action: "vault_change_pw", description: "Change the password protecting stored secrets."},
 	}
 
 	l := list.New(items, list.NewDefaultDelegate(), 30, len(items)+2)
@@ -324,10 +347,44 @@ func (m *actionMenuModel) Update(msg tea.Msg) (*actionMenuModel, *string) {
 }
 
 func (m *actionMenuModel) View() string {
-	footer := renderHelp([]helpItem{{Key: "↑/↓", Action: "move"}, {Key: "Enter", Action: "select"}, {Key: "Esc", Action: "back"}}, m.width)
-	lines := []string{titleStyle.Copy().MarginLeft(0).Render("Actions")}
-	capacity := max(1, m.height-displayLineCount(footer)-1)
+	body := func(width, height int) string {
+		listLines := m.actionLines(max(1, height-2))
+		if classifyTerminal(width, height) == sizeWide {
+			leftWidth := width * 48 / 100
+			rightWidth := width - leftWidth - 1
+			selected, _ := m.list.SelectedItem().(actionMenuItem)
+			detail := []string{dashboardSection("Selected action"), "", selected.label, ""}
+			detail = append(detail, wrapCells(selected.description, max(1, rightWidth-4))...)
+			return joinPanelColumns(
+				renderPaddedPanel(leftWidth, height, listLines), leftWidth,
+				renderPaddedPanel(rightWidth, height, detail), rightWidth,
+			)
+		}
+		if classifyTerminal(width, height) == sizeMedium {
+			if selected, ok := m.list.SelectedItem().(actionMenuItem); ok && len(listLines) < height-4 {
+				listLines = append(listLines, "", dashboardSection("Selected"), selected.description)
+			}
+		}
+		return renderPaddedPanel(width, height, listLines)
+	}
+	return renderScreenShell(screenShell{
+		breadcrumb: "Actions",
+		status:     fmt.Sprintf("%d actions", len(m.list.Items())),
+		width:      m.width,
+		height:     m.height,
+		body:       body,
+		footer: []helpItem{
+			{Key: "↑/↓", Action: "move"},
+			{Key: "Enter", Action: "select"},
+			{Key: "Ctrl+H", Action: "help"},
+			{Key: "Esc", Action: "back"},
+		},
+	})
+}
+
+func (m *actionMenuModel) actionLines(capacity int) []string {
 	start, end := visibleServerRange(len(m.list.Items()), m.list.Index(), capacity)
+	lines := make([]string, 0, capacity)
 	for index := start; index < end; index++ {
 		item, ok := m.list.Items()[index].(actionMenuItem)
 		if !ok {
@@ -337,11 +394,7 @@ func (m *actionMenuModel) View() string {
 		if index == m.list.Index() {
 			marker = "> "
 		}
-		lines = append(lines, fitLine(marker+item.label, m.width))
+		lines = append(lines, marker+item.label)
 	}
-	lines = append(lines, strings.Split(footer, "\n")...)
-	if len(lines) > m.height && m.height > 0 {
-		lines = lines[:m.height]
-	}
-	return strings.Join(lines, "\n")
+	return lines
 }

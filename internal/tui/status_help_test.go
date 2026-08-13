@@ -45,20 +45,41 @@ func TestNotificationSurvivesRepeatedView(t *testing.T) {
 	}
 }
 
-func TestFullHelpReturnsToOriginatingScreen(t *testing.T) {
+func TestCtrlHFullHelpReturnsToOriginatingScreen(t *testing.T) {
 	m := New(nil)
 	m.screen = screenForwardList
 	m.forwardScreen = newForwardScreenModel(1, "prod", 80, 24)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlH})
 	m = updated.(*tuiModel)
 	if m.screen != screenFullHelp || m.fullHelp == nil {
-		t.Fatalf("F1 did not open full help from forward list: screen=%v", m.screen)
+		t.Fatalf("Ctrl+H did not open full help from forward list: screen=%v", m.screen)
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(*tuiModel)
 	if m.screen != screenForwardList || m.fullHelp != nil {
 		t.Fatalf("help did not return to forward list: screen=%v help=%v", m.screen, m.fullHelp)
+	}
+}
+
+func TestF1NoLongerOpensFullHelp(t *testing.T) {
+	m := New(nil)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	m = updated.(*tuiModel)
+	if m.screen == screenFullHelp || m.fullHelp != nil {
+		t.Fatalf("F1 still opens full help: screen=%v", m.screen)
+	}
+}
+
+func TestBackspaceStillEditsSearchAfterCtrlHBinding(t *testing.T) {
+	m := New(nil)
+	m.screen = screenSearch
+	m.searchInput.SetValue("prod")
+	m.searchInput.Focus()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = updated.(*tuiModel)
+	if m.screen != screenSearch || m.searchInput.Value() != "pro" {
+		t.Fatalf("Backspace did not edit search: screen=%v value=%q", m.screen, m.searchInput.Value())
 	}
 }
 

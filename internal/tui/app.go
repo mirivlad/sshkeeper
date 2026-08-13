@@ -680,7 +680,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.success = ""
 		}
-		if msg.Type == tea.KeyF1 && m.screen != screenHelp && m.screen != screenFullHelp && m.screen != screenConfirm {
+		if msg.Type == tea.KeyCtrlH && m.screen != screenHelp && m.screen != screenFullHelp && m.screen != screenConfirm {
 			m.helpParent = m.screen
 			m.fullHelp = newFullHelpModel(m.width, m.height)
 			m.screen = screenFullHelp
@@ -1549,41 +1549,41 @@ func (m *tuiModel) viewConfirm() string {
 	if m.confirm == nil {
 		return ""
 	}
-	width := m.width
-	if width <= 0 {
-		width = 80
-	}
-	innerWidth := max(1, width-2)
-	lines := []string{titleStyle.Copy().MarginLeft(0).Render(fitLine(m.confirm.title, width)), ""}
-	for _, line := range wrapCells(m.confirm.target, innerWidth) {
-		lines = append(lines, "  "+line)
-	}
-	if m.confirm.consequence != "" {
-		lines = append(lines, "")
-		for _, line := range wrapCells(m.confirm.consequence, innerWidth) {
-			lines = append(lines, "  "+line)
+	body := func(width, height int) string {
+		innerWidth := max(1, width-4)
+		lines := []string{dashboardSection(m.confirm.title), ""}
+		lines = append(lines, wrapCells(m.confirm.target, innerWidth)...)
+		if m.confirm.consequence != "" {
+			lines = append(lines, "")
+			lines = append(lines, wrapCells(m.confirm.consequence, innerWidth)...)
 		}
+		lines = append(lines, "")
+		cancel := "[ Cancel ]"
+		accept := "[ " + m.confirm.verb + " ]"
+		if m.confirm.focus == confirmCancel {
+			cancel = selectedStyle.Render("> " + cancel)
+		} else {
+			accept = errorStyle.Render("> " + accept)
+		}
+		if m.confirm.pending {
+			lines = append(lines, m.confirm.verb+" in progress…")
+		} else {
+			lines = append(lines, cancel+"  "+accept)
+		}
+		return renderPaddedPanel(width, height, lines)
 	}
-	lines = append(lines, "")
-	cancel := "[ Cancel ]"
-	accept := "[ " + m.confirm.verb + " ]"
-	if m.confirm.focus == confirmCancel {
-		cancel = selectedStyle.Render("> " + cancel)
-	} else {
-		accept = errorStyle.Render("> " + accept)
-	}
-	if m.confirm.pending {
-		lines = append(lines, fitLine("  "+m.confirm.verb+" in progress…", width), "")
-	} else {
-		lines = append(lines, fitLine("  "+cancel+"  "+accept, width), "")
-	}
-	footer := renderHelp([]helpItem{
-		{Key: "Tab", Action: "choose"},
-		{Key: "Enter", Action: "activate"},
-		{Key: "Esc", Action: "cancel"},
-	}, width)
-	lines = append(lines, strings.Split(footer, "\n")...)
-	return strings.Join(lines, "\n")
+	return renderScreenShell(screenShell{
+		breadcrumb: "Confirm",
+		status:     shellStatus(m.vaultUnlocked, "Action required"),
+		width:      m.width,
+		height:     m.height,
+		body:       body,
+		footer: []helpItem{
+			{Key: "Tab", Action: "choose"},
+			{Key: "Enter", Action: "activate"},
+			{Key: "Esc", Action: "cancel"},
+		},
+	})
 }
 
 func (m *tuiModel) beginConfirm(state confirmState) {
@@ -2163,7 +2163,7 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 		helpItem{Key: "Ctrl+F", Action: "search"},
 		helpItem{Key: "Ins", Action: insAction},
 		helpItem{Key: "?", Action: "hotkeys"},
-		helpItem{Key: "F1", Action: "help"},
+		helpItem{Key: "Ctrl+H", Action: "help"},
 		helpItem{Key: "Ctrl+Q", Action: "quit"},
 	)
 	return items
