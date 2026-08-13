@@ -118,13 +118,13 @@ forwarding, tunnels, and vault.
 
 ### Screenshots
 
-| Main list | Actions | Route edit |
-|-----------|---------|------------|
-| ![Main list](docs/screenshots/screen_1.png) | ![Actions](docs/screenshots/screen_2.png) | ![Route edit](docs/screenshots/screen_3.png) |
+| Wide dashboard | Dashboard 80x24 | Server form 60x16 |
+|----------------|-----------------|-------------------|
+| ![Wide dashboard](docs/screenshots/screen_1.png) | ![Dashboard 80x24](docs/screenshots/screen_2.png) | ![Server form 60x16](docs/screenshots/screen_3.png) |
 
-| Port forwards | Tunnel manager |
-|---------------|----------------|
-| ![Port forwards](docs/screenshots/screen_4.png) | ![Tunnel manager](docs/screenshots/screen_5.png) |
+| Port forward form | Safe confirmation |
+|-------------------|-------------------|
+| ![Port forward form](docs/screenshots/screen_4.png) | ![Safe confirmation](docs/screenshots/screen_5.png) |
 
 ### Key Reference
 

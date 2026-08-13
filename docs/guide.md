@@ -121,16 +121,31 @@ Vault created and unlocked for this command. You're ready to go!
 ### Главный экран
 
 ```
-sshkeeper  0 servers
-Vault unlocked | 0 OK | 0 FAIL
-
-  NAME                 ALIAS                ROUTE                              AUTH         GROUP      STATUS
-
-  No servers yet. Press Ctrl+A to add one.
-
-  Enter: connect | Ctrl+X: actions | Ctrl+A: add | Ctrl+E: edit
-  Ctrl+F: search | Ins: select | ?: hotkeys | F1: help | Ctrl+Q: quit
+sshkeeper / Servers                                  Vault unlocked · 1 profiles
+────────────────────────────────────────────────────────────────────────────────
+┌──────────────────────────────────────────────────────────────────────────────┐
+│1 servers                                                                     │
+│   NAME                                          AUTH       GROUP      STATUS │
+│>  Production                                    agent      -          ?      │
+└──────────────────────────────────────────────────────────────────────────────┘
+Selected profile
+Alias: prod  Target: ops@prod.example:22
+Auth: agent  Group: -  Status: ?
 ```
+
+Интерфейс адаптируется к ширине терминала:
+
+- от 100 столбцов список и подробности выбранного профиля показаны в двух панелях;
+- от 70 до 99 столбцов подробности переносятся под список;
+- от 60 до 69 столбцов остаётся компактная таблица без второстепенных полей;
+- минимальный поддерживаемый размер — `60x16`; ниже показывается сообщение о необходимом размере.
+
+Статус vault в заголовке отражает реальное состояние. Выбор и фокус всегда
+обозначены текстовым маркером `>`, поэтому интерфейс остаётся понятным без цвета.
+
+![Широкий главный экран](screenshots/screen_1.png)
+
+![Главный экран 80x24](screenshots/screen_2.png)
 
 **Столбцы:**
 
@@ -160,7 +175,8 @@ Vault unlocked | 0 OK | 0 FAIL
 
 ### Быстрая справка по клавишам
 
-Нажмите `?` на любом экране:
+Нажмите `?` на экране списка или менеджера. В текстовом поле символ `?`
+остаётся обычным вводом. `F1` открывает полную справку также из форм.
 
 ```
 sshkeeper — Quick Help
@@ -255,10 +271,10 @@ sshkeeper — Full Help
 ```
 Add Server
 
-  Alias:              mail.kp
+  Alias *:            mail.kp
   Display Name:       Production mail
-  Host:               mail.example.org
-  Port:               22
+  Host *:             mail.example.org
+  Port *:             22
   User:               root
   Auth Method:        key
   Identity File:      ~/.ssh/id_ed25519
@@ -273,6 +289,13 @@ Add Server
   Tab/↓: next | ↑: prev | /: pick list | Enter: select | Esc: back
 ```
 
+Поля с `*` обязательны. Порты принимают только десятичные значения от `1` до
+`65535`; ошибочный текст остаётся в поле рядом с понятным сообщением. На
+маленьком экране форма показывает окно полей вокруг текущего фокуса, сохраняя
+кнопки и подсказку видимыми.
+
+![Форма сервера 60x16](screenshots/screen_3.png)
+
 **Навигация по форме:**
 
 | Клавиша | Действие |
@@ -283,7 +306,7 @@ Add Server
 | `/` на Group | Выбрать из существующих групп |
 | `Enter` на Test | Проверить подключение |
 | `Enter` на Save | Сохранить |
-| `Esc` | Отмена |
+| `Esc` | Назад; при изменённых данных сначала запросить подтверждение сброса |
 
 ### Редактирование сервера
 
@@ -297,7 +320,10 @@ Add Server
 1. Выберите сервер стрелками
 2. Нажмите `Ctrl+X` (меню действий)
 3. Выберите "Delete"
-4. Подтвердите: `Enter` или `Y` — да, `Esc` или `N` — нет
+4. Диалог по умолчанию выделяет **Cancel**. Нажмите `Tab`, затем `Enter`, чтобы удалить; `Esc` отменяет операцию. Быстрые клавиши `Y`/`N` также поддерживаются.
+
+Диалог называет точный профиль и предупреждает, что вместе с ним удаляются
+сохранённые forwards и секреты vault.
 
 ### Тест подключения
 
@@ -385,17 +411,17 @@ sshkeeper route clear web
 Port Forwards — web
 
   NAME                 TYPE    LISTEN               TARGET               ON
-  Local PostgreSQL     Local   127.0.0.1:15432      127.0.0.1:5432       yes
-  Web Admin            Local   127.0.0.1:18080      internal.web:80      yes
-  SOCKS Proxy          SOCKS   127.0.0.1:1080       SOCKS                yes
+> Local PostgreSQL     local   127.0.0.1:15432      127.0.0.1:5432       yes
 
-  Selected
+Selected
   Port 127.0.0.1:15432 on this machine will be forwarded through web to 127.0.0.1:5432.
-  -L 127.0.0.1:15432:127.0.0.1:5432
-  -o ExitOnForwardFailure=yes
+  ssh -L 127.0.0.1:15432:127.0.0.1:5432
 
   Ctrl+A: add | Ctrl+E/Enter: edit | Ctrl+D: delete | Esc: back
 ```
+
+Строки и пояснение выбранного forward сокращаются по экранным ячейкам, а не
+по байтам, поэтому кириллица, CJK и emoji не ломают границы таблицы.
 
 **Действия:**
 
@@ -414,20 +440,15 @@ Port Forwards — web
 ```
 Add Port Forward
 
-  Name:               Local PostgreSQL
+  Name *:             Local PostgreSQL
   Description:        optional
 
-  Type
-  ▸ 1. Local    port on my machine → service on SSH server
-    2. Remote   port on SSH server → service on my machine
-    3. SOCKS    local dynamic SOCKS proxy through SSH
+  Type  ● 1 Local   ○ 2 Remote   ○ 3 SOCKS
 
-  Opens a local port on this machine and forwards it through SSH to the target address.
-
-  Listen Address:     127.0.0.1
-  Listen Port:        15432
-  Target Host:        127.0.0.1
-  Target Port:        5432
+  Listen Address *:   127.0.0.1
+  Listen Port *:      15432
+  Target Host *:      127.0.0.1
+  Target Port *:      5432
 
   Preview
   -L 127.0.0.1:15432:127.0.0.1:5432
@@ -437,6 +458,11 @@ Add Port Forward
 
   Tab/↓: next | ↑: prev | 1/2/3: select type | Enter: save | Esc: back
 ```
+
+Цифры `1`/`2`/`3` переключают тип только когда фокус находится на селекторе
+типа. В полях адреса и порта они вводятся как обычный текст.
+
+![Форма port forward 80x24](screenshots/screen_4.png)
 
 **Поля зависят от типа:**
 
@@ -768,8 +794,12 @@ sshkeeper connect secure
 
 | Клавиша | Действие |
 |---------|----------|
-| `Enter` / `Y` | Да |
-| `Esc` / `N` | Нет |
+| `Tab` / `Shift+Tab` / `←` / `→` | Переключить Cancel/действие |
+| `Enter` | Выполнить выделенный вариант; по умолчанию это Cancel |
+| `Y` | Подтвердить действие |
+| `Esc` / `N` | Отменить |
+
+![Безопасное подтверждение удаления](screenshots/screen_5.png)
 
 ---
 
