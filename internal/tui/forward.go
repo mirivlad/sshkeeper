@@ -161,6 +161,14 @@ type forwardFormModel struct {
 	typeIdx     int // 0=local, 1=remote, 2=socks
 	width       int
 	height      int
+	initial     forwardFormSnapshot
+}
+
+type forwardFormSnapshot struct {
+	name        string
+	description string
+	values      []string
+	forwardType model.ForwardType
 }
 
 var forwardTypes = []forwardTypeItem{
@@ -186,7 +194,7 @@ func newForwardFormModel(serverID int64, w, h int) *forwardFormModel {
 		inputs[i].CharLimit = 128
 	}
 
-	return &forwardFormModel{
+	fm := &forwardFormModel{
 		serverID:    serverID,
 		inputs:      inputs,
 		focusIdx:    0,
@@ -197,6 +205,9 @@ func newForwardFormModel(serverID int64, w, h int) *forwardFormModel {
 		width:       w,
 		height:      h,
 	}
+	fm.updateFocus()
+	fm.initial = fm.snapshot()
+	return fm
 }
 
 func newForwardEditModel(serverID int64, fwd *model.Forward, w, h int) *forwardFormModel {
@@ -211,7 +222,35 @@ func newForwardEditModel(serverID int64, fwd *model.Forward, w, h int) *forwardF
 	fm.inputs[1].SetValue(strconv.Itoa(fwd.LocalPort))
 	fm.inputs[2].SetValue(fwd.RemoteAddr)
 	fm.inputs[3].SetValue(strconv.Itoa(fwd.RemotePort))
+	fm.updateFocus()
+	fm.initial = fm.snapshot()
 	return fm
+}
+
+func (fm *forwardFormModel) snapshot() forwardFormSnapshot {
+	values := make([]string, len(fm.inputs))
+	for i := range fm.inputs {
+		values[i] = fm.inputs[i].Value()
+	}
+	return forwardFormSnapshot{
+		name:        fm.nameInput.Value(),
+		description: fm.descInput.Value(),
+		values:      values,
+		forwardType: fm.currentType,
+	}
+}
+
+func (fm *forwardFormModel) Dirty() bool {
+	current := fm.snapshot()
+	if current.name != fm.initial.name || current.description != fm.initial.description || current.forwardType != fm.initial.forwardType || len(current.values) != len(fm.initial.values) {
+		return true
+	}
+	for i := range current.values {
+		if current.values[i] != fm.initial.values[i] {
+			return true
+		}
+	}
+	return false
 }
 
 func typeIndex(t model.ForwardType) int {
@@ -258,7 +297,7 @@ func (fm *forwardFormModel) labelForField(idx int) string {
 	if idx < 0 || idx >= len(labels) {
 		return ""
 	}
-	return labels[idx]
+	return labels[idx] + " *"
 }
 
 func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -369,7 +408,7 @@ func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (fm *forwardFormModel) updateFocus() {
 	fm.nameInput.Blur()
-	fm.nameInput.Prompt = blurredStyle.Render("Name: ")
+	fm.nameInput.Prompt = blurredStyle.Render("Name *: ")
 	fm.descInput.Blur()
 	fm.descInput.Prompt = blurredStyle.Render("Description: ")
 	for i := range fm.inputs {
@@ -381,7 +420,7 @@ func (fm *forwardFormModel) updateFocus() {
 	switch {
 	case fm.focusIdx == 0:
 		fm.nameInput.Focus()
-		fm.nameInput.Prompt = focusedStyle.Render("Name> ")
+		fm.nameInput.Prompt = focusedStyle.Render("Name *> ")
 	case fm.focusIdx == 1:
 		fm.descInput.Focus()
 		fm.descInput.Prompt = focusedStyle.Render("Description> ")
@@ -400,10 +439,11 @@ func (fm *forwardFormModel) runSave() tea.Cmd {
 		name := strings.TrimSpace(fm.nameInput.Value())
 		desc := strings.TrimSpace(fm.descInput.Value())
 
-		localPort := 0
-		fmt.Sscanf(fm.inputs[1].Value(), "%d", &localPort)
+		localPort, err := parseNamedPort("Listen port", fm.inputs[1].Value())
+		if err != nil {
+			return saveDoneMsg{err: err}
+		}
 		remotePort := 0
-		fmt.Sscanf(fm.inputs[3].Value(), "%d", &remotePort)
 
 		localAddr := strings.TrimSpace(fm.inputs[0].Value())
 		remoteAddr := strings.TrimSpace(fm.inputs[2].Value())
@@ -411,10 +451,6 @@ func (fm *forwardFormModel) runSave() tea.Cmd {
 		if name == "" {
 			return saveDoneMsg{err: fmt.Errorf("name is required")}
 		}
-		if localPort < 1 || localPort > 65535 {
-			return saveDoneMsg{err: fmt.Errorf("invalid listen port %d: must be 1-65535", localPort)}
-		}
-
 		switch fm.currentType {
 		case model.ForwardLocal:
 			if localAddr == "" {
@@ -423,15 +459,17 @@ func (fm *forwardFormModel) runSave() tea.Cmd {
 			if remoteAddr == "" {
 				return saveDoneMsg{err: fmt.Errorf("target host is required for local forward")}
 			}
-			if remotePort < 1 || remotePort > 65535 {
-				return saveDoneMsg{err: fmt.Errorf("invalid target port %d: must be 1-65535", remotePort)}
+			remotePort, err = parseNamedPort("Target port", fm.inputs[3].Value())
+			if err != nil {
+				return saveDoneMsg{err: err}
 			}
 		case model.ForwardRemote:
 			if remoteAddr == "" {
 				return saveDoneMsg{err: fmt.Errorf("remote listen address is required")}
 			}
-			if remotePort < 1 || remotePort > 65535 {
-				return saveDoneMsg{err: fmt.Errorf("invalid remote port %d: must be 1-65535", remotePort)}
+			remotePort, err = parseNamedPort("Remote port", fm.inputs[3].Value())
+			if err != nil {
+				return saveDoneMsg{err: err}
 			}
 			if localAddr == "" {
 				localAddr = "127.0.0.1"
@@ -467,9 +505,20 @@ func (fm *forwardFormModel) runSave() tea.Cmd {
 		if SaveForward == nil {
 			return saveDoneMsg{err: fmt.Errorf("forward storage is unavailable")}
 		}
-		err := SaveForward(fwd)
+		err = SaveForward(fwd)
 		return saveDoneMsg{err: err}
 	}
+}
+
+func parseNamedPort(label, value string) (int, error) {
+	port, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number from 1 to 65535", label)
+	}
+	if port < 1 || port > 65535 {
+		return 0, fmt.Errorf("%s must be between 1 and 65535", label)
+	}
+	return port, nil
 }
 
 func (fm *forwardFormModel) View() string {

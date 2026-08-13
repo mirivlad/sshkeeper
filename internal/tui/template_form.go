@@ -21,6 +21,7 @@ type templateFormModel struct {
 	saved    bool
 	width    int
 	height   int
+	initial  []string
 }
 
 func newTemplateFormModel(t *model.CommandTemplate, w, h int) *templateFormModel {
@@ -44,7 +45,29 @@ func newTemplateFormModel(t *model.CommandTemplate, w, h int) *templateFormModel
 		inputs[2].SetValue(t.Description)
 	}
 	tf.updateFocus()
+	tf.initial = tf.snapshot()
 	return tf
+}
+
+func (tf *templateFormModel) snapshot() []string {
+	values := make([]string, len(tf.inputs))
+	for i := range tf.inputs {
+		values[i] = tf.inputs[i].Value()
+	}
+	return values
+}
+
+func (tf *templateFormModel) Dirty() bool {
+	current := tf.snapshot()
+	if len(current) != len(tf.initial) {
+		return true
+	}
+	for i := range current {
+		if current[i] != tf.initial[i] {
+			return true
+		}
+	}
+	return false
 }
 
 func (tf *templateFormModel) Init() tea.Cmd {
@@ -89,12 +112,19 @@ func (tf *templateFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (tf *templateFormModel) updateFocus() {
 	for i := range tf.inputs {
 		tf.inputs[i].Blur()
-		tf.inputs[i].Prompt = blurredStyle.Render(tf.labels[i] + ": ")
+		tf.inputs[i].Prompt = blurredStyle.Render(tf.labelAt(i) + ": ")
 	}
 	if tf.focusIdx < len(tf.inputs) {
 		tf.inputs[tf.focusIdx].Focus()
-		tf.inputs[tf.focusIdx].Prompt = focusedStyle.Render(tf.labels[tf.focusIdx] + "> ")
+		tf.inputs[tf.focusIdx].Prompt = focusedStyle.Render(tf.labelAt(tf.focusIdx) + "> ")
 	}
+}
+
+func (tf *templateFormModel) labelAt(index int) string {
+	if index == 0 || index == 1 {
+		return tf.labels[index] + " *"
+	}
+	return tf.labels[index]
 }
 
 func (tf *templateFormModel) save() tea.Cmd {

@@ -100,6 +100,10 @@ type serverDeletedMsg struct {
 	err     error
 }
 
+type discardFormMsg struct {
+	origin screen
+}
+
 type importDoneMsg struct {
 	servers []*model.Server
 	count   int
@@ -225,6 +229,8 @@ type confirmState struct {
 	consequence string
 	verb        string
 	parent      screen
+	complete    screen
+	completeSet bool
 	focus       confirmChoice
 	pending     bool
 	action      func() tea.Cmd
@@ -484,6 +490,18 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.list.SetItems(items)
 		delete(m.selected, msg.alias)
+		return m, nil
+
+	case discardFormMsg:
+		m.finishConfirm()
+		switch msg.origin {
+		case screenForm:
+			m.form = nil
+		case screenForwardForm:
+			m.forwardForm = nil
+		case screenTemplateForm:
+			m.templateForm = nil
+		}
 		return m, nil
 
 	case forwardDeleteConfirmMsg:
@@ -966,6 +984,10 @@ func (m *tuiModel) updateTemplates(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) updateTemplateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
+		if m.templateForm != nil && m.templateForm.Dirty() {
+			m.confirmDiscard("Command template", screenTemplateForm, screenTemplates)
+			return m, nil
+		}
 		m.screen = screenTemplates
 		m.templateForm = nil
 		return m, nil
@@ -1080,6 +1102,10 @@ func (m *tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.form = fm
 			}
 			return m, cmd
+		}
+		if m.form != nil && m.form.Dirty() {
+			m.confirmDiscard("Server profile", screenForm, screenList)
+			return m, nil
 		}
 
 		m.screen = screenList
@@ -1496,8 +1522,27 @@ func (m *tuiModel) finishConfirm() {
 	if m.confirm == nil {
 		return
 	}
-	m.screen = m.confirm.parent
+	destination := m.confirm.parent
+	if m.confirm.completeSet {
+		destination = m.confirm.complete
+	}
+	m.screen = destination
 	m.confirm = nil
+}
+
+func (m *tuiModel) confirmDiscard(title string, origin, destination screen) {
+	m.beginConfirm(confirmState{
+		title:       "Discard unsaved changes?",
+		target:      title,
+		consequence: "Your edits on this form will be lost.",
+		verb:        "Discard",
+		parent:      origin,
+		complete:    destination,
+		completeSet: true,
+		action: func() tea.Cmd {
+			return func() tea.Msg { return discardFormMsg{origin: origin} }
+		},
+	})
 }
 
 func (m *tuiModel) confirmServerDelete(server *model.Server) {
@@ -1594,6 +1639,10 @@ func (m *tuiModel) screenOwnsPrintableInput() bool {
 
 func (m *tuiModel) updateForwardForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
+		if m.forwardForm != nil && m.forwardForm.Dirty() {
+			m.confirmDiscard("Port forward", screenForwardForm, screenForwardList)
+			return m, nil
+		}
 		m.screen = screenForwardList
 		m.forwardForm = nil
 		return m, nil

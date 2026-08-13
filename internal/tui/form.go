@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,6 +63,12 @@ type formModel struct {
 	showGroupList  bool
 	authList       list.Model
 	showAuthList   bool
+	initial        formSnapshot
+}
+
+type formSnapshot struct {
+	values   []string
+	password string
 }
 
 func newFormModel(w, h int) *formModel {
@@ -85,6 +92,7 @@ func newFormModel(w, h int) *formModel {
 		inputs[i].Placeholder = placeholderForLabel(label)
 		inputs[i].CharLimit = 128
 	}
+	inputs[3].SetValue("22")
 
 	pw := textinput.New()
 	pw.Placeholder = "optional"
@@ -122,6 +130,7 @@ func newFormModel(w, h int) *formModel {
 	}
 
 	fm.updateFocus()
+	fm.initial = fm.snapshot()
 	return fm
 }
 
@@ -202,7 +211,29 @@ func newEditFormModel(s *model.Server, w, h int) *formModel {
 		}
 	}
 	fm.updateFocus()
+	fm.initial = fm.snapshot()
 	return fm
+}
+
+func (fm *formModel) snapshot() formSnapshot {
+	values := make([]string, len(fm.inputs))
+	for i := range fm.inputs {
+		values[i] = fm.inputs[i].Value()
+	}
+	return formSnapshot{values: values, password: fm.password.Value()}
+}
+
+func (fm *formModel) Dirty() bool {
+	current := fm.snapshot()
+	if current.password != fm.initial.password || len(current.values) != len(fm.initial.values) {
+		return true
+	}
+	for i := range current.values {
+		if current.values[i] != fm.initial.values[i] {
+			return true
+		}
+	}
+	return false
 }
 
 func (fm *formModel) Init() tea.Cmd {
@@ -389,6 +420,14 @@ func (fm *formModel) updateFocus() {
 
 func (fm *formModel) labelAt(index int) string {
 	if index >= 0 && index < len(fm.labels) {
+		switch index {
+		case 0:
+			return "Alias *"
+		case 2:
+			return "Host *"
+		case 3:
+			return "Port *"
+		}
 		if index == 5 {
 			return "Auth Method (/ pick)"
 		}
@@ -409,6 +448,10 @@ func (fm *formModel) runTest() tea.Cmd {
 	fm.err = nil
 	fm.saved = false
 
+	if _, err := parsePort(fm.inputs[3].Value()); err != nil {
+		fm.testing = false
+		return func() tea.Msg { return testDoneMsg{ok: false, err: err.Error()} }
+	}
 	s := fm.buildServer()
 	pw := fm.password.Value()
 
@@ -434,6 +477,9 @@ func (fm *formModel) runSave() tea.Cmd {
 	fm.saved = false
 	fm.testResult = ""
 
+	if _, err := parsePort(fm.inputs[3].Value()); err != nil {
+		return func() tea.Msg { return saveDoneMsg{err: err} }
+	}
 	s := fm.buildServer()
 	pw := fm.password.Value()
 
@@ -482,8 +528,7 @@ func parseRouteHops(input string) model.Route {
 }
 
 func (fm *formModel) buildServer() *model.Server {
-	port := 22
-	fmt.Sscanf(fm.inputs[3].Value(), "%d", &port)
+	port, _ := parsePort(fm.inputs[3].Value())
 	authMethod := model.AuthMethod(fm.inputs[5].Value())
 	if authMethod == "" {
 		authMethod = model.AuthKey
@@ -506,6 +551,18 @@ func (fm *formModel) buildServer() *model.Server {
 		StartupCommand: fm.inputs[10].Value(),
 		Tags:           splitCSV(fm.inputs[11].Value()),
 	}
+}
+
+func parsePort(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	port, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("Port must be a number from 1 to 65535")
+	}
+	if port < 1 || port > 65535 {
+		return 0, fmt.Errorf("Port must be between 1 and 65535")
+	}
+	return port, nil
 }
 
 func (fm *formModel) View() string {
@@ -602,9 +659,9 @@ func (fm *formModel) View() string {
 		if fm.saved {
 			b.WriteString("\n" + successStyle.Render("✓ Saved.") + "\n")
 		}
-		if fm.err != nil {
-			b.WriteString("\n" + errorStyle.Render(fmt.Sprintf("✗ Error: %v", fm.err)) + "\n")
-		}
+	}
+	if fm.err != nil {
+		b.WriteString("\n" + errorStyle.Render(fmt.Sprintf("✗ Error: %v", fm.err)) + "\n")
 	}
 
 	testBtn := "[ Test ]"
