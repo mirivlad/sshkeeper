@@ -79,52 +79,90 @@ func (m *forwardScreenModel) editSelected() tea.Cmd {
 }
 
 func (m *forwardScreenModel) View() string {
-	footer := renderHelp([]helpItem{
-		{Key: "Ctrl+A (a)", Action: "add"},
-		{Key: "Ctrl+E/Enter", Action: "edit"},
-		{Key: "Ctrl+D (d)", Action: "delete"},
-		{Key: "Esc", Action: "back"},
-	}, m.width)
-	lines := []string{titleStyle.Copy().MarginLeft(0).Render(fitLine("Port Forwards — "+m.serverAlias, m.width))}
+	notification := ""
 	if m.err != nil {
-		lines = append(lines, fitLine(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)), m.width))
+		notification = errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
 	}
-
-	footerRows := displayLineCount(footer)
-	detailRows := 0
-	if len(m.list) > 0 && m.height-footerRows >= 7 {
-		detailRows = 3
-	}
-	rowCapacity := max(1, m.height-len(lines)-footerRows-detailRows-1)
-	if len(m.list) == 0 {
-		lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(fitLine("No port forwards configured. Ctrl+A adds one.", m.width)))
-	} else {
-		lines = append(lines, m.renderForwardRow(nil, false))
-		rowCapacity--
-		start, end := visibleServerRange(len(m.list), m.selected, rowCapacity)
-		for index := start; index < end; index++ {
-			lines = append(lines, m.renderForwardRow(m.list[index], index == m.selected))
-		}
-		if end < len(m.list) || start > 0 {
-			lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(fmt.Sprintf("Showing %d-%d of %d", start+1, end, len(m.list))))
-		}
-		if detailRows > 0 && m.selected >= 0 && m.selected < len(m.list) {
-			forward := m.list[m.selected]
-			lines = append(lines,
-				sectionStyle.Copy().MarginTop(0).Render("Selected"),
-				fitLine(forward.ForwardHumanExplanation(m.serverAlias), m.width),
-				fitLine("ssh "+strings.Join(forward.ForwardSSHArgs(), " "), m.width),
+	body := func(width, height int) string {
+		switch classifyTerminal(width, height) {
+		case sizeWide:
+			leftWidth := width * 70 / 100
+			rightWidth := width - leftWidth - 1
+			return joinPanelColumns(
+				renderPaddedPanel(leftWidth, height, m.forwardListLines(leftWidth-4, height-2, false)), leftWidth,
+				renderPaddedPanel(rightWidth, height, m.forwardDetailLines(rightWidth-4, false)), rightWidth,
 			)
+		case sizeMedium:
+			detailHeight := min(7, max(4, height/3))
+			listHeight := max(3, height-detailHeight-1)
+			listPanel := renderPaddedPanel(width, listHeight, m.forwardListLines(width-4, listHeight-2, false))
+			detailPanel := renderPaddedPanel(width, detailHeight, m.forwardDetailLines(width-4, true))
+			return listPanel + "\n" + detailPanel
+		default:
+			return renderPaddedPanel(width, height, m.forwardListLines(width-4, height-2, true))
 		}
 	}
-	lines = append(lines, strings.Split(footer, "\n")...)
-	if len(lines) > m.height && m.height > 0 {
-		lines = lines[:m.height]
-	}
-	return strings.Join(lines, "\n")
+	return renderScreenShell(screenShell{
+		breadcrumb:   "Port Forwards / " + m.serverAlias,
+		status:       fmt.Sprintf("%d rules", len(m.list)),
+		notification: notification,
+		width:        m.width,
+		height:       m.height,
+		body:         body,
+		footer: []helpItem{
+			{Key: "Ctrl+A (a)", Action: "add"},
+			{Key: "Ctrl+E/Enter", Action: "edit"},
+			{Key: "Ctrl+D (d)", Action: "delete"},
+			{Key: "Ctrl+H", Action: "help"},
+			{Key: "Esc", Action: "back"},
+		},
+	})
 }
 
-func (m *forwardScreenModel) renderForwardRow(forward *model.Forward, selected bool) string {
+func (m *forwardScreenModel) forwardListLines(width, capacity int, compact bool) []string {
+	if len(m.list) == 0 {
+		return []string{helpStyle.Copy().MarginLeft(0).Render("No port forwards configured. Ctrl+A adds one.")}
+	}
+	lines := []string{m.renderForwardRow(nil, false, width, compact)}
+	rowCapacity := max(1, capacity-1)
+	showRange := len(m.list) > rowCapacity
+	if showRange {
+		rowCapacity = max(1, rowCapacity-1)
+	}
+	start, end := visibleServerRange(len(m.list), m.selected, rowCapacity)
+	for index := start; index < end; index++ {
+		lines = append(lines, m.renderForwardRow(m.list[index], index == m.selected, width, compact))
+	}
+	if showRange {
+		lines = append(lines, dashboardHelp(fmt.Sprintf("Showing %d-%d of %d", start+1, end, len(m.list))))
+	}
+	return lines
+}
+
+func (m *forwardScreenModel) forwardDetailLines(width int, compact bool) []string {
+	lines := []string{dashboardSection("Selected rule")}
+	if m.selected < 0 || m.selected >= len(m.list) {
+		return append(lines, "", dashboardHelp("No rule selected."))
+	}
+	forward := m.list[m.selected]
+	name := forward.Name
+	if name == "" {
+		name = forward.ForwardListen()
+	}
+	if compact {
+		lines = append(lines, name+" · "+string(forward.Type))
+	} else {
+		lines = append(lines, "", name, string(forward.Type))
+	}
+	lines = append(lines, wrapCells(forward.ForwardHumanExplanation(m.serverAlias), max(1, width))...)
+	if !compact {
+		lines = append(lines, "")
+	}
+	lines = append(lines, dashboardHelp("ssh "+strings.Join(forward.ForwardSSHArgs(), " ")))
+	return lines
+}
+
+func (m *forwardScreenModel) renderForwardRow(forward *model.Forward, selected bool, width int, compact bool) string {
 	marker, name, kind, listen, target, enabled := " ", "NAME", "TYPE", "LISTEN", "TARGET", "ON"
 	if forward != nil {
 		if selected {
@@ -142,30 +180,30 @@ func (m *forwardScreenModel) renderForwardRow(forward *model.Forward, selected b
 			enabled = "no"
 		}
 	}
-	wide := m.width >= 70
 	typeWidth, enabledWidth := 8, 3
-	if wide {
-		nameWidth := max(12, (m.width-typeWidth-enabledWidth-6)*30/100)
-		listenWidth := max(14, (m.width-typeWidth-enabledWidth-nameWidth-6)/2)
-		targetWidth := m.width - nameWidth - typeWidth - listenWidth - enabledWidth - 5
-		line := marker + " " + padCells(name, nameWidth) + " " + padCells(kind, typeWidth) + " " + padCells(listen, listenWidth) + " " + padCells(target, targetWidth) + " " + padCells(enabled, enabledWidth)
+	if !compact && width >= 58 {
+		flexible := max(3, width-typeWidth-enabledWidth-7)
+		nameWidth := max(1, flexible*30/100)
+		listenWidth := max(1, flexible*32/100)
+		targetWidth := max(1, flexible-nameWidth-listenWidth)
+		line := padCells(marker, 2) + " " + padCells(name, nameWidth) + " " + padCells(kind, typeWidth) + " " + padCells(listen, listenWidth) + " " + padCells(target, targetWidth) + " " + padCells(enabled, enabledWidth)
 		if forward == nil {
-			return listHeaderStyle.Render(fitLine(line, m.width))
+			return listHeaderStyle.Render(fitLine(line, width))
 		}
 		if selected {
-			return selectedRowStyle.Render(fitLine(line, m.width))
+			return selectedRowStyle.Render(fitLine(line, width))
 		}
-		return fitLine(line, m.width)
+		return fitLine(line, width)
 	}
-	nameWidth := max(12, m.width-typeWidth-enabledWidth-4)
-	line := marker + " " + padCells(name, nameWidth) + " " + padCells(kind, typeWidth) + " " + padCells(enabled, enabledWidth)
+	nameWidth := max(1, width-typeWidth-enabledWidth-5)
+	line := padCells(marker, 2) + " " + padCells(name, nameWidth) + " " + padCells(kind, typeWidth) + " " + padCells(enabled, enabledWidth)
 	if forward == nil {
-		return listHeaderStyle.Render(fitLine(line, m.width))
+		return listHeaderStyle.Render(fitLine(line, width))
 	}
 	if selected {
-		return selectedRowStyle.Render(fitLine(line, m.width))
+		return selectedRowStyle.Render(fitLine(line, width))
 	}
-	return fitLine(line, m.width)
+	return fitLine(line, width)
 }
 
 // --- Forward form screen model ---
@@ -595,76 +633,69 @@ func (fm *forwardFormModel) View() string {
 	if fm.editMode {
 		title = "Edit Port Forward"
 	}
-	lines := []string{titleStyle.Copy().MarginLeft(0).Render(fitLine(title, fm.width))}
-	lines = append(lines,
-		fitLine(fm.nameInput.View(), fm.width),
-		fitLine(fm.descInput.View(), fm.width),
-	)
-
-	typeParts := make([]string, len(forwardTypes))
-	for i, forwardType := range forwardTypes {
-		selected := "○"
-		if i == fm.typeIdx {
-			selected = "●"
-		}
-		focus := " "
-		if fm.focusIdx == 2+i {
-			focus = ">"
-		}
-		typeParts[i] = fmt.Sprintf("%s%s %d %s", focus, selected, i+1, forwardType.label)
-	}
-	lines = append(lines, fitLine("Type  "+strings.Join(typeParts, "   "), fm.width))
-	if fm.width >= 100 {
-		lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(fitLine(forwardTypes[fm.typeIdx].description, fm.width)))
-	}
-
-	visible := fm.visibleFields()
-	for _, idx := range visible {
-		lines = append(lines, fitLine(fm.inputs[idx].View(), fm.width))
-	}
-
-	if localAddr := strings.TrimSpace(fm.inputs[0].Value()); localAddr == "0.0.0.0" {
-		lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(fitLine("⚠ This port will be accessible from the network.", fm.width)))
-	}
-
-	if fm.width >= 70 && fm.currentType != "" && fm.inputs[1].Value() != "" {
-		fwd := &model.Forward{
-			Type:       fm.currentType,
-			LocalAddr:  fm.inputs[0].Value(),
-			LocalPort:  0,
-			RemoteAddr: fm.inputs[2].Value(),
-			RemotePort: 0,
-		}
-		fmt.Sscanf(fm.inputs[1].Value(), "%d", &fwd.LocalPort)
-		fmt.Sscanf(fm.inputs[3].Value(), "%d", &fwd.RemotePort)
-		preview := strings.Join(fwd.ForwardSSHArgs(), " ") + " -o ExitOnForwardFailure=yes"
-		lines = append(lines, fitLine("Preview  ssh "+preview, fm.width))
-	}
-
-	total := 2 + 3 + len(visible) + 1
-	button := "  [ Save ]"
-	if fm.focusIdx == total-1 {
-		button = selectedStyle.Render("> [ Save ]")
-	}
+	notification := ""
 	if fm.err != nil {
-		lines = append(lines, fitLine(errorStyle.Render(fmt.Sprintf("✗ Error: %v", fm.err)), fm.width))
+		notification = errorStyle.Render(fmt.Sprintf("✗ Error: %v", fm.err))
+	} else if fm.saved {
+		notification = successStyle.Render("✓ Saved.")
 	}
-	if fm.saved {
-		lines = append(lines, successStyle.Render("✓ Saved."))
+	body := func(width, height int) string {
+		contentWidth := max(1, width-4)
+		lines := []string{fm.nameInput.View(), fm.descInput.View()}
+		typeParts := make([]string, len(forwardTypes))
+		for i, forwardType := range forwardTypes {
+			selected := "○"
+			if i == fm.typeIdx {
+				selected = "●"
+			}
+			focus := " "
+			if fm.focusIdx == 2+i {
+				focus = ">"
+			}
+			typeParts[i] = fmt.Sprintf("%s%s %d %s", focus, selected, i+1, forwardType.label)
+		}
+		lines = append(lines, "Type  "+strings.Join(typeParts, "   "))
+		if width >= 100 {
+			lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(forwardTypes[fm.typeIdx].description))
+		}
+		visible := fm.visibleFields()
+		for _, idx := range visible {
+			lines = append(lines, fm.inputs[idx].View())
+		}
+		if strings.TrimSpace(fm.inputs[0].Value()) == "0.0.0.0" {
+			lines = append(lines, helpStyle.Copy().MarginLeft(0).Render("⚠ This port will be accessible from the network."))
+		}
+		if width >= 70 && fm.currentType != "" && fm.inputs[1].Value() != "" {
+			fwd := &model.Forward{Type: fm.currentType, LocalAddr: fm.inputs[0].Value(), RemoteAddr: fm.inputs[2].Value()}
+			fmt.Sscanf(fm.inputs[1].Value(), "%d", &fwd.LocalPort)
+			fmt.Sscanf(fm.inputs[3].Value(), "%d", &fwd.RemotePort)
+			preview := "Preview  ssh " + strings.Join(fwd.ForwardSSHArgs(), " ") + " -o ExitOnForwardFailure=yes"
+			lines = append(lines, wrapCells(preview, contentWidth)...)
+		}
+		total := 2 + 3 + len(visible) + 1
+		button := "  [ Save ]"
+		if fm.focusIdx == total-1 {
+			button = selectedStyle.Render("> [ Save ]")
+		}
+		lines = append(lines, "", button)
+		return renderPaddedPanel(width, height, lines)
 	}
-	lines = append(lines, button)
-	footer := renderHelp([]helpItem{
-		{Key: "Tab/↓", Action: "next"},
-		{Key: "↑", Action: "prev"},
-		{Key: "1/2/3", Action: "select type"},
-		{Key: "Enter", Action: "save"},
-		{Key: "Esc", Action: "back"},
-	}, fm.width)
-	lines = append(lines, strings.Split(footer, "\n")...)
-	if len(lines) > fm.height && fm.height > 0 {
-		lines = lines[:fm.height]
-	}
-	return strings.Join(lines, "\n")
+	return renderScreenShell(screenShell{
+		breadcrumb:   "Port Forwards / " + title,
+		status:       string(fm.currentType),
+		notification: notification,
+		width:        fm.width,
+		height:       fm.height,
+		body:         body,
+		footer: []helpItem{
+			{Key: "Tab/↓", Action: "next"},
+			{Key: "↑", Action: "prev"},
+			{Key: "1/2/3", Action: "select type"},
+			{Key: "Enter", Action: "save"},
+			{Key: "Ctrl+H", Action: "help"},
+			{Key: "Esc", Action: "back"},
+		},
+	})
 }
 
 // forwardEditSignal is sent when user wants to edit a forward

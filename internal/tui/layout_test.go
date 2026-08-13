@@ -107,7 +107,9 @@ func TestForwardFormFitsSupportedTerminalSizes(t *testing.T) {
 		fm.inputs[1].SetValue("15432")
 		fm.inputs[2].SetValue("database.internal.example")
 		fm.inputs[3].SetValue("5432")
-		assertViewFits(t, fm.View(), size.width, size.height)
+		view := fm.View()
+		assertViewFits(t, view, size.width, size.height)
+		assertUnifiedScreen(t, view, size.width, size.height)
 	}
 }
 
@@ -120,6 +122,7 @@ func TestForwardListFitsSupportedTerminalSizes(t *testing.T) {
 		}
 		view := fm.View()
 		assertViewFits(t, view, size.width, size.height)
+		assertUnifiedScreen(t, view, size.width, size.height)
 		for _, want := range []string{"Port Forwards", "Local PostgreSQL", "Esc"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("forward list at %dx%d missing %q:\n%s", size.width, size.height, want, view)
