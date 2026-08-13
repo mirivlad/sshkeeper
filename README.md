@@ -96,20 +96,20 @@ Running `sshkeeper` without arguments opens the TUI.
 ### Main Window
 
 ```
-sshkeeper  0 servers
-Vault unlocked | 0 OK | 0 FAIL
-
-  NAME                 ALIAS                ROUTE                              AUTH         GROUP      STATUS
-
-  No servers yet. Press Ctrl+A to add one.
-
-  Enter: connect | Ctrl+X: actions | Ctrl+A: add | Ctrl+E: edit
-  Ctrl+F: search | Ins: select | ?: hotkeys | F1: help | Ctrl+Q: quit
+sshkeeper / Servers                                  Vault unlocked · 1 profiles
+────────────────────────────────────────────────────────────────────────────────
+┌──────────────────────────────────────────────────────────────────────────────┐
+│1 servers                                                                     │
+│   NAME                                          AUTH       GROUP      STATUS │
+│>  Production                                    agent      -          ?      │
+└──────────────────────────────────────────────────────────────────────────────┘
+  Enter: connect | Ctrl+X: actions | Ctrl+A: add | Ctrl+E: edit | Ctrl+Q: quit
 ```
 
 ### Quick Help (?)
 
-Press `?` on any screen for a compact hotkey reference.
+Press `?` outside text editors for a compact hotkey reference. Inside forms and
+search, `?` remains normal text input.
 
 ### Full Help (F1)
 

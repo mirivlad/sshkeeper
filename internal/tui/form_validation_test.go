@@ -46,9 +46,89 @@ func TestServerFormPreservesInvalidPortAndDoesNotSave(t *testing.T) {
 	if fm.err == nil || !strings.Contains(fm.err.Error(), "Port") {
 		t.Fatalf("missing actionable port error: %v", fm.err)
 	}
+	if fm.focusIdx != 3 {
+		t.Fatalf("invalid port focus = %d, want 3", fm.focusIdx)
+	}
 	if view := fm.View(); !strings.Contains(view, "Port must be a number") {
 		t.Fatalf("validation error is not rendered:\n%s", view)
 	}
+}
+
+func TestServerSaveSuccessResetsDirtySnapshot(t *testing.T) {
+	m := New(nil)
+	m.screen = screenForm
+	m.form = newFormModel(80, 24)
+	m.form.inputs[0].SetValue("prod")
+	m.form.inputs[2].SetValue("prod.example")
+	m.form.password.SetValue("secret")
+
+	updated, _ := m.Update(saveDoneMsg{})
+	m = updated.(*tuiModel)
+	if m.form == nil || m.form.Dirty() {
+		t.Fatalf("saved form remains dirty: %#v", m.form)
+	}
+	if m.form.password.Value() != "" {
+		t.Fatal("saved secret remained in the form")
+	}
+}
+
+func TestForwardValidationMovesFocusToInvalidPort(t *testing.T) {
+	fm := newForwardFormModel(1, 60, 16)
+	fm.nameInput.SetValue("postgres")
+	fm.inputs[0].SetValue("127.0.0.1")
+	fm.inputs[1].SetValue("bad")
+	fm.inputs[2].SetValue("db")
+	fm.inputs[3].SetValue("5432")
+	updated, _ := fm.Update(fm.runSave()())
+	fm = updated.(*forwardFormModel)
+	if fm.focusIdx != 6 {
+		t.Fatalf("invalid listen port focus = %d, want 6", fm.focusIdx)
+	}
+	view := fm.View()
+	if !strings.Contains(view, "Listen Port") || !strings.Contains(view, "must be a number") {
+		t.Fatalf("invalid port and error are not visible together:\n%s", view)
+	}
+}
+
+func TestCtrlQQuitsCleanStateAndConfirmsDirtyForm(t *testing.T) {
+	t.Run("clean manager", func(t *testing.T) {
+		m := New(nil)
+		m.screen = screenForwardList
+		m.forwardScreen = newForwardScreenModel(1, "prod", 80, 24)
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+		if cmd == nil {
+			t.Fatal("Ctrl+Q did not quit clean manager")
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Fatalf("Ctrl+Q command returned %T", cmd())
+		}
+	})
+
+	t.Run("dirty server form", func(t *testing.T) {
+		m := New(nil)
+		m.screen = screenForm
+		m.form = newFormModel(80, 24)
+		m.form.inputs[0].SetValue("prod")
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+		m = updated.(*tuiModel)
+		if cmd != nil || m.screen != screenConfirm || m.confirm == nil || m.confirm.focus != confirmCancel {
+			t.Fatalf("dirty Ctrl+Q did not open safe discard: screen=%v confirm=%#v", m.screen, m.confirm)
+		}
+		m.confirm.focus = confirmAccept
+		updated, cmd = m.updateConfirm(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(*tuiModel)
+		if cmd == nil {
+			t.Fatal("accepted quit confirmation produced no command")
+		}
+		updated, quitCmd := m.Update(cmd())
+		m = updated.(*tuiModel)
+		if quitCmd == nil || m.confirm != nil || m.form != nil {
+			t.Fatalf("accepted dirty quit did not clear state: confirm=%v form=%v", m.confirm, m.form)
+		}
+		if _, ok := quitCmd().(tea.QuitMsg); !ok {
+			t.Fatalf("accepted dirty quit returned %T", quitCmd())
+		}
+	})
 }
 
 func TestDirtyServerFormRequiresDiscardConfirmation(t *testing.T) {

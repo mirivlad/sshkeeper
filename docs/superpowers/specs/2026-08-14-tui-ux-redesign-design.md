@@ -110,4 +110,3 @@ context, vault status, resize propagation, and Unicode truncation.
 Runtime checks use an isolated XDG profile and real Bubble Tea execution at
 120x40, 80x24, and 60x16. Each size is captured and visually inspected for
 clipping, missing focus, missing actions, and false status.
-

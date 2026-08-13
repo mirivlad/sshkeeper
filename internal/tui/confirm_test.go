@@ -82,6 +82,72 @@ func TestServerDeleteRunsOnceAndReturnsToList(t *testing.T) {
 	}
 }
 
+func TestServerDeletePartialSuccessRemovesLocalRow(t *testing.T) {
+	server := &model.Server{ID: 1, Alias: "prod", Host: "prod.example", Port: 22}
+	m := New([]*model.Server{server})
+	oldDelete, oldList := DeleteServer, ListServers
+	t.Cleanup(func() { DeleteServer, ListServers = oldDelete, oldList })
+	DeleteServer = func(string) error { return nil }
+	ListServers = func() ([]*model.Server, error) { return nil, errors.New("reload unavailable") }
+
+	m.confirmServerDelete(server)
+	m.confirm.focus = confirmAccept
+	updated, cmd := m.updateConfirm(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*tuiModel)
+	updated, _ = m.Update(cmd())
+	m = updated.(*tuiModel)
+	if len(m.servers) != 0 || len(m.list.Items()) != 0 {
+		t.Fatalf("deleted server remained visible: servers=%d items=%d", len(m.servers), len(m.list.Items()))
+	}
+	if m.err != nil || !strings.Contains(m.success, "refresh failed") {
+		t.Fatalf("partial success was misreported: err=%v success=%q", m.err, m.success)
+	}
+}
+
+func TestTagAndTemplateDeletePartialSuccessRemovesLocalRow(t *testing.T) {
+	t.Run("tag", func(t *testing.T) {
+		m := New(nil)
+		m.screen = screenTags
+		m.setTags([]string{"prod"})
+		oldDelete, oldList := DeleteTag, ListTags
+		t.Cleanup(func() { DeleteTag, ListTags = oldDelete, oldList })
+		DeleteTag = func(string) error { return nil }
+		ListTags = func() ([]string, error) { return nil, errors.New("reload unavailable") }
+
+		updated, _ := m.updateTags(tea.KeyMsg{Type: tea.KeyCtrlD})
+		m = updated.(*tuiModel)
+		m.confirm.focus = confirmAccept
+		updated, cmd := m.updateConfirm(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(*tuiModel)
+		updated, _ = m.Update(cmd())
+		m = updated.(*tuiModel)
+		if len(m.tags) != 0 || !strings.Contains(m.success, "refresh failed") {
+			t.Fatalf("tag partial success: tags=%v success=%q err=%v", m.tags, m.success, m.err)
+		}
+	})
+
+	t.Run("template", func(t *testing.T) {
+		m := New(nil)
+		m.screen = screenTemplates
+		m.setTemplates([]*model.CommandTemplate{{Name: "uptime", Command: "uptime"}})
+		oldDelete, oldList := DeleteCommandTemplate, ListCommandTemplates
+		t.Cleanup(func() { DeleteCommandTemplate, ListCommandTemplates = oldDelete, oldList })
+		DeleteCommandTemplate = func(string) error { return nil }
+		ListCommandTemplates = func() ([]*model.CommandTemplate, error) { return nil, errors.New("reload unavailable") }
+
+		updated, _ := m.updateTemplates(tea.KeyMsg{Type: tea.KeyCtrlD})
+		m = updated.(*tuiModel)
+		m.confirm.focus = confirmAccept
+		updated, cmd := m.updateConfirm(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(*tuiModel)
+		updated, _ = m.Update(cmd())
+		m = updated.(*tuiModel)
+		if len(m.templates) != 0 || !strings.Contains(m.success, "refresh failed") {
+			t.Fatalf("template partial success: templates=%v success=%q err=%v", m.templates, m.success, m.err)
+		}
+	})
+}
+
 func TestForwardDeleteReturnsToForwardListAndRetainsError(t *testing.T) {
 	server := &model.Server{ID: 1, Alias: "prod"}
 	fwd := &model.Forward{ID: 7, ServerID: 1, Name: "postgres", Type: model.ForwardLocal, LocalAddr: "127.0.0.1", LocalPort: 15432, RemoteAddr: "db", RemotePort: 5432, Enabled: true}

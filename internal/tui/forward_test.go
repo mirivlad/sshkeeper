@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,6 +24,51 @@ func TestForwardFormDigitsReachFocusedInput(t *testing.T) {
 	}
 	if fm.currentType != model.ForwardLocal {
 		t.Fatalf("forward type = %q, want %q", fm.currentType, model.ForwardLocal)
+	}
+}
+
+func TestRemoteForwardFormMapsListenAndTargetEndpoints(t *testing.T) {
+	oldSave := SaveForward
+	t.Cleanup(func() { SaveForward = oldSave })
+	var saved *model.Forward
+	SaveForward = func(forward *model.Forward) error {
+		copy := *forward
+		saved = &copy
+		return nil
+	}
+
+	fm := newForwardFormModel(7, 80, 24)
+	fm.currentType = model.ForwardRemote
+	fm.typeIdx = typeIndex(model.ForwardRemote)
+	fm.nameInput.SetValue("remote web")
+	fm.inputs[0].SetValue("0.0.0.0")
+	fm.inputs[1].SetValue("18080")
+	fm.inputs[2].SetValue("127.0.0.1")
+	fm.inputs[3].SetValue("8080")
+	msg := fm.runSave()()
+	if result, ok := msg.(saveDoneMsg); !ok || result.err != nil {
+		t.Fatalf("save result = %#v", msg)
+	}
+	if saved == nil {
+		t.Fatal("forward was not saved")
+	}
+	if saved.RemoteAddr != "0.0.0.0" || saved.RemotePort != 18080 || saved.LocalAddr != "127.0.0.1" || saved.LocalPort != 8080 {
+		t.Fatalf("remote forward endpoints were reversed: %#v", saved)
+	}
+	wantArgs := []string{"-R", "0.0.0.0:18080:127.0.0.1:8080"}
+	if got := saved.ForwardSSHArgs(); !reflect.DeepEqual(got, wantArgs) {
+		t.Fatalf("ForwardSSHArgs() = %#v, want %#v", got, wantArgs)
+	}
+}
+
+func TestRemoteForwardEditPopulatesSemanticFields(t *testing.T) {
+	forward := &model.Forward{ID: 9, Type: model.ForwardRemote, RemoteAddr: "0.0.0.0", RemotePort: 18080, LocalAddr: "127.0.0.1", LocalPort: 8080}
+	fm := newForwardEditModel(7, forward, 80, 24)
+	want := []string{"0.0.0.0", "18080", "127.0.0.1", "8080"}
+	for index, value := range want {
+		if got := fm.inputs[index].Value(); got != value {
+			t.Fatalf("input[%d] = %q, want %q", index, got, value)
+		}
 	}
 }
 

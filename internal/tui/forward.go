@@ -242,10 +242,17 @@ func newForwardEditModel(serverID int64, fwd *model.Forward, w, h int) *forwardF
 	fm.descInput.SetValue(fwd.Description)
 	fm.currentType = fwd.Type
 	fm.typeIdx = typeIndex(fwd.Type)
-	fm.inputs[0].SetValue(fwd.LocalAddr)
-	fm.inputs[1].SetValue(strconv.Itoa(fwd.LocalPort))
-	fm.inputs[2].SetValue(fwd.RemoteAddr)
-	fm.inputs[3].SetValue(strconv.Itoa(fwd.RemotePort))
+	if fwd.Type == model.ForwardRemote {
+		fm.inputs[0].SetValue(fwd.RemoteAddr)
+		fm.inputs[1].SetValue(strconv.Itoa(fwd.RemotePort))
+		fm.inputs[2].SetValue(fwd.LocalAddr)
+		fm.inputs[3].SetValue(strconv.Itoa(fwd.LocalPort))
+	} else {
+		fm.inputs[0].SetValue(fwd.LocalAddr)
+		fm.inputs[1].SetValue(strconv.Itoa(fwd.LocalPort))
+		fm.inputs[2].SetValue(fwd.RemoteAddr)
+		fm.inputs[3].SetValue(strconv.Itoa(fwd.RemotePort))
+	}
 	fm.updateFocus()
 	fm.initial = fm.snapshot()
 	return fm
@@ -328,7 +335,7 @@ func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case saveDoneMsg:
 		fm.saved = (msg.err == nil)
-		fm.err = msg.err
+		fm.applySaveError(msg.err)
 		return fm, nil
 	}
 
@@ -462,24 +469,24 @@ func (fm *forwardFormModel) runSave() tea.Cmd {
 	return func() tea.Msg {
 		name := strings.TrimSpace(fm.nameInput.Value())
 		desc := strings.TrimSpace(fm.descInput.Value())
-
-		localPort, err := parseNamedPort("Listen port", fm.inputs[1].Value())
-		if err != nil {
-			return saveDoneMsg{err: err}
-		}
-		remotePort := 0
-
-		localAddr := strings.TrimSpace(fm.inputs[0].Value())
-		remoteAddr := strings.TrimSpace(fm.inputs[2].Value())
+		localAddr, remoteAddr := "", ""
+		localPort, remotePort := 0, 0
+		var err error
 
 		if name == "" {
 			return saveDoneMsg{err: fmt.Errorf("name is required")}
 		}
 		switch fm.currentType {
 		case model.ForwardLocal:
+			localAddr = strings.TrimSpace(fm.inputs[0].Value())
 			if localAddr == "" {
 				localAddr = "127.0.0.1"
 			}
+			localPort, err = parseNamedPort("Listen port", fm.inputs[1].Value())
+			if err != nil {
+				return saveDoneMsg{err: err}
+			}
+			remoteAddr = strings.TrimSpace(fm.inputs[2].Value())
 			if remoteAddr == "" {
 				return saveDoneMsg{err: fmt.Errorf("target host is required for local forward")}
 			}
@@ -488,19 +495,30 @@ func (fm *forwardFormModel) runSave() tea.Cmd {
 				return saveDoneMsg{err: err}
 			}
 		case model.ForwardRemote:
+			remoteAddr = strings.TrimSpace(fm.inputs[0].Value())
 			if remoteAddr == "" {
 				return saveDoneMsg{err: fmt.Errorf("remote listen address is required")}
 			}
-			remotePort, err = parseNamedPort("Remote port", fm.inputs[3].Value())
+			remotePort, err = parseNamedPort("Remote listen port", fm.inputs[1].Value())
 			if err != nil {
 				return saveDoneMsg{err: err}
 			}
+			localAddr = strings.TrimSpace(fm.inputs[2].Value())
 			if localAddr == "" {
 				localAddr = "127.0.0.1"
 			}
+			localPort, err = parseNamedPort("Local target port", fm.inputs[3].Value())
+			if err != nil {
+				return saveDoneMsg{err: err}
+			}
 		case model.ForwardDynamic:
+			localAddr = strings.TrimSpace(fm.inputs[0].Value())
 			if localAddr == "" {
 				localAddr = "127.0.0.1"
+			}
+			localPort, err = parseNamedPort("Listen port", fm.inputs[1].Value())
+			if err != nil {
+				return saveDoneMsg{err: err}
 			}
 			remoteAddr = ""
 			remotePort = 0
@@ -531,6 +549,33 @@ func (fm *forwardFormModel) runSave() tea.Cmd {
 		}
 		err = SaveForward(fwd)
 		return saveDoneMsg{err: err}
+	}
+}
+
+func (fm *forwardFormModel) applySaveError(err error) {
+	fm.err = err
+	if err == nil {
+		return
+	}
+	message := strings.ToLower(err.Error())
+	fieldIndex := -1
+	switch {
+	case strings.Contains(message, "name is required"):
+		fm.focusIdx = 0
+		fm.updateFocus()
+		return
+	case strings.Contains(message, "listen address"):
+		fieldIndex = 0
+	case strings.Contains(message, "listen port"):
+		fieldIndex = 1
+	case strings.Contains(message, "target host"):
+		fieldIndex = 2
+	case strings.Contains(message, "target port"):
+		fieldIndex = 3
+	}
+	if fieldIndex >= 0 {
+		fm.focusIdx = 2 + len(forwardTypes) + fieldIndex
+		fm.updateFocus()
 	}
 }
 

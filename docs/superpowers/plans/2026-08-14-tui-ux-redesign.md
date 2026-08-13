@@ -129,4 +129,3 @@
 - [ ] Resolve every Critical or Important issue using a failing regression test first.
 - [ ] Re-run `go vet ./...`, `go test ./... -count=1`, `go build ./...`, and the three-size runtime capture.
 - [ ] Verify feature branch is clean and synchronized, fast-forward `main`, push `main` to `origin` and `github`, and verify all three refs resolve to the same SHA.
-

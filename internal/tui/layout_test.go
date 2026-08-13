@@ -141,6 +141,27 @@ func TestActionMenuFitsSupportedTerminalSizes(t *testing.T) {
 	}
 }
 
+func TestConfirmationFitsSupportedTerminalSizes(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
+		m := New(nil)
+		m.width, m.height = size.width, size.height
+		m.beginConfirm(confirmState{
+			title:       "Delete port forward?",
+			target:      `"Очень длинный Local PostgreSQL 数据库 forward" · 127.0.0.1:15432 → database.internal.example:5432`,
+			consequence: "This removes the saved forwarding rule. Active tunnels are not stopped.",
+			verb:        "Delete",
+			parent:      screenForwardList,
+		})
+		view := m.View()
+		assertViewFits(t, view, size.width, size.height)
+		for _, want := range []string{"Local PostgreSQL", "not stopped.", "> [ Cancel ]", "Esc"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("confirmation at %dx%d missing %q:\n%s", size.width, size.height, want, view)
+			}
+		}
+	}
+}
+
 func TestTemplateFormFitsSupportedTerminalSizes(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
 		form := newTemplateFormModel(nil, size.width, size.height)

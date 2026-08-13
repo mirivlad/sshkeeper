@@ -61,13 +61,17 @@ type saveDoneMsg struct {
 }
 
 type templatesLoadedMsg struct {
-	templates []*model.CommandTemplate
-	err       error
+	templates   []*model.CommandTemplate
+	deleted     bool
+	deletedName string
+	err         error
 }
 
 type tagsLoadedMsg struct {
-	tags []string
-	err  error
+	tags        []string
+	deleted     bool
+	deletedName string
+	err         error
 }
 
 type backgroundRunDoneMsg struct {
@@ -97,8 +101,11 @@ type forwardDeletedMsg struct {
 type serverDeletedMsg struct {
 	alias   string
 	servers []*model.Server
+	deleted bool
 	err     error
 }
+
+type quitAfterDiscardMsg struct{}
 
 type discardFormMsg struct {
 	origin screen
@@ -397,7 +404,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.finishConfirm()
 		}
 		if msg.err != nil {
-			m.err = msg.err
+			if msg.deleted {
+				m.removeTemplate(msg.deletedName)
+				m.err = nil
+				m.success = fmt.Sprintf("Deleted %q; refresh failed: %v", msg.deletedName, msg.err)
+			} else {
+				m.err = msg.err
+			}
 			return m, nil
 		}
 		m.setTemplates(msg.templates)
@@ -408,7 +421,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.finishConfirm()
 		}
 		if msg.err != nil {
-			m.err = msg.err
+			if msg.deleted {
+				m.removeTag(msg.deletedName)
+				m.err = nil
+				m.success = fmt.Sprintf("Deleted %q; refresh failed: %v", msg.deletedName, msg.err)
+			} else {
+				m.err = msg.err
+			}
 			return m, nil
 		}
 		m.setTags(msg.tags)
@@ -474,14 +493,32 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.forwardScreen.err = nil
+			forwards := make([]*model.Forward, 0, len(m.forwardScreen.list))
+			for _, forward := range m.forwardScreen.list {
+				if forward.ID != msg.id {
+					forwards = append(forwards, forward)
+				}
+			}
+			m.forwardScreen.list = forwards
+			if m.forwardScreen.selected >= len(forwards) {
+				m.forwardScreen.selected = max(0, len(forwards)-1)
+			}
 			return m, m.forwardScreen.loadForwards()
 		}
 		return m, nil
 
 	case serverDeletedMsg:
 		m.finishConfirm()
+		if msg.deleted {
+			m.removeServer(msg.alias)
+		}
 		if msg.err != nil {
-			m.err = msg.err
+			if msg.deleted {
+				m.err = nil
+				m.success = fmt.Sprintf("Deleted %q; refresh failed: %v", msg.alias, msg.err)
+			} else {
+				m.err = msg.err
+			}
 			return m, nil
 		}
 		m.servers = msg.servers
@@ -492,6 +529,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetItems(items)
 		delete(m.selected, msg.alias)
 		return m, nil
+
+	case quitAfterDiscardMsg:
+		m.confirm = nil
+		m.form = nil
+		m.forwardForm = nil
+		m.templateForm = nil
+		return m, tea.Quit
 
 	case discardFormMsg:
 		m.finishConfirm()
@@ -588,7 +632,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case saveDoneMsg:
 		if m.forwardForm != nil {
 			if msg.err != nil {
-				m.forwardForm.err = msg.err
+				m.forwardForm.applySaveError(msg.err)
 				m.forwardForm.saved = false
 				// Stay on screenForwardForm to show error
 				return m, nil
@@ -619,12 +663,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.form != nil {
 			m.form.saving = false
 			if msg.err != nil {
-				m.form.err = msg.err
+				m.form.applySaveError(msg.err)
 				m.form.saved = false
 			} else {
 				m.form.saved = true
 				m.form.savedTime = time.Now()
 				m.form.err = nil
+				m.form.password.SetValue("")
+				m.form.initial = m.form.snapshot()
 			}
 		}
 		return m, nil
@@ -639,6 +685,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fullHelp = newFullHelpModel(m.width, m.height)
 			m.screen = screenFullHelp
 			return m, nil
+		}
+		if msg.Type == tea.KeyCtrlQ && m.screen != screenConfirm {
+			return m.requestQuit()
 		}
 		if msg.Type == tea.KeyRunes && msg.String() == "?" && !m.screenOwnsPrintableInput() && m.screen != screenHelp && m.screen != screenFullHelp && m.screen != screenConfirm {
 			m.helpParent = m.screen
@@ -790,6 +839,33 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *tuiModel) requestQuit() (tea.Model, tea.Cmd) {
+	dirty := false
+	switch m.screen {
+	case screenForm:
+		dirty = m.form != nil && m.form.Dirty()
+	case screenForwardForm:
+		dirty = m.forwardForm != nil && m.forwardForm.Dirty()
+	case screenTemplateForm:
+		dirty = m.templateForm != nil && m.templateForm.Dirty()
+	}
+	if !dirty {
+		return m, tea.Quit
+	}
+	origin := m.screen
+	m.beginConfirm(confirmState{
+		title:       "Discard changes and quit?",
+		target:      "Unsaved form changes",
+		consequence: "Your edits will be lost before sshkeeper exits.",
+		verb:        "Quit",
+		parent:      origin,
+		action: func() tea.Cmd {
+			return func() tea.Msg { return quitAfterDiscardMsg{} }
+		},
+	})
+	return m, nil
+}
+
 func (m *tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
@@ -859,10 +935,10 @@ func (m *tuiModel) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							return tagsLoadedMsg{err: err}
 						}
 						if ListTags == nil {
-							return tagsLoadedMsg{err: fmt.Errorf("tag reload is unavailable")}
+							return tagsLoadedMsg{deleted: true, deletedName: name, err: fmt.Errorf("tag reload is unavailable")}
 						}
 						tags, err := ListTags()
-						return tagsLoadedMsg{tags: tags, err: err}
+						return tagsLoadedMsg{tags: tags, deleted: true, deletedName: name, err: err}
 					}
 				},
 			})
@@ -968,10 +1044,10 @@ func (m *tuiModel) updateTemplates(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							return templatesLoadedMsg{err: err}
 						}
 						if ListCommandTemplates == nil {
-							return templatesLoadedMsg{err: fmt.Errorf("template reload is unavailable")}
+							return templatesLoadedMsg{deleted: true, deletedName: name, err: fmt.Errorf("template reload is unavailable")}
 						}
 						templates, err := ListCommandTemplates()
-						return templatesLoadedMsg{templates: templates, err: err}
+						return templatesLoadedMsg{templates: templates, deleted: true, deletedName: name, err: err}
 					}
 				},
 			})
@@ -1473,14 +1549,22 @@ func (m *tuiModel) viewConfirm() string {
 	if m.confirm == nil {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString(titleStyle.Render(m.confirm.title))
-	b.WriteString("\n\n")
-	b.WriteString("  " + m.confirm.target)
-	if m.confirm.consequence != "" {
-		b.WriteString("\n\n  " + m.confirm.consequence)
+	width := m.width
+	if width <= 0 {
+		width = 80
 	}
-	b.WriteString("\n\n")
+	innerWidth := max(1, width-2)
+	lines := []string{titleStyle.Copy().MarginLeft(0).Render(fitLine(m.confirm.title, width)), ""}
+	for _, line := range wrapCells(m.confirm.target, innerWidth) {
+		lines = append(lines, "  "+line)
+	}
+	if m.confirm.consequence != "" {
+		lines = append(lines, "")
+		for _, line := range wrapCells(m.confirm.consequence, innerWidth) {
+			lines = append(lines, "  "+line)
+		}
+	}
+	lines = append(lines, "")
 	cancel := "[ Cancel ]"
 	accept := "[ " + m.confirm.verb + " ]"
 	if m.confirm.focus == confirmCancel {
@@ -1489,16 +1573,17 @@ func (m *tuiModel) viewConfirm() string {
 		accept = errorStyle.Render("> " + accept)
 	}
 	if m.confirm.pending {
-		b.WriteString("  " + m.confirm.verb + " in progress…\n\n")
+		lines = append(lines, fitLine("  "+m.confirm.verb+" in progress…", width), "")
 	} else {
-		b.WriteString("  " + cancel + "  " + accept + "\n\n")
+		lines = append(lines, fitLine("  "+cancel+"  "+accept, width), "")
 	}
-	b.WriteString(renderHelp([]helpItem{
+	footer := renderHelp([]helpItem{
 		{Key: "Tab", Action: "choose"},
 		{Key: "Enter", Action: "activate"},
 		{Key: "Esc", Action: "cancel"},
-	}, m.width))
-	return b.String()
+	}, width)
+	lines = append(lines, strings.Split(footer, "\n")...)
+	return strings.Join(lines, "\n")
 }
 
 func (m *tuiModel) beginConfirm(state confirmState) {
@@ -1566,13 +1651,29 @@ func (m *tuiModel) confirmServerDelete(server *model.Server) {
 					return serverDeletedMsg{alias: alias, err: err}
 				}
 				if ListServers == nil {
-					return serverDeletedMsg{alias: alias, err: fmt.Errorf("server reload is unavailable")}
+					return serverDeletedMsg{alias: alias, deleted: true, err: fmt.Errorf("server reload is unavailable")}
 				}
 				servers, err := ListServers()
-				return serverDeletedMsg{alias: alias, servers: servers, err: err}
+				return serverDeletedMsg{alias: alias, servers: servers, deleted: true, err: err}
 			}
 		},
 	})
+}
+
+func (m *tuiModel) removeServer(alias string) {
+	servers := make([]*model.Server, 0, len(m.servers))
+	for _, server := range m.servers {
+		if server.Alias != alias {
+			servers = append(servers, server)
+		}
+	}
+	m.servers = servers
+	items := make([]list.Item, len(servers))
+	for index, server := range servers {
+		items[index] = serverItem{server: server}
+	}
+	m.list.SetItems(items)
+	delete(m.selected, alias)
 }
 
 func (m *tuiModel) confirmForwardDelete(fwd *model.Forward) {
@@ -2008,6 +2109,26 @@ func (m *tuiModel) setTemplates(templates []*model.CommandTemplate) {
 func (m *tuiModel) setTags(tags []string) {
 	m.tags = tags
 	m.tagList = newStringList(tags, "Tags", m.width, managerListHeight(m.height))
+}
+
+func (m *tuiModel) removeTemplate(name string) {
+	templates := make([]*model.CommandTemplate, 0, len(m.templates))
+	for _, template := range m.templates {
+		if template.Name != name {
+			templates = append(templates, template)
+		}
+	}
+	m.setTemplates(templates)
+}
+
+func (m *tuiModel) removeTag(name string) {
+	tags := make([]string, 0, len(m.tags))
+	for _, tag := range m.tags {
+		if tag != name {
+			tags = append(tags, tag)
+		}
+	}
+	m.setTags(tags)
 }
 
 // --- Server list footer ---

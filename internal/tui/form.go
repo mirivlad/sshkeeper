@@ -257,7 +257,7 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case saveDoneMsg:
 		fm.saving = false
 		if msg.err != nil {
-			fm.err = msg.err
+			fm.applySaveError(msg.err)
 			fm.saved = false
 		} else {
 			fm.saved = true
@@ -399,6 +399,25 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return fm, nil
+}
+
+func (fm *formModel) applySaveError(err error) {
+	fm.err = err
+	if err == nil {
+		return
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "alias is required"):
+		fm.focusIdx = 0
+	case strings.Contains(message, "host is required"):
+		fm.focusIdx = 2
+	case strings.Contains(message, "port"):
+		fm.focusIdx = 3
+	default:
+		return
+	}
+	fm.updateFocus()
 }
 
 func (fm *formModel) updateFocus() {

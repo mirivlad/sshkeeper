@@ -59,6 +59,13 @@ func fitLine(value string, width int) string {
 	return truncateCells(value, width)
 }
 
+func wrapCells(value string, width int) []string {
+	if width <= 0 {
+		return []string{""}
+	}
+	return strings.Split(ansi.Wrap(value, width, ""), "\n")
+}
+
 func minimumSizeView(width int) string {
 	message := "sshkeeper needs at least 60x16"
 	if width <= 0 {
