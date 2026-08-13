@@ -318,8 +318,8 @@ func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fm.updateFocus()
 			return fm, nil
 		case tea.KeyRunes:
-			// Direct number key to select type
-			if len(msg.Runes) == 1 {
+			// Direct number keys select a type only while the type selector has focus.
+			if fm.focusIdx >= 2 && fm.focusIdx < 2+len(forwardTypes) && len(msg.Runes) == 1 {
 				switch msg.Runes[0] {
 				case '1':
 					fm.typeIdx = 0
