@@ -97,6 +97,10 @@ func (m *tunnelScreenModel) View() string {
 	var b strings.Builder
 	b.WriteString(m.list.View())
 	b.WriteString("\n\n")
+	if m.err != nil {
+		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
+		b.WriteString("\n\n")
+	}
 	b.WriteString(renderHelp([]helpItem{
 		{Key: "Ctrl+D (s)", Action: "stop tunnel"},
 		{Key: "Ctrl+R (r)", Action: "refresh"},

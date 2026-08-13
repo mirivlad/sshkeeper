@@ -94,6 +94,12 @@ type forwardDeletedMsg struct {
 	err error
 }
 
+type serverDeletedMsg struct {
+	alias   string
+	servers []*model.Server
+	err     error
+}
+
 type importDoneMsg struct {
 	servers []*model.Server
 	count   int
@@ -205,6 +211,24 @@ const (
 	screenFullHelp
 )
 
+type confirmChoice int
+
+const (
+	confirmCancel confirmChoice = iota
+	confirmAccept
+)
+
+type confirmState struct {
+	title       string
+	target      string
+	consequence string
+	verb        string
+	parent      screen
+	focus       confirmChoice
+	pending     bool
+	action      func() tea.Cmd
+}
+
 // --- Result type — returned from TUI to caller ---
 
 type TUIResult struct {
@@ -244,8 +268,7 @@ type tuiModel struct {
 	actionMenu      *actionMenuModel
 	forwardScreen   *forwardScreenModel
 	forwardForm     *forwardFormModel
-	confirmMsg      string
-	confirmAction   func() tea.Cmd
+	confirm         *confirmState
 	fullHelp        *fullHelpModel
 }
 
@@ -323,6 +346,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case templatesLoadedMsg:
+		if m.confirm != nil && m.confirm.pending && m.confirm.parent == screenTemplates {
+			m.finishConfirm()
+		}
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -331,6 +357,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tagsLoadedMsg:
+		if m.confirm != nil && m.confirm.pending && m.confirm.parent == screenTags {
+			m.finishConfirm()
+		}
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -391,20 +420,48 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case forwardDeletedMsg:
-		if m.forwardScreen != nil && msg.err == nil {
+		m.finishConfirm()
+		if m.forwardScreen != nil {
+			if msg.err != nil {
+				m.forwardScreen.err = msg.err
+				return m, nil
+			}
+			m.forwardScreen.err = nil
 			return m, m.forwardScreen.loadForwards()
 		}
 		return m, nil
 
-	case forwardDeleteConfirmMsg:
-		// Show confirmation screen
-		m.confirmMsg = fmt.Sprintf("Delete forward %q?", msg.name)
-		m.confirmAction = func() tea.Cmd {
-			return func() tea.Msg {
-				return forwardDeletedMsg{id: msg.id, err: DeleteForward(msg.id)}
-			}
+	case serverDeletedMsg:
+		m.finishConfirm()
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
 		}
-		m.screen = screenConfirm
+		m.servers = msg.servers
+		items := make([]list.Item, len(msg.servers))
+		for i, server := range msg.servers {
+			items[i] = serverItem{server: server}
+		}
+		m.list.SetItems(items)
+		delete(m.selected, msg.alias)
+		return m, nil
+
+	case forwardDeleteConfirmMsg:
+		m.beginConfirm(confirmState{
+			title:       "Delete port forward?",
+			target:      msg.name,
+			consequence: "This removes the saved forwarding rule.",
+			verb:        "Delete",
+			parent:      screenForwardList,
+			action: func() tea.Cmd {
+				return func() tea.Msg {
+					if DeleteForward == nil {
+						return forwardDeletedMsg{id: msg.id, err: fmt.Errorf("forward deletion is unavailable")}
+					}
+					return forwardDeletedMsg{id: msg.id, err: DeleteForward(msg.id)}
+				}
+			},
+		})
 		return m, nil
 
 	case forwardEditSignal:
@@ -430,7 +487,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tunnelStoppedMsg:
-		if m.tunnelScreen != nil && msg.err == nil {
+		m.finishConfirm()
+		if m.tunnelScreen != nil {
+			if msg.err != nil {
+				m.tunnelScreen.err = msg.err
+				return m, nil
+			}
+			m.tunnelScreen.err = nil
 			return m, m.tunnelScreen.loadTunnels()
 		}
 		return m, nil
@@ -594,14 +657,8 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlD:
 		if item, ok := m.list.SelectedItem().(serverItem); ok {
-			return m, func() tea.Msg {
-				err := DeleteServer(item.server.Alias)
-				if err != nil {
-					return saveDoneMsg{err: err}
-				}
-				servers, err := ListServers()
-				return serversLoadedMsg{servers: servers, err: err}
-			}
+			m.confirmServerDelete(item.server)
+			return m, nil
 		}
 
 	case tea.KeyCtrlT:
@@ -714,15 +771,31 @@ func (m *tuiModel) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyCtrlD:
-		if item, ok := m.tagList.SelectedItem().(groupItem); ok && DeleteTag != nil {
+		if item, ok := m.tagList.SelectedItem().(groupItem); ok {
 			name := item.name
-			return m, func() tea.Msg {
-				if err := DeleteTag(name); err != nil {
-					return tagsLoadedMsg{err: err}
-				}
-				tags, err := ListTags()
-				return tagsLoadedMsg{tags: tags, err: err}
-			}
+			m.beginConfirm(confirmState{
+				title:       "Delete tag?",
+				target:      fmt.Sprintf("%q", name),
+				consequence: "This removes the tag from every server profile.",
+				verb:        "Delete",
+				parent:      screenTags,
+				action: func() tea.Cmd {
+					return func() tea.Msg {
+						if DeleteTag == nil {
+							return tagsLoadedMsg{err: fmt.Errorf("tag deletion is unavailable")}
+						}
+						if err := DeleteTag(name); err != nil {
+							return tagsLoadedMsg{err: err}
+						}
+						if ListTags == nil {
+							return tagsLoadedMsg{err: fmt.Errorf("tag reload is unavailable")}
+						}
+						tags, err := ListTags()
+						return tagsLoadedMsg{tags: tags, err: err}
+					}
+				},
+			})
+			return m, nil
 		}
 	case tea.KeyEnter:
 		if item, ok := m.tagList.SelectedItem().(groupItem); ok && SetServerTags != nil {
@@ -807,15 +880,31 @@ func (m *tuiModel) updateTemplates(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyCtrlD:
-		if item, ok := m.templateList.SelectedItem().(templateItem); ok && DeleteCommandTemplate != nil {
+		if item, ok := m.templateList.SelectedItem().(templateItem); ok {
 			name := item.template.Name
-			return m, func() tea.Msg {
-				if err := DeleteCommandTemplate(name); err != nil {
-					return templatesLoadedMsg{err: err}
-				}
-				templates, err := ListCommandTemplates()
-				return templatesLoadedMsg{templates: templates, err: err}
-			}
+			m.beginConfirm(confirmState{
+				title:       "Delete command template?",
+				target:      fmt.Sprintf("%q", name),
+				consequence: "This removes the saved command template.",
+				verb:        "Delete",
+				parent:      screenTemplates,
+				action: func() tea.Cmd {
+					return func() tea.Msg {
+						if DeleteCommandTemplate == nil {
+							return templatesLoadedMsg{err: fmt.Errorf("template deletion is unavailable")}
+						}
+						if err := DeleteCommandTemplate(name); err != nil {
+							return templatesLoadedMsg{err: err}
+						}
+						if ListCommandTemplates == nil {
+							return templatesLoadedMsg{err: fmt.Errorf("template reload is unavailable")}
+						}
+						templates, err := ListCommandTemplates()
+						return templatesLoadedMsg{templates: templates, err: err}
+					}
+				},
+			})
+			return m, nil
 		}
 	}
 	var cmd tea.Cmd
@@ -1141,16 +1230,9 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "delete":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
-				m.screen = screenList
 				m.actionMenu = nil
-				return m, func() tea.Msg {
-					err := DeleteServer(item.server.Alias)
-					if err != nil {
-						return saveDoneMsg{err: err}
-					}
-					servers, err := ListServers()
-					return serversLoadedMsg{servers: servers, err: err}
-				}
+				m.confirmServerDelete(item.server)
+				return m, nil
 			}
 		case "import":
 			m.screen = screenList
@@ -1207,13 +1289,7 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlD:
 		if m.forwardScreen != nil && m.forwardScreen.selected >= 0 && m.forwardScreen.selected < len(m.forwardScreen.list) {
 			fwd := m.forwardScreen.list[m.forwardScreen.selected]
-			m.confirmMsg = fmt.Sprintf("Delete forward %q?", fwd.Name)
-			m.confirmAction = func() tea.Cmd {
-				return func() tea.Msg {
-					return forwardDeletedMsg{id: fwd.ID, err: DeleteForward(fwd.ID)}
-				}
-			}
-			m.screen = screenConfirm
+			m.confirmForwardDelete(fwd)
 			return m, nil
 		}
 	case tea.KeyCtrlE, tea.KeyEnter:
@@ -1231,13 +1307,7 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "d", "D":
 			if m.forwardScreen != nil && m.forwardScreen.selected >= 0 && m.forwardScreen.selected < len(m.forwardScreen.list) {
 				fwd := m.forwardScreen.list[m.forwardScreen.selected]
-				m.confirmMsg = fmt.Sprintf("Delete forward %q?", fwd.Name)
-				m.confirmAction = func() tea.Cmd {
-					return func() tea.Msg {
-						return forwardDeletedMsg{id: fwd.ID, err: DeleteForward(fwd.ID)}
-					}
-				}
-				m.screen = screenConfirm
+				m.confirmForwardDelete(fwd)
 				return m, nil
 			}
 		}
@@ -1262,9 +1332,8 @@ func (m *tuiModel) updateTunnelManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tunnelScreen = nil
 		return m, nil
 	case tea.KeyCtrlD:
-		if m.tunnelScreen != nil {
-			return m, m.tunnelScreen.stopSelected()
-		}
+		m.confirmTunnelStop()
+		return m, nil
 	case tea.KeyCtrlR:
 		if m.tunnelScreen != nil {
 			return m, m.tunnelScreen.loadTunnels()
@@ -1272,9 +1341,8 @@ func (m *tuiModel) updateTunnelManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyRunes:
 		switch msg.String() {
 		case "d", "D", "s", "S":
-			if m.tunnelScreen != nil {
-				return m, m.tunnelScreen.stopSelected()
-			}
+			m.confirmTunnelStop()
+			return m, nil
 		case "r", "R":
 			if m.tunnelScreen != nil {
 				return m, m.tunnelScreen.loadTunnels()
@@ -1287,49 +1355,168 @@ func (m *tuiModel) updateTunnelManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.confirm == nil {
+		m.screen = screenList
+		return m, nil
+	}
+	if m.confirm.pending {
+		return m, nil
+	}
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.screen = screenList
-		m.confirmMsg = ""
-		m.confirmAction = nil
+		return m.cancelConfirm()
+	case tea.KeyTab, tea.KeyShiftTab, tea.KeyLeft, tea.KeyRight:
+		if m.confirm.focus == confirmCancel {
+			m.confirm.focus = confirmAccept
+		} else {
+			m.confirm.focus = confirmCancel
+		}
 		return m, nil
 	case tea.KeyEnter:
-		if m.confirmAction != nil {
-			action := m.confirmAction
-			m.confirmMsg = ""
-			m.confirmAction = nil
-			return m, action()
+		if m.confirm.focus == confirmCancel {
+			return m.cancelConfirm()
 		}
+		return m.acceptConfirm()
 	case tea.KeyRunes:
 		switch msg.String() {
 		case "y", "Y":
-			if m.confirmAction != nil {
-				action := m.confirmAction
-				m.confirmMsg = ""
-				m.confirmAction = nil
-				return m, action()
-			}
+			return m.acceptConfirm()
 		case "n", "N":
-			m.screen = screenList
-			m.confirmMsg = ""
-			m.confirmAction = nil
-			return m, nil
+			return m.cancelConfirm()
 		}
 	}
 	return m, nil
 }
 
 func (m *tuiModel) viewConfirm() string {
+	if m.confirm == nil {
+		return ""
+	}
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Confirm"))
+	b.WriteString(titleStyle.Render(m.confirm.title))
 	b.WriteString("\n\n")
-	b.WriteString("  " + m.confirmMsg)
+	b.WriteString("  " + m.confirm.target)
+	if m.confirm.consequence != "" {
+		b.WriteString("\n\n  " + m.confirm.consequence)
+	}
 	b.WriteString("\n\n")
+	cancel := "[ Cancel ]"
+	accept := "[ " + m.confirm.verb + " ]"
+	if m.confirm.focus == confirmCancel {
+		cancel = selectedStyle.Render("> " + cancel)
+	} else {
+		accept = errorStyle.Render("> " + accept)
+	}
+	if m.confirm.pending {
+		b.WriteString("  " + m.confirm.verb + " in progress…\n\n")
+	} else {
+		b.WriteString("  " + cancel + "  " + accept + "\n\n")
+	}
 	b.WriteString(renderHelp([]helpItem{
-		{Key: "Enter / Y", Action: "yes"},
-		{Key: "Esc / N", Action: "no"},
+		{Key: "Tab", Action: "choose"},
+		{Key: "Enter", Action: "activate"},
+		{Key: "Esc", Action: "cancel"},
 	}, m.width))
 	return b.String()
+}
+
+func (m *tuiModel) beginConfirm(state confirmState) {
+	state.focus = confirmCancel
+	m.confirm = &state
+	m.screen = screenConfirm
+}
+
+func (m *tuiModel) cancelConfirm() (tea.Model, tea.Cmd) {
+	parent := m.confirm.parent
+	m.confirm = nil
+	m.screen = parent
+	return m, nil
+}
+
+func (m *tuiModel) acceptConfirm() (tea.Model, tea.Cmd) {
+	if m.confirm == nil || m.confirm.pending || m.confirm.action == nil {
+		return m, nil
+	}
+	m.confirm.pending = true
+	return m, m.confirm.action()
+}
+
+func (m *tuiModel) finishConfirm() {
+	if m.confirm == nil {
+		return
+	}
+	m.screen = m.confirm.parent
+	m.confirm = nil
+}
+
+func (m *tuiModel) confirmServerDelete(server *model.Server) {
+	alias := server.Alias
+	m.beginConfirm(confirmState{
+		title:       "Delete server profile?",
+		target:      fmt.Sprintf("%q", alias),
+		consequence: "This also removes its saved port forwards and vault secrets.",
+		verb:        "Delete",
+		parent:      screenList,
+		action: func() tea.Cmd {
+			return func() tea.Msg {
+				if DeleteServer == nil {
+					return serverDeletedMsg{alias: alias, err: fmt.Errorf("server deletion is unavailable")}
+				}
+				if err := DeleteServer(alias); err != nil {
+					return serverDeletedMsg{alias: alias, err: err}
+				}
+				if ListServers == nil {
+					return serverDeletedMsg{alias: alias, err: fmt.Errorf("server reload is unavailable")}
+				}
+				servers, err := ListServers()
+				return serverDeletedMsg{alias: alias, servers: servers, err: err}
+			}
+		},
+	})
+}
+
+func (m *tuiModel) confirmForwardDelete(fwd *model.Forward) {
+	name := fwd.Name
+	if strings.TrimSpace(name) == "" {
+		name = fwd.ForwardListen()
+	}
+	id := fwd.ID
+	m.beginConfirm(confirmState{
+		title:       "Delete port forward?",
+		target:      fmt.Sprintf("%q · %s → %s", name, fwd.ForwardListen(), fwd.ForwardTarget()),
+		consequence: "This removes the saved forwarding rule. Active tunnels are not stopped.",
+		verb:        "Delete",
+		parent:      screenForwardList,
+		action: func() tea.Cmd {
+			return func() tea.Msg {
+				if DeleteForward == nil {
+					return forwardDeletedMsg{id: id, err: fmt.Errorf("forward deletion is unavailable")}
+				}
+				return forwardDeletedMsg{id: id, err: DeleteForward(id)}
+			}
+		},
+	})
+}
+
+func (m *tuiModel) confirmTunnelStop() {
+	if m.tunnelScreen == nil {
+		return
+	}
+	item, ok := m.tunnelScreen.list.SelectedItem().(tunnelItem)
+	if !ok || item.state == nil {
+		return
+	}
+	state := item.state
+	m.beginConfirm(confirmState{
+		title:       "Stop running tunnel?",
+		target:      fmt.Sprintf("%q · PID %d · %s", state.Name, state.PID, state.ServerAlias),
+		consequence: "Active forwarded connections through this process will close.",
+		verb:        "Stop",
+		parent:      screenTunnelManager,
+		action: func() tea.Cmd {
+			return m.tunnelScreen.stopSelected()
+		},
+	})
 }
 
 func (m *tuiModel) updateFullHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

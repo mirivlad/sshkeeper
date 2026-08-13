@@ -131,6 +131,10 @@ func (m *forwardScreenModel) View() string {
 	}
 
 	b.WriteString("\n")
+	if m.err != nil {
+		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
+		b.WriteString("\n\n")
+	}
 	b.WriteString(renderHelp([]helpItem{
 		{Key: "Ctrl+A (a)", Action: "add"},
 		{Key: "Ctrl+E/Enter", Action: "edit"},
