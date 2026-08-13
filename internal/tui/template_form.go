@@ -156,15 +156,15 @@ func (tf *templateFormModel) View() string {
 	if tf.edit {
 		title = "Edit Template"
 	}
-	b.WriteString(titleStyle.Render(title))
+	b.WriteString(titleStyle.Copy().MarginLeft(0).Render(fitLine(title, tf.width)))
 	b.WriteString("\n\n")
 	for i := range tf.inputs {
-		b.WriteString(tf.inputs[i].View())
+		b.WriteString(fitLine(tf.inputs[i].View(), tf.width))
 		b.WriteString("\n")
 	}
-	button := "[ Save ]"
+	button := "  [ Save ]"
 	if tf.focusIdx == len(tf.inputs) {
-		button = selectedStyle.Render(button)
+		button = selectedStyle.Render("> [ Save ]")
 	}
 	b.WriteString("\n" + button + "\n\n")
 	if tf.err != nil {

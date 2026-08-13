@@ -372,6 +372,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.actionMenu != nil {
 			m.actionMenu.width = msg.Width
+			m.actionMenu.height = msg.Height
 			m.actionMenu.list.SetSize(msg.Width, managerListHeight(msg.Height))
 		}
 		m.templateList.SetSize(msg.Width, managerListHeight(msg.Height))
@@ -1126,6 +1127,9 @@ func (m *tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) View() string {
+	if classifyTerminal(m.width, m.height) == sizeBelowFloor {
+		return minimumSizeView(m.width)
+	}
 	var b strings.Builder
 
 	switch m.screen {
@@ -1194,10 +1198,10 @@ func (m *tuiModel) View() string {
 		b.WriteString(m.viewConfirm())
 	}
 
-	if m.err != nil {
+	if m.screen != screenList && m.err != nil {
 		b.WriteString("\n" + errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
 	}
-	if m.success != "" {
+	if m.screen != screenList && m.success != "" {
 		b.WriteString("\n" + successStyle.Render(m.success))
 	}
 
@@ -1663,101 +1667,7 @@ func (m *tuiModel) updateForwardForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) viewServerList() string {
-	var b strings.Builder
-	selectedAlias := ""
-	if item, ok := m.list.SelectedItem().(serverItem); ok && item.server != nil {
-		selectedAlias = item.server.Alias
-	}
-
-	b.WriteString(titleStyle.Render(fmt.Sprintf("sshkeeper  %d servers", len(m.servers))))
-	b.WriteString("\n")
-	vaultStatus := "Vault locked"
-	if m.vaultUnlocked {
-		vaultStatus = "Vault unlocked"
-	}
-	b.WriteString(helpStyle.Render(fmt.Sprintf("%s | %s", vaultStatus, testSummary(m.servers))))
-	b.WriteString("\n\n")
-	b.WriteString(listHeaderStyle.Render(fmt.Sprintf("  %-20s %-20s %-34s %-12s %-10s %s", "NAME", "ALIAS", "ROUTE", "AUTH", "GROUP", "STATUS")))
-	b.WriteString("\n")
-
-	if len(m.servers) == 0 {
-		b.WriteString(helpStyle.Render("  No servers yet. Press Ctrl+A to add one."))
-		b.WriteString("\n")
-	} else {
-		selectedIndex := m.list.Index()
-		start, end := visibleServerRange(len(m.servers), selectedIndex, m.visibleServerRows())
-		for _, server := range m.servers[start:end] {
-			marker := " "
-			rowStyle := normalStyle
-			if server.Alias == selectedAlias {
-				marker = ">"
-				rowStyle = selectedRowStyle
-			}
-			if m.selected[server.Alias] {
-				marker = "*"
-				if server.Alias == selectedAlias {
-					marker = ">*"
-				}
-			}
-			name := server.DisplayName
-			if name == "" {
-				name = server.Alias
-			}
-			target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
-			routeStr := server.Route.DisplaySummary(target)
-			// Add visual icon prefix based on connection type
-			if len(server.Route.Hops) == 0 {
-				routeStr = "  " + routeStr // direct
-			} else {
-				routeStr = "→ " + routeStr // via/chain
-			}
-			// If too long, collapse middle hops
-			if len(routeStr) > 34 && len(server.Route.Hops) > 2 {
-				first := server.Route.Hops[0]
-				firstName := first.Alias
-				if !first.IsProfile {
-					firstName = first.Raw
-				}
-				routeStr = fmt.Sprintf("→ %s → … → %s", firstName, truncate(target, 34-len(firstName)-8))
-			}
-			group := server.GroupName
-			if group == "" {
-				group = "-"
-			}
-			row := fmt.Sprintf("%s %-20s %-20s %-34s %-12s %-10s %s",
-				marker,
-				truncate(name, 20),
-				truncate(server.Alias, 20),
-				truncate(routeStr, 34),
-				authLabel(server.AuthMethod),
-				truncate(group, 10),
-				testStatusLabel(server),
-			)
-			b.WriteString(rowStyle.Render(row))
-			b.WriteString("\n")
-		}
-		if len(m.servers) > end-start {
-			b.WriteString(helpStyle.Render(fmt.Sprintf("  Showing %d-%d of %d", start+1, end, len(m.servers))))
-			b.WriteString("\n")
-		}
-	}
-
-	b.WriteString("\n")
-	if selectedAlias != "" {
-		if selected := m.selectedServer(); selected != nil {
-			b.WriteString(m.viewSelectedServer(selected))
-			b.WriteString("\n")
-		}
-	}
-	if len(m.bgResults) > 0 {
-		b.WriteString(m.viewInlineBackgroundResults())
-		b.WriteString("\n")
-	}
-	selectedCount := len(m.selectedServers())
-	footer := m.renderListHelp(selectedCount, len(m.bgResults) > 0)
-	b.WriteString(strings.Repeat("\n", bottomPaddingLines(b.String(), footer, m.height)))
-	b.WriteString(footer)
-	return b.String()
+	return m.renderServerDashboard()
 }
 
 func (m *tuiModel) viewInlineBackgroundResults() string {
@@ -2232,10 +2142,7 @@ func displayLineCount(s string) int {
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
+	return truncateCells(s, maxLen)
 }
 
 func splitCSV(value string) []string {

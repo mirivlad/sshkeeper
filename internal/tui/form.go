@@ -566,130 +566,118 @@ func parsePort(value string) (int, error) {
 }
 
 func (fm *formModel) View() string {
-	var b strings.Builder
-
 	title := "Add Server"
 	if fm.edit {
 		title = "Edit Server: " + fm.server.Alias
 	}
-	b.WriteString(titleStyle.Render(title))
-	b.WriteString("\n\n")
-
-	reserved := 9
-	available := fm.height - reserved
-	if available < 4 {
-		available = 4
-	}
-
-	numInputs := len(fm.inputs)
-	startIdx := 0
-	endIdx := numInputs
-
-	if numInputs > available {
-		focusInput := fm.focusIdx
-		if focusInput >= numInputs {
-			focusInput = numInputs - 1
-		}
-		startIdx = focusInput - available/2
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		endIdx = startIdx + available
-		if endIdx > numInputs {
-			endIdx = numInputs
-			startIdx = endIdx - available
-			if startIdx < 0 {
-				startIdx = 0
-			}
-		}
-	}
-
-	if startIdx > 0 {
-		b.WriteString(helpStyle.Render("  ↑ more fields above\n"))
-	}
-
-	for i := startIdx; i < endIdx; i++ {
-		if section := formSectionTitle(i); section != "" {
-			b.WriteString(sectionStyle.Render(section))
-			b.WriteString("\n")
-		}
-		if i == 5 {
-			fm.inputs[i].Placeholder = "password/key/key_passphrase/agent"
-		}
-		if i == 8 && len(fm.groups) > 0 && !fm.showGroupList {
-			fm.inputs[i].Placeholder = truncate(strings.Join(fm.groups, ", "), 25)
-		}
-		b.WriteString(fm.inputs[i].View())
-		b.WriteString("\n")
-		if i == 5 && fm.showAuthList {
-			b.WriteString("\n" + renderDropdown(fm.authList) + "\n")
-			b.WriteString(renderHelp([]helpItem{{Key: "Enter", Action: "select"}, {Key: "Esc", Action: "cancel"}}, fm.width))
-			return b.String()
-		}
-		if i == 8 && fm.showGroupList {
-			b.WriteString("\n" + renderDropdown(fm.groupList) + "\n")
-			b.WriteString(renderHelp([]helpItem{{Key: "Enter", Action: "select"}, {Key: "Esc", Action: "cancel"}}, fm.width))
-			return b.String()
-		}
-	}
-
-	if endIdx < numInputs {
-		b.WriteString(helpStyle.Render(fmt.Sprintf("  ↓ more fields below (%d-%d of %d)\n", startIdx+1, endIdx, numInputs)))
-	}
-
-	b.WriteString(fm.password.View())
-	b.WriteString("\n")
-
-	showResults := time.Since(fm.testResultTime) < 10*time.Second || time.Since(fm.savedTime) < 10*time.Second
-
-	if fm.testing {
-		b.WriteString("\n" + fm.spinner.View() + " Testing connection...\n")
-	} else if fm.saving {
-		b.WriteString("\n" + fm.spinner.View() + " Saving...\n")
-	} else if showResults {
-		if fm.testResult != "" {
-			b.WriteString("\n")
-			if fm.testOK {
-				b.WriteString(testOKStyle.Render("✓ " + fm.testResult))
-			} else {
-				b.WriteString(testFailStyle.Render("✗ " + fm.testResult))
-			}
-			b.WriteString("\n")
-		}
-		if fm.saved {
-			b.WriteString("\n" + successStyle.Render("✓ Saved.") + "\n")
-		}
-	}
-	if fm.err != nil {
-		b.WriteString("\n" + errorStyle.Render(fmt.Sprintf("✗ Error: %v", fm.err)) + "\n")
-	}
-
-	testBtn := "[ Test ]"
-	saveBtn := "[ Save ]"
-
-	if fm.focusIdx == len(fm.inputs)+1 {
-		testBtn = selectedStyle.Render(testBtn)
-	} else {
-		testBtn = normalStyle.Render(testBtn)
-	}
-
-	if fm.focusIdx == len(fm.inputs)+2 {
-		saveBtn = selectedStyle.Render(saveBtn)
-	} else {
-		saveBtn = normalStyle.Render(saveBtn)
-	}
-
-	b.WriteString("\n" + sectionStyle.Render("Actions") + "\n")
-	b.WriteString(testBtn + "  " + saveBtn + "\n\n")
-	b.WriteString(renderHelp([]helpItem{
+	footer := renderHelp([]helpItem{
 		{Key: "Tab/↓", Action: "next"},
 		{Key: "↑", Action: "prev"},
 		{Key: "/", Action: "pick list"},
 		{Key: "Enter", Action: "select"},
 		{Key: "Esc", Action: "back"},
-	}, fm.width))
+	}, fm.width)
 
-	return b.String()
+	if fm.showAuthList || fm.showGroupList {
+		var dropdown list.Model
+		fieldIndex := 8
+		if fm.showAuthList {
+			dropdown = fm.authList
+			fieldIndex = 5
+		} else {
+			dropdown = fm.groupList
+		}
+		return titleStyle.Copy().MarginLeft(0).Render(fitLine(title, fm.width)) + "\n" +
+			fitLine(fm.inputs[fieldIndex].View(), fm.width) + "\n" +
+			fitLine(renderDropdown(dropdown), fm.width) + "\n" +
+			renderHelp([]helpItem{{Key: "Enter", Action: "select"}, {Key: "Esc", Action: "cancel"}}, fm.width)
+	}
+
+	status := fm.formStatusLine()
+	testBtn, saveBtn := "  [ Test ]", "  [ Save ]"
+	if fm.focusIdx == len(fm.inputs)+1 {
+		testBtn = selectedStyle.Render("> [ Test ]")
+	}
+	if fm.focusIdx == len(fm.inputs)+2 {
+		saveBtn = selectedStyle.Render("> [ Save ]")
+	}
+	actions := fitLine(testBtn+"  "+saveBtn, fm.width)
+
+	reserved := 1 + displayLineCount(footer) + 1
+	if status != "" {
+		reserved++
+	}
+	fieldRows := max(4, fm.height-reserved)
+	richLayout := fm.width >= 90 && fm.height >= 24
+	allFields := make([]string, 0, len(fm.inputs)+5)
+	focusRows := make([]int, len(fm.inputs)+1)
+	for i := range fm.inputs {
+		if richLayout {
+			if section := formSectionTitle(i); section != "" {
+				allFields = append(allFields, sectionStyle.Copy().MarginTop(0).Render(section))
+			}
+		}
+		if i == 5 {
+			fm.inputs[i].Placeholder = "password/key/key_passphrase/agent"
+		}
+		if i == 8 && len(fm.groups) > 0 {
+			fm.inputs[i].Placeholder = truncateCells(strings.Join(fm.groups, ", "), 25)
+		}
+		focusRows[i] = len(allFields)
+		allFields = append(allFields, fitLine(fm.inputs[i].View(), fm.width))
+	}
+	focusRows[len(fm.inputs)] = len(allFields)
+	allFields = append(allFields, fitLine(fm.password.View(), fm.width))
+	focusField := len(allFields) - 1
+	if fm.focusIdx <= len(fm.inputs) {
+		focusField = focusRows[fm.focusIdx]
+	}
+	start, end := visibleServerRange(len(allFields), focusField, fieldRows)
+	visible := append([]string(nil), allFields[start:end]...)
+	if start > 0 && len(visible) > 0 {
+		visible[0] = fitLine("↑ more fields · "+visible[0], fm.width)
+	}
+	if end < len(allFields) && len(visible) > 0 {
+		visible[len(visible)-1] = fitLine(visible[len(visible)-1]+" · more ↓", fm.width)
+	}
+
+	lines := []string{titleStyle.Copy().MarginLeft(0).Render(fitLine(title, fm.width))}
+	lines = append(lines, visible...)
+	if status != "" {
+		lines = append(lines, fitLine(status, fm.width))
+	}
+	if richLayout {
+		lines = append(lines, sectionStyle.Copy().MarginTop(0).Render("Actions"))
+	}
+	lines = append(lines, actions)
+	lines = append(lines, strings.Split(footer, "\n")...)
+	if len(lines) > fm.height && fm.height > 0 {
+		lines = lines[:fm.height]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (fm *formModel) formStatusLine() string {
+	if fm.err != nil {
+		return errorStyle.Render(fmt.Sprintf("✗ Error: %v", fm.err))
+	}
+	if fm.testing {
+		return fm.spinner.View() + " Testing connection..."
+	}
+	if fm.saving {
+		return fm.spinner.View() + " Saving..."
+	}
+	showResults := time.Since(fm.testResultTime) < 10*time.Second || time.Since(fm.savedTime) < 10*time.Second
+	if showResults && fm.testResult != "" {
+		if fm.testOK {
+			return testOKStyle.Render("✓ " + fm.testResult)
+		}
+		return testFailStyle.Render("✗ " + strings.ReplaceAll(fm.testResult, "\n", " "))
+	}
+	if showResults && fm.saved {
+		return successStyle.Render("✓ Saved.")
+	}
+	return ""
 }
 
 func renderDropdown(l list.Model) string {

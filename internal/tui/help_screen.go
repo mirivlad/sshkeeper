@@ -272,8 +272,9 @@ func (i actionMenuItem) Description() string { return "" }
 func (i actionMenuItem) FilterValue() string { return i.label }
 
 type actionMenuModel struct {
-	list  list.Model
-	width int
+	list   list.Model
+	width  int
+	height int
 }
 
 func newActionMenuModel(w, h int) *actionMenuModel {
@@ -301,7 +302,7 @@ func newActionMenuModel(w, h int) *actionMenuModel {
 	l.SetShowHelp(false)
 	l.Styles.Title = titleStyle
 
-	return &actionMenuModel{list: l, width: w}
+	return &actionMenuModel{list: l, width: w, height: h}
 }
 
 func (m *actionMenuModel) Update(msg tea.Msg) (*actionMenuModel, *string) {
@@ -323,5 +324,24 @@ func (m *actionMenuModel) Update(msg tea.Msg) (*actionMenuModel, *string) {
 }
 
 func (m *actionMenuModel) View() string {
-	return m.list.View()
+	footer := renderHelp([]helpItem{{Key: "↑/↓", Action: "move"}, {Key: "Enter", Action: "select"}, {Key: "Esc", Action: "back"}}, m.width)
+	lines := []string{titleStyle.Copy().MarginLeft(0).Render("Actions")}
+	capacity := max(1, m.height-displayLineCount(footer)-1)
+	start, end := visibleServerRange(len(m.list.Items()), m.list.Index(), capacity)
+	for index := start; index < end; index++ {
+		item, ok := m.list.Items()[index].(actionMenuItem)
+		if !ok {
+			continue
+		}
+		marker := "  "
+		if index == m.list.Index() {
+			marker = "> "
+		}
+		lines = append(lines, fitLine(marker+item.label, m.width))
+	}
+	lines = append(lines, strings.Split(footer, "\n")...)
+	if len(lines) > m.height && m.height > 0 {
+		lines = lines[:m.height]
+	}
+	return strings.Join(lines, "\n")
 }

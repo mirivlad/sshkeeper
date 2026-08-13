@@ -79,69 +79,93 @@ func (m *forwardScreenModel) editSelected() tea.Cmd {
 }
 
 func (m *forwardScreenModel) View() string {
-	var b strings.Builder
-
-	b.WriteString(titleStyle.Render("Port Forwards — " + m.serverAlias))
-	b.WriteString("\n\n")
-
-	if len(m.list) == 0 {
-		b.WriteString(helpStyle.Render("  No port forwards configured. Press Ctrl+A to add one."))
-		b.WriteString("\n")
-	} else {
-		// Column header
-		b.WriteString(listHeaderStyle.Render(fmt.Sprintf("  %-22s %-8s %-20s %-20s %s",
-			"NAME", "TYPE", "LISTEN", "TARGET", "ON")))
-		b.WriteString("\n")
-
-		for i, f := range m.list {
-			name := f.Name
-			if name == "" {
-				name = f.ForwardListen()
-			}
-			enabled := "yes"
-			if !f.Enabled {
-				enabled = "no"
-			}
-			line := fmt.Sprintf("  %-22s %-8s %-20s %-20s %s",
-				truncate(name, 22),
-				f.Type,
-				truncate(f.ForwardListen(), 20),
-				truncate(f.ForwardTarget(), 20),
-				enabled,
-			)
-			style := normalStyle
-			if i == m.selected {
-				style = selectedRowStyle
-			}
-			b.WriteString(style.Render(line))
-			b.WriteString("\n")
-		}
-
-		// Details for selected
-		if m.selected >= 0 && m.selected < len(m.list) {
-			f := m.list[m.selected]
-			b.WriteString("\n")
-			b.WriteString(sectionStyle.Render("Selected"))
-			b.WriteString("\n")
-			b.WriteString(fmt.Sprintf("  %s\n", f.ForwardHumanExplanation(m.serverAlias)))
-			for _, arg := range f.ForwardSSHArgs() {
-				b.WriteString(fmt.Sprintf("  %s\n", arg))
-			}
-		}
-	}
-
-	b.WriteString("\n")
-	if m.err != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
-		b.WriteString("\n\n")
-	}
-	b.WriteString(renderHelp([]helpItem{
+	footer := renderHelp([]helpItem{
 		{Key: "Ctrl+A (a)", Action: "add"},
 		{Key: "Ctrl+E/Enter", Action: "edit"},
 		{Key: "Ctrl+D (d)", Action: "delete"},
 		{Key: "Esc", Action: "back"},
-	}, m.width))
-	return b.String()
+	}, m.width)
+	lines := []string{titleStyle.Copy().MarginLeft(0).Render(fitLine("Port Forwards — "+m.serverAlias, m.width))}
+	if m.err != nil {
+		lines = append(lines, fitLine(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)), m.width))
+	}
+
+	footerRows := displayLineCount(footer)
+	detailRows := 0
+	if len(m.list) > 0 && m.height-footerRows >= 7 {
+		detailRows = 3
+	}
+	rowCapacity := max(1, m.height-len(lines)-footerRows-detailRows-1)
+	if len(m.list) == 0 {
+		lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(fitLine("No port forwards configured. Ctrl+A adds one.", m.width)))
+	} else {
+		lines = append(lines, m.renderForwardRow(nil, false))
+		rowCapacity--
+		start, end := visibleServerRange(len(m.list), m.selected, rowCapacity)
+		for index := start; index < end; index++ {
+			lines = append(lines, m.renderForwardRow(m.list[index], index == m.selected))
+		}
+		if end < len(m.list) || start > 0 {
+			lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(fmt.Sprintf("Showing %d-%d of %d", start+1, end, len(m.list))))
+		}
+		if detailRows > 0 && m.selected >= 0 && m.selected < len(m.list) {
+			forward := m.list[m.selected]
+			lines = append(lines,
+				sectionStyle.Copy().MarginTop(0).Render("Selected"),
+				fitLine(forward.ForwardHumanExplanation(m.serverAlias), m.width),
+				fitLine("ssh "+strings.Join(forward.ForwardSSHArgs(), " "), m.width),
+			)
+		}
+	}
+	lines = append(lines, strings.Split(footer, "\n")...)
+	if len(lines) > m.height && m.height > 0 {
+		lines = lines[:m.height]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *forwardScreenModel) renderForwardRow(forward *model.Forward, selected bool) string {
+	marker, name, kind, listen, target, enabled := " ", "NAME", "TYPE", "LISTEN", "TARGET", "ON"
+	if forward != nil {
+		if selected {
+			marker = ">"
+		}
+		name = forward.Name
+		if name == "" {
+			name = forward.ForwardListen()
+		}
+		kind = string(forward.Type)
+		listen = forward.ForwardListen()
+		target = forward.ForwardTarget()
+		enabled = "yes"
+		if !forward.Enabled {
+			enabled = "no"
+		}
+	}
+	wide := m.width >= 70
+	typeWidth, enabledWidth := 8, 3
+	if wide {
+		nameWidth := max(12, (m.width-typeWidth-enabledWidth-6)*30/100)
+		listenWidth := max(14, (m.width-typeWidth-enabledWidth-nameWidth-6)/2)
+		targetWidth := m.width - nameWidth - typeWidth - listenWidth - enabledWidth - 5
+		line := marker + " " + padCells(name, nameWidth) + " " + padCells(kind, typeWidth) + " " + padCells(listen, listenWidth) + " " + padCells(target, targetWidth) + " " + padCells(enabled, enabledWidth)
+		if forward == nil {
+			return listHeaderStyle.Render(fitLine(line, m.width))
+		}
+		if selected {
+			return selectedRowStyle.Render(fitLine(line, m.width))
+		}
+		return fitLine(line, m.width)
+	}
+	nameWidth := max(12, m.width-typeWidth-enabledWidth-4)
+	line := marker + " " + padCells(name, nameWidth) + " " + padCells(kind, typeWidth) + " " + padCells(enabled, enabledWidth)
+	if forward == nil {
+		return listHeaderStyle.Render(fitLine(line, m.width))
+	}
+	if selected {
+		return selectedRowStyle.Render(fitLine(line, m.width))
+	}
+	return fitLine(line, m.width)
 }
 
 // --- Forward form screen model ---
@@ -522,64 +546,43 @@ func parseNamedPort(label, value string) (int, error) {
 }
 
 func (fm *forwardFormModel) View() string {
-	var b strings.Builder
 	title := "Add Port Forward"
 	if fm.editMode {
 		title = "Edit Port Forward"
 	}
-	b.WriteString(titleStyle.Render(title))
-	b.WriteString("\n\n")
+	lines := []string{titleStyle.Copy().MarginLeft(0).Render(fitLine(title, fm.width))}
+	lines = append(lines,
+		fitLine(fm.nameInput.View(), fm.width),
+		fitLine(fm.descInput.View(), fm.width),
+	)
 
-	// Name
-	b.WriteString(fm.nameInput.View())
-	b.WriteString("\n")
-
-	// Description
-	b.WriteString(fm.descInput.View())
-	b.WriteString("\n\n")
-
-	// Type selector — visible radio items with descriptions
-	b.WriteString(sectionStyle.Render("Type"))
-	b.WriteString("\n")
-	for i, t := range forwardTypes {
-		prefix := "  "
-		style := normalStyle
+	typeParts := make([]string, len(forwardTypes))
+	for i, forwardType := range forwardTypes {
+		selected := "○"
 		if i == fm.typeIdx {
-			prefix = "▸ "
-			style = selectedRowStyle
+			selected = "●"
 		}
-		line := fmt.Sprintf("%s%d. %-8s  %s", prefix, i+1, t.label, t.description)
-		b.WriteString(style.Render(line))
-		b.WriteString("\n")
+		focus := " "
+		if fm.focusIdx == 2+i {
+			focus = ">"
+		}
+		typeParts[i] = fmt.Sprintf("%s%s %d %s", focus, selected, i+1, forwardType.label)
 	}
-	// Show human-readable explanation for selected type
-	if fm.typeIdx >= 0 && fm.typeIdx < len(forwardTypes) {
-		explanations := map[model.ForwardType]string{
-			model.ForwardLocal:   "Opens a local port on this machine and forwards it through SSH to the target address.",
-			model.ForwardRemote:  "Opens a port on the remote SSH server and forwards it back to this machine.",
-			model.ForwardDynamic: "Creates a local SOCKS proxy that routes all traffic through the SSH server.",
-		}
-		if exp, ok := explanations[forwardTypes[fm.typeIdx].value]; ok {
-			b.WriteString(helpStyle.Render(fmt.Sprintf("  %s\n", exp)))
-		}
+	lines = append(lines, fitLine("Type  "+strings.Join(typeParts, "   "), fm.width))
+	if fm.width >= 100 {
+		lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(fitLine(forwardTypes[fm.typeIdx].description, fm.width)))
 	}
-	b.WriteString("\n")
 
-	// Dynamic fields based on type
 	visible := fm.visibleFields()
 	for _, idx := range visible {
-		b.WriteString(fm.inputs[idx].View())
-		b.WriteString("\n")
+		lines = append(lines, fitLine(fm.inputs[idx].View(), fm.width))
 	}
 
-	// Warning for 0.0.0.0
 	if localAddr := strings.TrimSpace(fm.inputs[0].Value()); localAddr == "0.0.0.0" {
-		b.WriteString(helpStyle.Render("  ⚠ This port will be accessible from the network.\n"))
+		lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(fitLine("⚠ This port will be accessible from the network.", fm.width)))
 	}
 
-	// Preview
-	if fm.currentType != "" && fm.inputs[1].Value() != "" {
-		b.WriteString("\n" + sectionStyle.Render("Preview") + "\n")
+	if fm.width >= 70 && fm.currentType != "" && fm.inputs[1].Value() != "" {
 		fwd := &model.Forward{
 			Type:       fm.currentType,
 			LocalAddr:  fm.inputs[0].Value(),
@@ -589,37 +592,34 @@ func (fm *forwardFormModel) View() string {
 		}
 		fmt.Sscanf(fm.inputs[1].Value(), "%d", &fwd.LocalPort)
 		fmt.Sscanf(fm.inputs[3].Value(), "%d", &fwd.RemotePort)
-		for _, arg := range fwd.ForwardSSHArgs() {
-			b.WriteString("  " + arg + "\n")
-		}
-		b.WriteString("  -o ExitOnForwardFailure=yes\n")
+		preview := strings.Join(fwd.ForwardSSHArgs(), " ") + " -o ExitOnForwardFailure=yes"
+		lines = append(lines, fitLine("Preview  ssh "+preview, fm.width))
 	}
 
-	// Save button
 	total := 2 + 3 + len(visible) + 1
-	button := "\n[ Save ]"
+	button := "  [ Save ]"
 	if fm.focusIdx == total-1 {
-		button = selectedStyle.Render(button)
+		button = selectedStyle.Render("> [ Save ]")
 	}
-	b.WriteString(button)
-	b.WriteString("\n\n")
-
 	if fm.err != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("✗ Error: %v", fm.err)) + "\n\n")
+		lines = append(lines, fitLine(errorStyle.Render(fmt.Sprintf("✗ Error: %v", fm.err)), fm.width))
 	}
 	if fm.saved {
-		b.WriteString(successStyle.Render("✓ Saved.") + "\n\n")
+		lines = append(lines, successStyle.Render("✓ Saved."))
 	}
-
-	b.WriteString(renderHelp([]helpItem{
+	lines = append(lines, button)
+	footer := renderHelp([]helpItem{
 		{Key: "Tab/↓", Action: "next"},
 		{Key: "↑", Action: "prev"},
 		{Key: "1/2/3", Action: "select type"},
 		{Key: "Enter", Action: "save"},
 		{Key: "Esc", Action: "back"},
-	}, fm.width))
-
-	return b.String()
+	}, fm.width)
+	lines = append(lines, strings.Split(footer, "\n")...)
+	if len(lines) > fm.height && fm.height > 0 {
+		lines = lines[:fm.height]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // forwardEditSignal is sent when user wants to edit a forward
