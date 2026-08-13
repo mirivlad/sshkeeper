@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -94,19 +93,41 @@ func (m *tunnelScreenModel) stopSelected() tea.Cmd {
 }
 
 func (m *tunnelScreenModel) View() string {
-	var b strings.Builder
-	b.WriteString(m.list.View())
-	b.WriteString("\n\n")
+	notification := ""
 	if m.err != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
-		b.WriteString("\n\n")
+		notification = errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
 	}
-	b.WriteString(renderHelp([]helpItem{
-		{Key: "Ctrl+D (s)", Action: "stop tunnel"},
-		{Key: "Ctrl+R (r)", Action: "refresh"},
-		{Key: "Esc", Action: "back"},
-	}, m.width))
-	return b.String()
+	body := func(width, height int) string {
+		if len(m.tunnels) == 0 {
+			return renderPaddedPanel(width, height, []string{dashboardHelp("No running tunnels.")})
+		}
+		capacity := max(1, height-2)
+		start, end := visibleServerRange(len(m.tunnels), m.list.Index(), max(1, capacity/2))
+		lines := make([]string, 0, capacity)
+		for index := start; index < end; index++ {
+			item := tunnelItem{state: m.tunnels[index]}
+			marker := "  "
+			if index == m.list.Index() {
+				marker = "> "
+			}
+			lines = append(lines, marker+item.Title(), "    "+item.Description())
+		}
+		return renderPaddedPanel(width, height, lines)
+	}
+	return renderScreenShell(screenShell{
+		breadcrumb:   "Tunnel Manager",
+		status:       fmt.Sprintf("%d running", len(m.tunnels)),
+		notification: notification,
+		width:        m.width,
+		height:       m.height,
+		body:         body,
+		footer: []helpItem{
+			{Key: "Ctrl+D (s)", Action: "stop tunnel"},
+			{Key: "Ctrl+R (r)", Action: "refresh"},
+			{Key: "Ctrl+H", Action: "help"},
+			{Key: "Esc", Action: "back"},
+		},
+	})
 }
 
 type tunnelsLoadedMsg struct {

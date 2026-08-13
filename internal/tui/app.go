@@ -1213,8 +1213,7 @@ func (m *tuiModel) View() string {
 		b.WriteString(m.viewServerList())
 
 	case screenSearch:
-		b.WriteString("Search: " + m.searchInput.View() + "\n")
-		b.WriteString(renderHelp([]helpItem{{Key: "Type", Action: "search"}, {Key: "Enter", Action: "confirm"}, {Key: "Esc", Action: "cancel"}}, m.width))
+		b.WriteString(m.viewSearch())
 
 	case screenForm:
 		b.WriteString(m.form.View())
@@ -1272,13 +1271,6 @@ func (m *tuiModel) View() string {
 
 	case screenConfirm:
 		b.WriteString(m.viewConfirm())
-	}
-
-	if m.screen != screenList && m.err != nil {
-		b.WriteString("\n" + errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
-	}
-	if m.screen != screenList && m.success != "" {
-		b.WriteString("\n" + successStyle.Render(m.success))
 	}
 
 	return b.String()
@@ -1771,6 +1763,36 @@ func (m *tuiModel) viewServerList() string {
 	return m.renderServerDashboard()
 }
 
+func (m *tuiModel) rootNotification() string {
+	if m.err != nil {
+		return errorStyle.Render("Error: " + m.err.Error())
+	}
+	if m.success != "" {
+		return successStyle.Render(m.success)
+	}
+	return ""
+}
+
+func (m *tuiModel) viewSearch() string {
+	return renderScreenShell(screenShell{
+		breadcrumb:   "Search",
+		status:       shellStatus(m.vaultUnlocked, fmt.Sprintf("%d profiles", len(m.servers))),
+		notification: m.rootNotification(),
+		width:        m.width,
+		height:       m.height,
+		body: func(width, height int) string {
+			return renderPaddedPanel(width, height, []string{
+				dashboardSection("Find server"),
+				"",
+				m.searchInput.View(),
+				"",
+				dashboardHelp("Search alias, host, display name, group, tags, notes, and route."),
+			})
+		},
+		footer: []helpItem{{Key: "Type", Action: "search"}, {Key: "Enter", Action: "confirm"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "cancel"}},
+	})
+}
+
 func (m *tuiModel) viewInlineBackgroundResults() string {
 	var b strings.Builder
 	b.WriteString(sectionStyle.Render("Last Background Run"))
@@ -1891,37 +1913,34 @@ func (m *tuiModel) viewSelectedServer(server *model.Server) string {
 }
 
 func (m *tuiModel) viewTags() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("Tags"))
-	b.WriteString("\n\n")
-	if len(m.tags) == 0 {
-		b.WriteString(helpStyle.Render("  No tags yet. Press Ctrl+A to add one to the selected servers."))
-		b.WriteString("\n")
-	} else {
-		for i, item := range m.tagList.Items() {
-			tag, ok := item.(groupItem)
-			if !ok {
-				continue
+	return renderScreenShell(screenShell{
+		breadcrumb:   "Tags",
+		status:       shellStatus(m.vaultUnlocked, fmt.Sprintf("%d tags", len(m.tags))),
+		notification: m.rootNotification(),
+		width:        m.width,
+		height:       m.height,
+		body: func(width, height int) string {
+			if len(m.tags) == 0 {
+				return renderPaddedPanel(width, height, []string{dashboardHelp("No tags yet. Ctrl+A adds one to the selected servers.")})
 			}
-			marker := "  "
-			style := normalStyle
-			if i == m.tagList.Index() {
-				marker = "> "
-				style = selectedRowStyle
+			capacity := max(1, height-2)
+			start, end := visibleServerRange(len(m.tagList.Items()), m.tagList.Index(), capacity)
+			lines := make([]string, 0, capacity)
+			for index := start; index < end; index++ {
+				tag, ok := m.tagList.Items()[index].(groupItem)
+				if !ok {
+					continue
+				}
+				marker := "  "
+				if index == m.tagList.Index() {
+					marker = "> "
+				}
+				lines = append(lines, marker+tag.name)
 			}
-			b.WriteString(style.Render(marker + tag.name))
-			b.WriteString("\n")
-		}
-	}
-	b.WriteString("\n")
-	b.WriteString(renderHelp([]helpItem{
-		{Key: "Enter", Action: "toggle for selected/current"},
-		{Key: "Ctrl+A", Action: "add"},
-		{Key: "Ctrl+E", Action: "rename"},
-		{Key: "Ctrl+D", Action: "delete"},
-		{Key: "Esc", Action: "back"},
-	}, m.width))
-	return b.String()
+			return renderPaddedPanel(width, height, lines)
+		},
+		footer: []helpItem{{Key: "Enter", Action: "toggle"}, {Key: "Ctrl+A", Action: "add"}, {Key: "Ctrl+E", Action: "rename"}, {Key: "Ctrl+D", Action: "delete"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+	})
 }
 
 func (m *tuiModel) viewTagInput() string {
@@ -1929,74 +1948,82 @@ func (m *tuiModel) viewTagInput() string {
 	if m.tagMode == "rename" {
 		title = "Rename Tag"
 	}
-	return titleStyle.Render(title) + "\n\n" + m.tagInput.View() + "\n\n" + renderHelp([]helpItem{{Key: "Enter", Action: "save"}, {Key: "Esc", Action: "cancel"}}, m.width)
+	return renderScreenShell(screenShell{
+		breadcrumb: title,
+		status:     shellStatus(m.vaultUnlocked, "Tag editor"),
+		width:      m.width,
+		height:     m.height,
+		body: func(width, height int) string {
+			return renderPaddedPanel(width, height, []string{dashboardSection(title), "", m.tagInput.View()})
+		},
+		footer: []helpItem{{Key: "Enter", Action: "save"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "cancel"}},
+	})
 }
 
 func (m *tuiModel) viewTemplates() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("Command Templates"))
-	b.WriteString("\n\n")
-	if len(m.templates) == 0 {
-		b.WriteString(helpStyle.Render("  No command templates yet. Press Ctrl+A to add one."))
-		b.WriteString("\n")
-	} else {
-		for i, item := range m.templateList.Items() {
-			tpl, ok := item.(templateItem)
-			if !ok {
-				continue
+	return renderScreenShell(screenShell{
+		breadcrumb:   "Command Templates",
+		status:       shellStatus(m.vaultUnlocked, fmt.Sprintf("%d templates", len(m.templates))),
+		notification: m.rootNotification(),
+		width:        m.width,
+		height:       m.height,
+		body: func(width, height int) string {
+			if len(m.templates) == 0 {
+				return renderPaddedPanel(width, height, []string{dashboardHelp("No command templates yet. Ctrl+A adds one.")})
 			}
-			marker := "  "
-			style := normalStyle
-			if i == m.templateList.Index() {
-				marker = "> "
-				style = selectedRowStyle
+			capacity := max(1, height-2)
+			start, end := visibleServerRange(len(m.templateList.Items()), m.templateList.Index(), capacity)
+			lines := make([]string, 0, capacity)
+			for index := start; index < end; index++ {
+				tpl, ok := m.templateList.Items()[index].(templateItem)
+				if !ok {
+					continue
+				}
+				marker := "  "
+				if index == m.templateList.Index() {
+					marker = "> "
+				}
+				lines = append(lines, marker+tpl.template.Name+"  "+tpl.template.Command)
+				if tpl.template.Description != "" && classifyTerminal(width, height) != sizeNarrow {
+					lines = append(lines, "    "+dashboardHelp(tpl.template.Description))
+				}
 			}
-			line := fmt.Sprintf("%s%-24s %s", marker, truncate(tpl.template.Name, 24), tpl.template.Command)
-			b.WriteString(style.Render(line))
-			b.WriteString("\n")
-			if tpl.template.Description != "" {
-				b.WriteString(helpStyle.Render("    " + tpl.template.Description))
-				b.WriteString("\n")
-			}
-		}
-	}
-	b.WriteString("\n")
-	b.WriteString(renderHelp([]helpItem{
-		{Key: "Ctrl+A", Action: "add"},
-		{Key: "Ctrl+E", Action: "edit"},
-		{Key: "Ctrl+D", Action: "delete"},
-		{Key: "Esc", Action: "back"},
-	}, m.width))
-	return b.String()
+			return renderPaddedPanel(width, height, lines)
+		},
+		footer: []helpItem{{Key: "Ctrl+A", Action: "add"}, {Key: "Ctrl+E", Action: "edit"}, {Key: "Ctrl+D", Action: "delete"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+	})
 }
 
 func (m *tuiModel) viewTemplatePicker() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("Run Template"))
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render(fmt.Sprintf("Targets: %s", strings.Join(serverAliases(m.targetServers()), ", "))))
-	b.WriteString("\n\n")
-	if len(m.templates) == 0 {
-		b.WriteString(helpStyle.Render("  No command templates. Press Esc, then Ctrl+P to add one."))
-	} else {
-		for i, item := range m.templateList.Items() {
-			tpl, ok := item.(templateItem)
-			if !ok {
-				continue
+	targets := strings.Join(serverAliases(m.targetServers()), ", ")
+	return renderScreenShell(screenShell{
+		breadcrumb: "Run Template",
+		status:     "Targets: " + targets,
+		width:      m.width,
+		height:     m.height,
+		body: func(width, height int) string {
+			lines := []string{dashboardSection("Choose template"), dashboardHelp("Targets: " + targets), ""}
+			if len(m.templates) == 0 {
+				lines = append(lines, dashboardHelp("No command templates. Press Esc, then Ctrl+P to add one."))
+			} else {
+				capacity := max(1, height-len(lines)-2)
+				start, end := visibleServerRange(len(m.templateList.Items()), m.templateList.Index(), capacity)
+				for index := start; index < end; index++ {
+					tpl, ok := m.templateList.Items()[index].(templateItem)
+					if !ok {
+						continue
+					}
+					marker := "  "
+					if index == m.templateList.Index() {
+						marker = "> "
+					}
+					lines = append(lines, marker+tpl.template.Name+"  "+tpl.template.Command)
+				}
 			}
-			marker := "  "
-			style := normalStyle
-			if i == m.templateList.Index() {
-				marker = "> "
-				style = selectedRowStyle
-			}
-			b.WriteString(style.Render(fmt.Sprintf("%s%-24s %s", marker, truncate(tpl.template.Name, 24), tpl.template.Command)))
-			b.WriteString("\n")
-		}
-	}
-	b.WriteString("\n")
-	b.WriteString(renderHelp([]helpItem{{Key: "Enter", Action: "choose"}, {Key: "Esc", Action: "back"}}, m.width))
-	return b.String()
+			return renderPaddedPanel(width, height, lines)
+		},
+		footer: []helpItem{{Key: "Enter", Action: "choose"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+	})
 }
 
 func (m *tuiModel) viewTemplateMode() string {
@@ -2006,30 +2033,44 @@ func (m *tuiModel) viewTemplateMode() string {
 		name = m.pendingTemplate.Name
 		command = m.pendingTemplate.Command
 	}
-	return titleStyle.Render("Run Mode") + "\n\n" +
-		fmt.Sprintf("Template: %s\nCommand: %s\nTargets: %s\n\n", name, command, strings.Join(serverAliases(m.targetServers()), ", ")) +
-		renderHelp([]helpItem{{Key: "Ctrl+F (Enter)", Action: "Foreground"}, {Key: "Ctrl+B", Action: "Background"}, {Key: "Esc", Action: "back"}}, m.width)
+	targets := strings.Join(serverAliases(m.targetServers()), ", ")
+	return renderScreenShell(screenShell{
+		breadcrumb: "Run Template / Mode",
+		status:     "Targets: " + targets,
+		width:      m.width,
+		height:     m.height,
+		body: func(width, height int) string {
+			return renderPaddedPanel(width, height, []string{dashboardSection("Execution"), "", "Template: " + name, "Command: " + command, "Targets: " + targets, "", "Choose foreground for an interactive run or background to keep using sshkeeper."})
+		},
+		footer: []helpItem{{Key: "Ctrl+F (Enter)", Action: "Foreground"}, {Key: "Ctrl+B", Action: "Background"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+	})
 }
 
 func (m *tuiModel) viewBackgroundResults() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("Background Results"))
-	b.WriteString("\n\n")
-	for _, result := range m.bgResults {
-		status := "OK"
-		if result.Err != "" {
-			status = "FAIL: " + result.Err
-		}
-		b.WriteString(sectionStyle.Render(result.Alias + "  " + status))
-		b.WriteString("\n")
-		if result.Output != "" {
-			b.WriteString(result.Output)
-			b.WriteString("\n")
-		}
-	}
-	b.WriteString("\n")
-	b.WriteString(renderHelp([]helpItem{{Key: "Enter/Esc", Action: "back"}}, m.width))
-	return b.String()
+	return renderScreenShell(screenShell{
+		breadcrumb: "Background Results",
+		status:     fmt.Sprintf("%d results", len(m.bgResults)),
+		width:      m.width,
+		height:     m.height,
+		body: func(width, height int) string {
+			lines := make([]string, 0)
+			for _, result := range m.bgResults {
+				status := "OK"
+				if result.Err != "" {
+					status = "FAIL: " + result.Err
+				}
+				lines = append(lines, dashboardSection(result.Alias+"  "+status))
+				if result.Output != "" {
+					for _, line := range strings.Split(result.Output, "\n") {
+						lines = append(lines, strings.ReplaceAll(line, "\t", "    "))
+					}
+				}
+				lines = append(lines, "")
+			}
+			return renderPaddedPanel(width, height, lines)
+		},
+		footer: []helpItem{{Key: "Enter/Esc", Action: "back"}, {Key: "Ctrl+H", Action: "help"}},
+	})
 }
 
 func (m *tuiModel) selectedServers() []*model.Server {

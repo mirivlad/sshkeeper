@@ -183,6 +183,40 @@ func TestHelpScreensUseUnifiedShell(t *testing.T) {
 	}
 }
 
+func TestManagerScreensUseUnifiedShell(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
+		m := New([]*model.Server{{Alias: "prod", Host: "prod.example", Port: 22, User: "ops"}})
+		m.width, m.height = size.width, size.height
+		template := &model.CommandTemplate{Name: "Disk usage", Command: "df -h", Description: "Show mounted filesystems"}
+		m.setTemplates([]*model.CommandTemplate{template})
+		m.setTags([]string{"production"})
+		m.pendingTemplate = template
+		m.bgResults = []templateRunResult{{Alias: "prod", Output: "ok\n数据库 ready"}}
+
+		screens := []struct {
+			name   string
+			screen screen
+		}{
+			{"search", screenSearch},
+			{"tags", screenTags},
+			{"tag-input", screenTagInput},
+			{"templates", screenTemplates},
+			{"template-picker", screenTemplatePicker},
+			{"template-mode", screenTemplateMode},
+			{"background-results", screenBackgroundResults},
+		}
+		for _, tt := range screens {
+			m.screen = tt.screen
+			t.Run(tt.name+itoa(size.width), func(t *testing.T) {
+				assertUnifiedScreen(t, m.View(), size.width, size.height)
+			})
+		}
+
+		tunnelScreen := newTunnelScreenModel(size.width, size.height)
+		assertUnifiedScreen(t, tunnelScreen.View(), size.width, size.height)
+	}
+}
+
 func TestTemplateFormFitsSupportedTerminalSizes(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
 		form := newTemplateFormModel(nil, size.width, size.height)
