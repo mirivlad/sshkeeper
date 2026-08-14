@@ -342,8 +342,8 @@ func TestAuthMethodListViewShowsAllOptions(t *testing.T) {
 	if between := view[authPos:listPos]; strings.Contains(between, "Identity File") {
 		t.Fatalf("expected auth method list to render directly under auth field\nview:\n%s", view)
 	}
-	if strings.Contains(view, "│") {
-		t.Fatalf("expected compact auth method dropdown without default list border\nview:\n%s", view)
+	if !strings.Contains(view, "│") {
+		t.Fatalf("expected auth method dropdown inside the unified frame\nview:\n%s", view)
 	}
 	for _, method := range []model.AuthMethod{
 		model.AuthPassword,
@@ -383,8 +383,8 @@ func TestGroupListViewRendersDirectlyUnderGroupField(t *testing.T) {
 	if between := view[groupPos:listPos]; strings.Contains(between, "Password") {
 		t.Fatalf("expected group dropdown to render before password field\nview:\n%s", view)
 	}
-	if strings.Contains(view, "│") {
-		t.Fatalf("expected compact group dropdown without default list border\nview:\n%s", view)
+	if !strings.Contains(view, "│") {
+		t.Fatalf("expected group dropdown inside the unified frame\nview:\n%s", view)
 	}
 }
 

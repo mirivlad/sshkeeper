@@ -90,6 +90,7 @@ func TestServerFormFitsSupportedTerminalSizes(t *testing.T) {
 			fm.updateFocus()
 			view := fm.View()
 			assertViewFits(t, view, size.width, size.height)
+			assertUnifiedScreen(t, view, size.width, size.height)
 			for _, want := range []string{"Server", "Port *", "not-a-port", "Port must be", "Save", "Esc"} {
 				if !strings.Contains(view, want) {
 					t.Fatalf("form at %dx%d missing %q:\n%s", size.width, size.height, want, view)
@@ -224,9 +225,25 @@ func TestTemplateFormFitsSupportedTerminalSizes(t *testing.T) {
 		form.inputs[1].SetValue("printf 'a very long command that remains editable'")
 		view := form.View()
 		assertViewFits(t, view, size.width, size.height)
+		assertUnifiedScreen(t, view, size.width, size.height)
 		for _, want := range []string{"Template", "Name *", "Save", "Esc"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("template form at %dx%d missing %q:\n%s", size.width, size.height, want, view)
+			}
+		}
+	}
+}
+
+func TestServerFormDropdownUsesUnifiedShell(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
+		form := newFormModel(size.width, size.height)
+		form.focusIdx = 5
+		form.showAuthList = true
+		view := form.View()
+		assertUnifiedScreen(t, view, size.width, size.height)
+		for _, want := range []string{"Select auth method", "password", "agent", "Enter", "Esc"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("dropdown at %dx%d missing %q:\n%s", size.width, size.height, want, view)
 			}
 		}
 	}

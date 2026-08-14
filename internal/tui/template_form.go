@@ -151,31 +151,40 @@ func (tf *templateFormModel) save() tea.Cmd {
 }
 
 func (tf *templateFormModel) View() string {
-	var b strings.Builder
 	title := "Add Template"
 	if tf.edit {
 		title = "Edit Template"
 	}
-	b.WriteString(titleStyle.Copy().MarginLeft(0).Render(fitLine(title, tf.width)))
-	b.WriteString("\n\n")
-	for i := range tf.inputs {
-		b.WriteString(fitLine(tf.inputs[i].View(), tf.width))
-		b.WriteString("\n")
-	}
-	button := "  [ Save ]"
-	if tf.focusIdx == len(tf.inputs) {
-		button = selectedStyle.Render("> [ Save ]")
-	}
-	b.WriteString("\n" + button + "\n\n")
+	notification := ""
 	if tf.err != nil {
-		b.WriteString(errorStyle.Render(tf.err.Error()))
-		b.WriteString("\n")
+		notification = errorStyle.Render(tf.err.Error())
+	} else if tf.saved {
+		notification = successStyle.Render("✓ Saved.")
 	}
-	b.WriteString(renderHelp([]helpItem{
-		{Key: "Tab/↓", Action: "next"},
-		{Key: "↑", Action: "prev"},
-		{Key: "Enter", Action: "select"},
-		{Key: "Esc", Action: "back"},
-	}, tf.width))
-	return b.String()
+	return renderScreenShell(screenShell{
+		breadcrumb:   "Command Templates / " + title,
+		status:       "Template editor",
+		notification: notification,
+		width:        tf.width,
+		height:       tf.height,
+		body: func(width, height int) string {
+			lines := make([]string, 0, len(tf.inputs)+3)
+			for i := range tf.inputs {
+				lines = append(lines, tf.inputs[i].View())
+			}
+			button := "  [ Save ]"
+			if tf.focusIdx == len(tf.inputs) {
+				button = selectedStyle.Render("> [ Save ]")
+			}
+			lines = append(lines, "", button)
+			return renderPaddedPanel(width, height, lines)
+		},
+		footer: []helpItem{
+			{Key: "Tab/↓", Action: "next"},
+			{Key: "↑", Action: "prev"},
+			{Key: "Enter", Action: "select"},
+			{Key: "Ctrl+H", Action: "help"},
+			{Key: "Esc", Action: "back"},
+		},
+	})
 }

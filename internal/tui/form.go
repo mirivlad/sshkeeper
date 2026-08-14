@@ -589,14 +589,6 @@ func (fm *formModel) View() string {
 	if fm.edit {
 		title = "Edit Server: " + fm.server.Alias
 	}
-	footer := renderHelp([]helpItem{
-		{Key: "Tab/↓", Action: "next"},
-		{Key: "↑", Action: "prev"},
-		{Key: "/", Action: "pick list"},
-		{Key: "Enter", Action: "select"},
-		{Key: "Esc", Action: "back"},
-	}, fm.width)
-
 	if fm.showAuthList || fm.showGroupList {
 		var dropdown list.Model
 		fieldIndex := 8
@@ -606,10 +598,18 @@ func (fm *formModel) View() string {
 		} else {
 			dropdown = fm.groupList
 		}
-		return titleStyle.Copy().MarginLeft(0).Render(fitLine(title, fm.width)) + "\n" +
-			fitLine(fm.inputs[fieldIndex].View(), fm.width) + "\n" +
-			fitLine(renderDropdown(dropdown), fm.width) + "\n" +
-			renderHelp([]helpItem{{Key: "Enter", Action: "select"}, {Key: "Esc", Action: "cancel"}}, fm.width)
+		return renderScreenShell(screenShell{
+			breadcrumb: title + " / Picker",
+			status:     "Choose a value",
+			width:      fm.width,
+			height:     fm.height,
+			body: func(width, height int) string {
+				lines := []string{fm.inputs[fieldIndex].View(), ""}
+				lines = append(lines, splitBlock(renderDropdown(dropdown))...)
+				return renderPaddedPanel(width, height, lines)
+			},
+			footer: []helpItem{{Key: "↑/↓", Action: "move"}, {Key: "Enter", Action: "select"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "cancel"}},
+		})
 	}
 
 	status := fm.formStatusLine()
@@ -620,60 +620,68 @@ func (fm *formModel) View() string {
 	if fm.focusIdx == len(fm.inputs)+2 {
 		saveBtn = selectedStyle.Render("> [ Save ]")
 	}
-	actions := fitLine(testBtn+"  "+saveBtn, fm.width)
+	actions := testBtn + "  " + saveBtn
 
-	reserved := 1 + displayLineCount(footer) + 1
-	if status != "" {
-		reserved++
-	}
-	fieldRows := max(4, fm.height-reserved)
-	richLayout := fm.width >= 90 && fm.height >= 24
-	allFields := make([]string, 0, len(fm.inputs)+5)
-	focusRows := make([]int, len(fm.inputs)+1)
-	for i := range fm.inputs {
-		if richLayout {
-			if section := formSectionTitle(i); section != "" {
-				allFields = append(allFields, sectionStyle.Copy().MarginTop(0).Render(section))
+	body := func(width, height int) string {
+		richLayout := width >= 90 && height >= 20
+		allFields := make([]string, 0, len(fm.inputs)+5)
+		focusRows := make([]int, len(fm.inputs)+1)
+		for i := range fm.inputs {
+			if richLayout {
+				if section := formSectionTitle(i); section != "" {
+					allFields = append(allFields, sectionStyle.Copy().MarginTop(0).Render(section))
+				}
 			}
+			if i == 5 {
+				fm.inputs[i].Placeholder = "password/key/key_passphrase/agent"
+			}
+			if i == 8 && len(fm.groups) > 0 {
+				fm.inputs[i].Placeholder = truncateCells(strings.Join(fm.groups, ", "), 25)
+			}
+			focusRows[i] = len(allFields)
+			allFields = append(allFields, fm.inputs[i].View())
 		}
-		if i == 5 {
-			fm.inputs[i].Placeholder = "password/key/key_passphrase/agent"
+		focusRows[len(fm.inputs)] = len(allFields)
+		allFields = append(allFields, fm.password.View())
+		focusField := len(allFields) - 1
+		if fm.focusIdx <= len(fm.inputs) {
+			focusField = focusRows[fm.focusIdx]
 		}
-		if i == 8 && len(fm.groups) > 0 {
-			fm.inputs[i].Placeholder = truncateCells(strings.Join(fm.groups, ", "), 25)
+		actionRows := 1
+		if richLayout {
+			actionRows = 2
 		}
-		focusRows[i] = len(allFields)
-		allFields = append(allFields, fitLine(fm.inputs[i].View(), fm.width))
+		fieldRows := max(1, height-2-actionRows)
+		start, end := visibleServerRange(len(allFields), focusField, fieldRows)
+		visible := append([]string(nil), allFields[start:end]...)
+		if start > 0 && len(visible) > 0 {
+			visible[0] = "↑ more fields · " + visible[0]
+		}
+		if end < len(allFields) && len(visible) > 0 {
+			visible[len(visible)-1] += " · more ↓"
+		}
+		if richLayout {
+			visible = append(visible, sectionStyle.Copy().MarginTop(0).Render("Actions"))
+		}
+		visible = append(visible, actions)
+		return renderPaddedPanel(width, height, visible)
 	}
-	focusRows[len(fm.inputs)] = len(allFields)
-	allFields = append(allFields, fitLine(fm.password.View(), fm.width))
-	focusField := len(allFields) - 1
-	if fm.focusIdx <= len(fm.inputs) {
-		focusField = focusRows[fm.focusIdx]
-	}
-	start, end := visibleServerRange(len(allFields), focusField, fieldRows)
-	visible := append([]string(nil), allFields[start:end]...)
-	if start > 0 && len(visible) > 0 {
-		visible[0] = fitLine("↑ more fields · "+visible[0], fm.width)
-	}
-	if end < len(allFields) && len(visible) > 0 {
-		visible[len(visible)-1] = fitLine(visible[len(visible)-1]+" · more ↓", fm.width)
-	}
-
-	lines := []string{titleStyle.Copy().MarginLeft(0).Render(fitLine(title, fm.width))}
-	lines = append(lines, visible...)
-	if status != "" {
-		lines = append(lines, fitLine(status, fm.width))
-	}
-	if richLayout {
-		lines = append(lines, sectionStyle.Copy().MarginTop(0).Render("Actions"))
-	}
-	lines = append(lines, actions)
-	lines = append(lines, strings.Split(footer, "\n")...)
-	if len(lines) > fm.height && fm.height > 0 {
-		lines = lines[:fm.height]
-	}
-	return strings.Join(lines, "\n")
+	return renderScreenShell(screenShell{
+		breadcrumb:   title,
+		status:       "Server profile",
+		notification: status,
+		width:        fm.width,
+		height:       fm.height,
+		body:         body,
+		footer: []helpItem{
+			{Key: "Tab/↓", Action: "next"},
+			{Key: "↑", Action: "prev"},
+			{Key: "/", Action: "pick list"},
+			{Key: "Enter", Action: "select"},
+			{Key: "Ctrl+H", Action: "help"},
+			{Key: "Esc", Action: "back"},
+		},
+	})
 }
 
 func (fm *formModel) formStatusLine() string {
@@ -701,7 +709,7 @@ func (fm *formModel) formStatusLine() string {
 
 func renderDropdown(l list.Model) string {
 	var b strings.Builder
-	b.WriteString(sectionStyle.Render(l.Title))
+	b.WriteString(dashboardSection(l.Title))
 	b.WriteString("\n")
 	for i, item := range l.Items() {
 		group, ok := item.(groupItem)
