@@ -16,6 +16,8 @@ func (m *tuiModel) renderServerDashboard() string {
 	if height <= 0 {
 		height = 40
 	}
+	sizeClass := classifyTerminal(width, height)
+	width = max(1, width-1)
 
 	header := m.renderDashboardHeader(width)
 	notification := m.renderDashboardNotification(width)
@@ -29,7 +31,7 @@ func (m *tuiModel) renderServerDashboard() string {
 	}
 
 	var body string
-	switch classifyTerminal(width, height) {
+	switch sizeClass {
 	case sizeWide:
 		leftWidth := width * 62 / 100
 		rightWidth := width - leftWidth - 1

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -46,6 +47,7 @@ func TestDashboardFitsSupportedTerminalSizes(t *testing.T) {
 			m := New(servers)
 			m.width, m.height = size.width, size.height
 			assertViewFits(t, m.View(), size.width, size.height)
+			assertRightMargin(t, m.View(), size.width)
 			for _, want := range []string{"sshkeeper", "Servers", "Vault", "Enter", "Ctrl+Q"} {
 				if !strings.Contains(m.View(), want) {
 					t.Fatalf("dashboard at %dx%d missing %q:\n%s", size.width, size.height, want, m.View())
@@ -168,6 +170,27 @@ func TestConfirmationFitsSupportedTerminalSizes(t *testing.T) {
 	}
 }
 
+func TestConfirmationKeepsActionsVisibleWithLongContent(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
+		m := New(nil)
+		m.width, m.height = size.width, size.height
+		m.beginConfirm(confirmState{
+			title:       "Delete port forward?",
+			target:      strings.Repeat("非常に長い-очень-длинный-🔐 ", 20),
+			consequence: strings.Repeat("Active connections can be interrupted. ", 20),
+			verb:        "Delete",
+			parent:      screenForwardList,
+		})
+		view := m.View()
+		assertUnifiedScreen(t, view, size.width, size.height)
+		for _, want := range []string{"[ Cancel ]", "[ Delete ]"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("confirmation at %dx%d clipped %q:\n%s", size.width, size.height, want, view)
+			}
+		}
+	}
+}
+
 func TestHelpScreensUseUnifiedShell(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
 		for name, view := range map[string]string{
@@ -215,6 +238,72 @@ func TestManagerScreensUseUnifiedShell(t *testing.T) {
 
 		tunnelScreen := newTunnelScreenModel(size.width, size.height)
 		assertUnifiedScreen(t, tunnelScreen.View(), size.width, size.height)
+	}
+}
+
+func TestLayoutMatrixInventoriesEveryScreen(t *testing.T) {
+	covered := map[screen]string{
+		screenList:              "dashboard",
+		screenForm:              "server form",
+		screenSearch:            "manager matrix",
+		screenTags:              "manager matrix",
+		screenTagInput:          "manager matrix",
+		screenTemplates:         "manager matrix",
+		screenTemplateForm:      "template form",
+		screenTemplatePicker:    "manager matrix",
+		screenTemplateMode:      "manager matrix",
+		screenBackgroundResults: "manager matrix",
+		screenHelp:              "help matrix",
+		screenActionMenu:        "action matrix",
+		screenForwardList:       "forward matrix",
+		screenForwardForm:       "forward form matrix",
+		screenTunnelManager:     "manager matrix",
+		screenConfirm:           "confirmation matrix",
+		screenFullHelp:          "help matrix",
+	}
+	for value := screenList; value <= screenFullHelp; value++ {
+		if _, ok := covered[value]; !ok {
+			t.Fatalf("screen %d is missing from the layout matrix", value)
+		}
+	}
+}
+
+func TestShellBreakpointsUseTerminalWidth(t *testing.T) {
+	for _, tt := range []struct {
+		contentWidth int
+		want         terminalSizeClass
+	}{{68, sizeNarrow}, {69, sizeMedium}, {98, sizeMedium}, {99, sizeWide}} {
+		if got := classifyShellContent(tt.contentWidth); got != tt.want {
+			t.Fatalf("content width %d classified as %v, want %v", tt.contentWidth, got, tt.want)
+		}
+	}
+}
+
+func TestTunnelErrorUsesUnifiedShellRows(t *testing.T) {
+	tunnelModel := newTunnelScreenModel(60, 16)
+	tunnelModel.tunnels = []*model.TunnelState{{Name: "prod tunnel", ServerAlias: "prod", LastError: "connection lost\nretry failed"}}
+	tunnelModel.rebuildList()
+	view := tunnelModel.View()
+	assertUnifiedScreen(t, view, 60, 16)
+	if !strings.Contains(view, "connection lost") || !strings.Contains(view, "retry failed") {
+		t.Fatalf("tunnel error was lost:\n%s", view)
+	}
+}
+
+func TestTemplateViewportKeepsSelectedDescribedItemVisible(t *testing.T) {
+	m := New(nil)
+	m.width, m.height = 60, 16
+	templates := make([]*model.CommandTemplate, 20)
+	for index := range templates {
+		templates[index] = &model.CommandTemplate{Name: fmt.Sprintf("template-%02d", index), Command: "echo ok", Description: "description"}
+	}
+	m.setTemplates(templates)
+	m.templateList.Select(len(templates) - 1)
+	m.screen = screenTemplates
+	view := m.View()
+	assertUnifiedScreen(t, view, 60, 16)
+	if !strings.Contains(view, "> template-19") {
+		t.Fatalf("selected template is outside viewport:\n%s", view)
 	}
 }
 
@@ -278,6 +367,15 @@ func assertUnifiedScreen(t *testing.T, view string, width, height int) {
 		t.Fatalf("unified screen footer is not on last row:\n%s", view)
 	}
 	for index, line := range lines {
+		if got := ansi.StringWidth(line); got > width-1 {
+			t.Fatalf("line %d uses unsafe last terminal column: width=%d terminal=%d", index+1, got, width)
+		}
+	}
+}
+
+func assertRightMargin(t *testing.T, view string, width int) {
+	t.Helper()
+	for index, line := range strings.Split(view, "\n") {
 		if got := ansi.StringWidth(line); got > width-1 {
 			t.Fatalf("line %d uses unsafe last terminal column: width=%d terminal=%d", index+1, got, width)
 		}

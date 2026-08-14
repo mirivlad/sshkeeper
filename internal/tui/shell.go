@@ -110,6 +110,17 @@ func splitBlock(block string) []string {
 	return strings.Split(strings.TrimRight(block, "\n"), "\n")
 }
 
+func classifyShellContent(contentWidth int) terminalSizeClass {
+	terminalWidth := contentWidth + 1
+	if terminalWidth >= 100 {
+		return sizeWide
+	}
+	if terminalWidth >= 70 {
+		return sizeMedium
+	}
+	return sizeNarrow
+}
+
 func shellStatus(vaultUnlocked bool, detail string) string {
 	vault := "Vault locked"
 	if vaultUnlocked {

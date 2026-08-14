@@ -1543,13 +1543,12 @@ func (m *tuiModel) viewConfirm() string {
 	}
 	body := func(width, height int) string {
 		innerWidth := max(1, width-4)
-		lines := []string{dashboardSection(m.confirm.title), ""}
-		lines = append(lines, wrapCells(m.confirm.target, innerWidth)...)
+		innerHeight := max(1, height-2)
+		message := wrapCells(m.confirm.target, innerWidth)
 		if m.confirm.consequence != "" {
-			lines = append(lines, "")
-			lines = append(lines, wrapCells(m.confirm.consequence, innerWidth)...)
+			message = append(message, "")
+			message = append(message, wrapCells(m.confirm.consequence, innerWidth)...)
 		}
-		lines = append(lines, "")
 		cancel := "[ Cancel ]"
 		accept := "[ " + m.confirm.verb + " ]"
 		if m.confirm.focus == confirmCancel {
@@ -1557,11 +1556,23 @@ func (m *tuiModel) viewConfirm() string {
 		} else {
 			accept = errorStyle.Render("> " + accept)
 		}
+		action := cancel + "  " + accept
 		if m.confirm.pending {
-			lines = append(lines, m.confirm.verb+" in progress…")
-		} else {
-			lines = append(lines, cancel+"  "+accept)
+			action = m.confirm.verb + " in progress…"
 		}
+		messageRows := max(0, innerHeight-2)
+		if len(message) > messageRows {
+			message = message[:messageRows]
+			if len(message) > 0 {
+				message[len(message)-1] = truncateCells(strings.TrimSpace(message[len(message)-1])+" …", innerWidth)
+			}
+		}
+		lines := []string{dashboardSection(m.confirm.title)}
+		lines = append(lines, message...)
+		for len(lines) < innerHeight-1 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, action)
 		return renderPaddedPanel(width, height, lines)
 	}
 	return renderScreenShell(screenShell{
@@ -1983,10 +1994,11 @@ func (m *tuiModel) viewTemplates() string {
 				if index == m.templateList.Index() {
 					marker = "> "
 				}
-				lines = append(lines, marker+tpl.template.Name+"  "+tpl.template.Command)
-				if tpl.template.Description != "" && classifyTerminal(width, height) != sizeNarrow {
-					lines = append(lines, "    "+dashboardHelp(tpl.template.Description))
+				line := marker + tpl.template.Name + "  " + tpl.template.Command
+				if tpl.template.Description != "" && classifyShellContent(width) != sizeNarrow {
+					line += "  — " + tpl.template.Description
 				}
+				lines = append(lines, line)
 			}
 			return renderPaddedPanel(width, height, lines)
 		},
@@ -2175,7 +2187,7 @@ func (m *tuiModel) removeTag(name string) {
 // --- Server list footer ---
 
 func (m *tuiModel) renderListHelp(selectedCount int, hasBackgroundResult bool) string {
-	width := m.width - 2
+	width := m.width - 3
 	if width <= 0 {
 		width = 80
 	}

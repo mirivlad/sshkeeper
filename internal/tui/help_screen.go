@@ -349,7 +349,7 @@ func (m *actionMenuModel) Update(msg tea.Msg) (*actionMenuModel, *string) {
 func (m *actionMenuModel) View() string {
 	body := func(width, height int) string {
 		listLines := m.actionLines(max(1, height-2))
-		if classifyTerminal(width, height) == sizeWide {
+		if classifyShellContent(width) == sizeWide {
 			leftWidth := width * 48 / 100
 			rightWidth := width - leftWidth - 1
 			selected, _ := m.list.SelectedItem().(actionMenuItem)
@@ -360,7 +360,7 @@ func (m *actionMenuModel) View() string {
 				renderPaddedPanel(rightWidth, height, detail), rightWidth,
 			)
 		}
-		if classifyTerminal(width, height) == sizeMedium {
+		if classifyShellContent(width) == sizeMedium {
 			if selected, ok := m.list.SelectedItem().(actionMenuItem); ok && len(listLines) < height-4 {
 				listLines = append(listLines, "", dashboardSection("Selected"), selected.description)
 			}

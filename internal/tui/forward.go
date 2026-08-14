@@ -84,7 +84,7 @@ func (m *forwardScreenModel) View() string {
 		notification = errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
 	}
 	body := func(width, height int) string {
-		switch classifyTerminal(width, height) {
+		switch classifyShellContent(width) {
 		case sizeWide:
 			leftWidth := width * 70 / 100
 			rightWidth := width - leftWidth - 1

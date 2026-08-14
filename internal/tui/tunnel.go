@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -102,7 +103,7 @@ func (m *tunnelScreenModel) View() string {
 			return renderPaddedPanel(width, height, []string{dashboardHelp("No running tunnels.")})
 		}
 		capacity := max(1, height-2)
-		start, end := visibleServerRange(len(m.tunnels), m.list.Index(), max(1, capacity/2))
+		start, end := visibleServerRange(len(m.tunnels), m.list.Index(), max(1, capacity/3))
 		lines := make([]string, 0, capacity)
 		for index := start; index < end; index++ {
 			item := tunnelItem{state: m.tunnels[index]}
@@ -110,7 +111,10 @@ func (m *tunnelScreenModel) View() string {
 			if index == m.list.Index() {
 				marker = "> "
 			}
-			lines = append(lines, marker+item.Title(), "    "+item.Description())
+			lines = append(lines, marker+item.Title())
+			for _, description := range strings.Split(item.Description(), "\n") {
+				lines = append(lines, "    "+strings.TrimSpace(description))
+			}
 		}
 		return renderPaddedPanel(width, height, lines)
 	}
