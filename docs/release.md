@@ -137,16 +137,23 @@ byte for byte. `release.sh` pins everything that would otherwise vary:
 - `normalize_package` forces 755 on directories and the program and 644 on
   everything else, so the builder's umask cannot leak into the archive.
 
-To check a published build, compare the binary inside the archive rather than
-the archive hash:
+- the Windows zip is packaged under `LC_ALL=C` and `TZ=UTC`, because `sort`
+  orders entries by locale and zip stores DOS local time with no zone.
+
+With those in place the archives themselves reproduce across hosts: a build on
+`ubuntu-latest` (umask 022, C locale, UTC) and one on a workstation (umask 002,
+`ru_RU.UTF-8`, UTC+08) produce identical checksums for all five archives.
+
+The strongest check is still the binary, since it does not depend on the host's
+`tar` and `gzip` at all:
 
 ```bash
 tar -xzf sshkeeper_<version>_linux_amd64.tar.gz
 sha256sum sshkeeper_<version>_linux_amd64/sshkeeper
 ```
 
-The archive hash additionally depends on the `tar` and `gzip` implementations
-on the build host, so it is the weaker check of the two.
+Comparing whole-archive hashes works too, as long as both builds used the same
+Go version.
 
 ## Publish in GitHub Release
 
