@@ -199,6 +199,7 @@ func init() {
 	forwardAddCmd.Flags().String("name", "", "Forward name")
 	forwardAddCmd.Flags().String("description", "", "Forward description")
 	forwardAddCmd.Flags().String("local-addr", "127.0.0.1", "Listen address")
+	forwardAddCmd.Flags().Int("local-port", 0, "Listen port")
 	forwardAddCmd.MarkFlagRequired("local-port")
 	forwardAddCmd.Flags().String("remote-addr", "", "Target address")
 	forwardAddCmd.Flags().Int("remote-port", 0, "Target port")
