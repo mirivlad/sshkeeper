@@ -12,8 +12,11 @@ git tag -a v0.2.0 -m "sshkeeper v0.2.0"
 git push origin v0.2.0
 ```
 
-The release script uses `git describe --tags --always --dirty` by default. You
-can also pass the version explicitly:
+The release script uses `git describe --tags --match 'v*' --always --dirty` by
+default. The `--match 'v*'` filter matters: nightly builds move a `nightly` tag
+across `main`, and without the filter `git describe` would pick that tag and
+stamp binaries `nightly` instead of `v<last release>-<n>-g<sha>`. You can also
+pass the version explicitly:
 
 ```bash
 ./release.sh v0.2.0

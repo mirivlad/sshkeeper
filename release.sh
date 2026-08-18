@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP=sshkeeper
-VERSION=${VERSION:-${1:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev")}}
+# --match 'v*' ignores the rolling `nightly` tag; see build.sh for the details.
+VERSION=${VERSION:-${1:-$(git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo "dev")}}
 LDFLAGS="-s -w -X main.version=${VERSION}"
 DIST_DIR="dist"
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || date +%s)}
