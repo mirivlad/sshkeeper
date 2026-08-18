@@ -71,7 +71,14 @@ build_zip() {
 	GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" -o "${package_dir}/${APP}.exe" .
 	package_docs "${package_dir}"
 	normalize_package "${package_dir}" "${APP}.exe"
-	(cd "${DIST_DIR}" && find "$(basename "${package_dir}")" -print | sort | zip -X -q "$(basename "${archive}")" -@)
+	# LC_ALL=C: `sort` is locale-sensitive, and it decides the entry order here.
+	# A ru_RU.UTF-8 host orders docs/ before LICENSE where a C locale does the
+	# reverse, producing a different archive from identical files.
+	#
+	# TZ=UTC: zip records DOS local time with no zone, so the same build in
+	# +08:00 and in UTC would embed different timestamps. tar needs neither —
+	# it sorts internally and stores Unix epochs.
+	(cd "${DIST_DIR}" && export LC_ALL=C TZ=UTC && find "$(basename "${package_dir}")" -print | sort | zip -X -q "$(basename "${archive}")" -@)
 	rm -rf "${package_dir}"
 }
 
