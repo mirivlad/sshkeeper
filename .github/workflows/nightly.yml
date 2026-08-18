@@ -1,0 +1,94 @@
+name: Nightly
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Two pushes in quick succession must not race for the rolling tag. Let the
+# newer commit win rather than publishing a nightly built from older code.
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  nightly:
+    name: publish nightly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Cheaper than the full release-check, but still refuses to publish a
+      # broken build.
+      - name: test
+        run: |
+          go vet ./...
+          go test ./... -count=1
+
+      # Version discovery is pinned to v* tags (see build.sh), so the rolling
+      # nightly tag below cannot hijack this value.
+      - name: resolve version
+        id: version
+        run: echo "value=$(git describe --tags --match 'v*' --always)" >> "$GITHUB_OUTPUT"
+
+      - name: build artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: ./release.sh "$VERSION"
+
+      # Move the rolling tag before touching the release: a GitHub release must
+      # point at a tag, and this one always tracks the tip of main.
+      - name: move nightly tag
+        run: |
+          set -euo pipefail
+          git tag -f nightly
+          git push -f origin nightly
+
+      # Replace rather than update: assets are immutable once uploaded, so the
+      # old release has to go before the new archives can take its name.
+      - name: replace nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+
+          # Heredoc, not an inline string: the notes are markdown and must not
+          # inherit this file's YAML indentation.
+          cat > /tmp/nightly-notes.md <<EOF
+          Automated build from the tip of \`main\`, rebuilt on every push.
+
+          **This is not a stable release.** It is untagged, unannounced and may be
+          broken. The \`Latest\` badge stays on the newest \`v*\` release, which is
+          what you want for normal use.
+
+          | | |
+          |---|---|
+          | Version | \`${VERSION}\` |
+          | Commit | ${GITHUB_SHA} |
+          | Built | $(date -u '+%Y-%m-%d %H:%M UTC') |
+
+          Verify downloads against \`checksums.txt\`.
+          EOF
+
+          gh release delete nightly --yes || echo "no previous nightly release"
+          gh release create nightly \
+            --prerelease \
+            --title "sshkeeper nightly (${VERSION})" \
+            --notes-file /tmp/nightly-notes.md \
+            "dist/sshkeeper_${VERSION}_linux_amd64.tar.gz" \
+            "dist/sshkeeper_${VERSION}_linux_arm64.tar.gz" \
+            "dist/sshkeeper_${VERSION}_darwin_amd64.tar.gz" \
+            "dist/sshkeeper_${VERSION}_darwin_arm64.tar.gz" \
+            "dist/sshkeeper_${VERSION}_windows_amd64.zip" \
+            dist/checksums.txt
