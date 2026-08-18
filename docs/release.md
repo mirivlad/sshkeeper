@@ -1,16 +1,49 @@
 # Release Packaging
 
-This document describes the manual release flow for sshkeeper.
+Releases are published by GitHub Actions. Pushing a `v*` tag is the whole
+release procedure; the rest of this document describes what that automation
+runs, and how to reproduce it by hand when needed.
+
+## Workflows
+
+| Workflow | Trigger | Result |
+|----------|---------|--------|
+| `ci.yml` | push to `main`, every pull request | `gofmt`, `go vet`, `go test` on Linux and macOS, plus a cross-build of all five release targets |
+| `release.yml` | push of a `v*` tag | runs `make release-check`, then `release.sh`, then publishes the GitHub release |
+| `nightly.yml` | push to `main` | rebuilds the tip of `main` and replaces the `nightly` prerelease |
+
+`release.yml` builds through `release.sh` rather than reimplementing packaging,
+so a local run produces byte-identical archives.
+
+### Release notes
+
+`release.yml` looks for `docs/releases/<tag>.md`. If that file exists it becomes
+the release body; otherwise GitHub generates notes from commit history. Write
+the file before pushing the tag when a release deserves a real description.
+
+### The nightly prerelease
+
+`nightly.yml` force-moves a rolling `nightly` tag to the tip of `main` and
+republishes a prerelease from it. It is marked prerelease deliberately, so
+GitHub's `Latest` badge stays on the newest `v*` release.
+
+Because that tag moves, version discovery in `build.sh` and `release.sh` is
+pinned with `--match 'v*'`. Without the filter `git describe` would select
+`nightly` and stamp binaries with it instead of `v<last release>-<n>-g<sha>`.
+Keep the filter if you touch those scripts.
 
 ## Create a Tag
 
-Use a semantic version tag:
+Use a semantic version tag. Pushing it is what triggers `release.yml`:
 
 ```bash
 git status --short
 git tag -a v0.2.0 -m "sshkeeper v0.2.0"
 git push origin v0.2.0
 ```
+
+The remaining sections describe the manual equivalent, which is still the way
+to test packaging locally or to recover if Actions is unavailable.
 
 The release script uses `git describe --tags --match 'v*' --always --dirty` by
 default. The `--match 'v*'` filter matters: nightly builds move a `nightly` tag
@@ -92,7 +125,7 @@ Expected result: every archive reports `OK`.
 
 ## Publish in GitHub Release
 
-Upload these files to the release:
+`release.yml` does this automatically on tag push. To publish by hand, upload:
 
 - all five platform archives
 - `checksums.txt`

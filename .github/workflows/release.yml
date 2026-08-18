@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      # Full history and tags: release.sh derives SOURCE_DATE_EPOCH from the
+      # tagged commit, and version discovery needs the v* tags to be present.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Gate the release on the same checks used locally. A red suite must not
+      # be able to publish.
+      - name: release checks
+        run: make release-check
+
+      # Build through release.sh rather than reimplementing packaging here, so
+      # CI and a local ./release.sh produce byte-identical archives.
+      - name: build artifacts
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: ./release.sh "$VERSION"
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # A hand-written docs/releases/<tag>.md wins; otherwise fall back to
+          # GitHub's generated changelog.
+          notes="docs/releases/${VERSION}.md"
+          if [ -f "$notes" ]; then
+            echo "Using hand-written notes from $notes"
+            set -- --notes-file "$notes"
+          else
+            echo "No $notes, generating notes from commit history"
+            set -- --generate-notes
+          fi
+
+          gh release create "$VERSION" \
+            --title "sshkeeper $VERSION" \
+            --verify-tag \
+            "$@" \
+            "dist/sshkeeper_${VERSION}_linux_amd64.tar.gz" \
+            "dist/sshkeeper_${VERSION}_linux_arm64.tar.gz" \
+            "dist/sshkeeper_${VERSION}_darwin_amd64.tar.gz" \
+            "dist/sshkeeper_${VERSION}_darwin_arm64.tar.gz" \
+            "dist/sshkeeper_${VERSION}_windows_amd64.zip" \
+            dist/checksums.txt
