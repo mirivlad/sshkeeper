@@ -111,10 +111,15 @@ sshkeeper / Servers                                  Vault unlocked · 1 profile
 Press `?` outside text editors for a compact hotkey reference. Inside forms and
 search, `?` remains normal text input.
 
-### Full Help (F1)
+### Full Help (Ctrl+H)
 
-Press `F1` on any screen for full documentation including routes, port
+Press `Ctrl+H` on any screen for full documentation including routes, port
 forwarding, tunnels, and vault.
+
+`Ctrl+H` is the BS control character (0x08). xterm and most modern emulators
+send DEL (0x7F) for Backspace, so help and text editing never collide. A
+terminal configured to send BS for Backspace cannot distinguish the two; switch
+it to DEL (in xterm, `backarrowKey: false`).
 
 ### Screenshots
 
@@ -138,7 +143,7 @@ forwarding, tunnels, and vault.
 | Ctrl+X | Action menu (connect, tunnels, forwards, route, test, edit, delete, import/export, vault actions) |
 | Ins | Select / deselect a server |
 | ? | Quick help (hotkeys) |
-| F1 | Full documentation |
+| Ctrl+H | Full documentation |
 | Ctrl+Q / Ctrl+C | Quit |
 
 Templates are global entities and can run on any server. Foreground template
