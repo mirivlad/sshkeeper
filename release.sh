@@ -28,6 +28,16 @@ package_docs() {
 
 normalize_package() {
 	local package_dir="$1"
+	local binary="$2"
+
+	# Permissions must not depend on the builder's umask. Without this, a host
+	# with umask 002 packages 664/775 while one with umask 022 packages
+	# 644/755, and the archives differ even though every file inside is
+	# byte-identical.
+	find "${package_dir}" -type d -exec chmod 755 {} +
+	find "${package_dir}" -type f -exec chmod 644 {} +
+	chmod 755 "${package_dir}/${binary}"
+
 	find "${package_dir}" -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} +
 }
 
@@ -43,7 +53,7 @@ build_tarball() {
 
 	GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" -o "${package_dir}/${APP}" .
 	package_docs "${package_dir}"
-	normalize_package "${package_dir}"
+	normalize_package "${package_dir}" "${APP}"
 	tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@${SOURCE_DATE_EPOCH}" -cf - -C "${DIST_DIR}" "$(basename "${package_dir}")" | gzip -n > "${archive}"
 	rm -rf "${package_dir}"
 }
@@ -60,7 +70,7 @@ build_zip() {
 
 	GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" -o "${package_dir}/${APP}.exe" .
 	package_docs "${package_dir}"
-	normalize_package "${package_dir}"
+	normalize_package "${package_dir}" "${APP}.exe"
 	(cd "${DIST_DIR}" && find "$(basename "${package_dir}")" -print | sort | zip -X -q "$(basename "${archive}")" -@)
 	rm -rf "${package_dir}"
 }

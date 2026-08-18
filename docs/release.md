@@ -13,7 +13,8 @@ runs, and how to reproduce it by hand when needed.
 | `nightly.yml` | push to `main` | rebuilds the tip of `main` and replaces the `nightly` prerelease |
 
 `release.yml` builds through `release.sh` rather than reimplementing packaging,
-so a local run produces byte-identical archives.
+so CI and a local run stay in step. See [Reproducibility](#reproducibility) for
+what that guarantees.
 
 ### Release notes
 
@@ -122,6 +123,30 @@ sha256sum -c checksums.txt
 ```
 
 Expected result: every archive reports `OK`.
+
+## Reproducibility
+
+Rebuilding the same commit with the same Go version reproduces the **binaries**
+byte for byte. `release.sh` pins everything that would otherwise vary:
+
+- `-trimpath` and `CGO_ENABLED=0` keep build paths and the host toolchain out
+  of the binary;
+- `SOURCE_DATE_EPOCH` (the commit timestamp) sets every archive mtime;
+- `tar --sort=name --owner=0 --group=0 --numeric-owner` fixes entry order and
+  ownership, and `gzip -n` drops the compression timestamp;
+- `normalize_package` forces 755 on directories and the program and 644 on
+  everything else, so the builder's umask cannot leak into the archive.
+
+To check a published build, compare the binary inside the archive rather than
+the archive hash:
+
+```bash
+tar -xzf sshkeeper_<version>_linux_amd64.tar.gz
+sha256sum sshkeeper_<version>_linux_amd64/sshkeeper
+```
+
+The archive hash additionally depends on the `tar` and `gzip` implementations
+on the build host, so it is the weaker check of the two.
 
 ## Publish in GitHub Release
 
