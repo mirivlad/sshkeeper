@@ -43,7 +43,6 @@ func importServersFromSSHConfig(report func(format string, args ...interface{}))
 	if err != nil {
 		return 0, fmt.Errorf("import: %w", err)
 	}
-
 	if len(servers) == 0 {
 		if report != nil {
 			report("No servers found in ~/.ssh/config")
@@ -51,27 +50,63 @@ func importServersFromSSHConfig(report func(format string, args ...interface{}))
 		return 0, nil
 	}
 
+	// First pass creates every profile without routes. That makes ProxyJump
+	// aliases resolvable to stable sshkeeper IDs in the second pass, regardless
+	// of declaration order in ~/.ssh/config.
+	type pendingRoute struct {
+		server *model.Server
+		spec   string
+	}
+	pending := make([]pendingRoute, 0, len(servers))
 	imported := 0
-	for _, s := range servers {
-		existing, _ := appDB.GetServer(s.Alias)
-		if existing != nil {
+	for _, server := range servers {
+		if existing, _ := appDB.GetServer(server.Alias); existing != nil {
 			if report != nil {
-				report("  skip (exists): %s", s.Alias)
+				report("  skip (exists): %s", server.Alias)
 			}
 			continue
 		}
-		if err := appDB.CreateServer(s); err != nil {
+		spec := strings.TrimSpace(server.ProxyJump)
+		server.ProxyJump = ""
+		server.Route = model.Route{}
+		if err := appDB.CreateServer(server); err != nil {
 			if report != nil {
-				report("  error: %s: %v", s.Alias, err)
+				report("  error: %s: %v", server.Alias, err)
 			}
 			continue
 		}
-		if report != nil {
-			report("  imported: %s (%s@%s:%d)", s.Alias, s.User, s.Host, s.Port)
-		}
+		pending = append(pending, pendingRoute{server: server, spec: spec})
 		imported++
 	}
 
+	for _, item := range pending {
+		if item.spec != "" {
+			route, err := parseRouteSpec(item.spec)
+			if err != nil {
+				if report != nil {
+					report("  warning: %s imported direct; route %q could not be parsed: %v", item.server.Alias, item.spec, err)
+				}
+				continue
+			}
+			item.server.Route = route
+			item.server.ProxyJump = route.ProxyJumpString()
+			if err := appDB.UpdateServer(item.server); err != nil {
+				item.server.Route = model.Route{}
+				item.server.ProxyJump = ""
+				if report != nil {
+					report("  warning: %s imported direct; route could not be saved: %v", item.server.Alias, err)
+				}
+				continue
+			}
+		}
+		if report != nil {
+			routeSuffix := ""
+			if len(item.server.Route.Hops) > 0 {
+				routeSuffix = " via " + model.FormatRouteSpec(item.server.Route)
+			}
+			report("  imported: %s (%s@%s:%d)%s", item.server.Alias, item.server.User, item.server.Host, item.server.Port, routeSuffix)
+		}
+	}
 	return imported, nil
 }
 
@@ -101,18 +136,5 @@ var runCmd = &cobra.Command{
 }
 
 func runCommandOnServer(server *model.Server, command string) error {
-	return ssh.RunCommand(cfg, server, commandVaultFunc, command)
-}
-
-func commandVaultFunc(serverAlias string, secretType string) (string, error) {
-	v := getOrCreateVault()
-	if !v.IsUnlocked() {
-		return "", fmt.Errorf("%s", vaultLockedProcessMessage())
-	}
-	vaultKey := fmt.Sprintf("server:%s:%s", serverAlias, secretType)
-	data, err := v.Get(vaultKey)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+	return ssh.RunCommandResolved(cfg, server, dbProfileResolver, serverVaultFunc(server), command)
 }

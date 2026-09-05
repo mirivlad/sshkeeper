@@ -21,6 +21,7 @@ var addFlags struct {
 	authMethod   string
 	identityFile string
 	proxyJump    string
+	route        string
 	groupName    string
 	displayName  string
 	notes        string
@@ -50,6 +51,14 @@ func addInteractive() error {
 }
 
 func addNonInteractive(alias string) error {
+	routeSpec := strings.TrimSpace(addFlags.route)
+	if routeSpec == "" {
+		routeSpec = strings.TrimSpace(addFlags.proxyJump)
+	}
+	route, err := parseRouteSpec(routeSpec)
+	if err != nil {
+		return fmt.Errorf("route: %w", err)
+	}
 	server := &model.Server{
 		Alias:          alias,
 		DisplayName:    addFlags.displayName,
@@ -58,7 +67,8 @@ func addNonInteractive(alias string) error {
 		User:           addFlags.user,
 		AuthMethod:     model.AuthMethod(addFlags.authMethod),
 		IdentityFile:   addFlags.identityFile,
-		ProxyJump:      addFlags.proxyJump,
+		Route:          route,
+		ProxyJump:      route.ProxyJumpString(),
 		GroupName:      addFlags.groupName,
 		Notes:          addFlags.notes,
 		StartupCommand: addFlags.startup,
@@ -78,13 +88,30 @@ func addNonInteractive(alias string) error {
 }
 
 func saveServerWithOptionalSecret(server *model.Server) error {
-	// Handle password/passphrase auth — request interactively, never via argv
-	if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
+	if len(server.Route.Hops) == 0 && strings.TrimSpace(server.ProxyJump) != "" {
+		route, err := parseRouteSpec(server.ProxyJump)
+		if err != nil {
+			return fmt.Errorf("route: %w", err)
+		}
+		server.Route = route
+	}
+	server.ProxyJump = server.Route.ProxyJumpString()
+	if err := model.ValidateServerBasics(server); err != nil {
+		return err
+	}
+
+	if addFlags.tags != "" {
+		server.Tags = strings.Split(addFlags.tags, ",")
+	}
+
+	var secret []byte
+	var v = getOrCreateVault()
+	needsSecret := server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase
+	if needsSecret {
 		secretType := "password"
 		if server.AuthMethod == model.AuthKeyPassphrase {
 			secretType = "passphrase"
 		}
-
 		fmt.Printf("Enter %s (will be stored in vault, input hidden): ", secretType)
 		password, err := term.ReadPassword(int(syscall.Stdin))
 		fmt.Println()
@@ -94,37 +121,38 @@ func saveServerWithOptionalSecret(server *model.Server) error {
 		if len(password) == 0 {
 			return fmt.Errorf("%s cannot be empty", secretType)
 		}
-
-		v := getOrCreateVault()
+		secret = password
+		defer func() {
+			for i := range secret {
+				secret[i] = 0
+			}
+		}()
 		if err := unlockVaultForCommand(v); err != nil {
 			return err
-		}
-
-		vaultKey := fmt.Sprintf("server:%s:ssh_password", server.Alias)
-		vaultType := "ssh_password"
-		if server.AuthMethod == model.AuthKeyPassphrase {
-			vaultKey = fmt.Sprintf("server:%s:key_passphrase", server.Alias)
-			vaultType = "key_passphrase"
-		}
-
-		if err := v.Put(vaultKey, vaultType, password); err != nil {
-			return fmt.Errorf("store %s in vault: %w", secretType, err)
-		}
-		if err := v.Save(); err != nil {
-			return fmt.Errorf("save vault: %w", err)
 		}
 	}
 
 	if err := appDB.CreateServer(server); err != nil {
 		return fmt.Errorf("create server: %w", err)
 	}
+	rollbackDB := func() { _ = appDB.DeleteServer(server.Alias) }
 
-	if addFlags.tags != "" {
-		server.Tags = strings.Split(addFlags.tags, ",")
-	}
 	if len(server.Tags) > 0 {
 		if err := appDB.SetServerTags(server.ID, server.Tags); err != nil {
+			rollbackDB()
 			return fmt.Errorf("set tags: %w", err)
+		}
+	}
+
+	if needsSecret {
+		if err := syncServerSecrets(v, "", server, string(secret)); err != nil {
+			rollbackDB()
+			return fmt.Errorf("store secret in vault: %w", err)
+		}
+		if err := v.Save(); err != nil {
+			cleanupServerSecretsForServer(v, server)
+			rollbackDB()
+			return fmt.Errorf("save vault: %w", err)
 		}
 	}
 
@@ -171,7 +199,7 @@ func promptServerForAdd(in io.Reader, out io.Writer) (*model.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	proxyJump, err := promptOptional(reader, out, "ProxyJump", "")
+	proxyJump, err := promptOptional(reader, out, "Route / ProxyJump (profile:<alias> or raw:<target>)", "")
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +281,8 @@ func init() {
 	addCmd.Flags().StringVar(&addFlags.user, "user", "", "SSH username")
 	addCmd.Flags().StringVar(&addFlags.authMethod, "auth", "key", "Auth method: password, key, key_passphrase, agent")
 	addCmd.Flags().StringVar(&addFlags.identityFile, "identity-file", "", "Path to SSH private key")
-	addCmd.Flags().StringVar(&addFlags.proxyJump, "proxy-jump", "", "ProxyJump host")
+	addCmd.Flags().StringVar(&addFlags.route, "route", "", "Route hops: profile:<alias>, raw:<target>, comma-separated")
+	addCmd.Flags().StringVar(&addFlags.proxyJump, "proxy-jump", "", "Compatibility alias for --route")
 	addCmd.Flags().StringVar(&addFlags.groupName, "group", "", "Server group")
 	addCmd.Flags().StringVar(&addFlags.displayName, "display-name", "", "Display name")
 	addCmd.Flags().StringVar(&addFlags.notes, "notes", "", "Notes")

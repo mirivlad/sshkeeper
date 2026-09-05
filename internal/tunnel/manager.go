@@ -88,8 +88,14 @@ func Get(id int64) *model.TunnelState {
 	return states[id]
 }
 
-// Start starts a tunnel for the given server with its forwards.
+// Start starts a tunnel without profile resolution (legacy/direct routes).
 func Start(cfg *config.Config, server *model.Server, forwards []*model.Forward, forwardOnly bool) (*model.TunnelState, error) {
+	return StartResolved(cfg, server, forwards, forwardOnly, nil)
+}
+
+// StartResolved starts a background tunnel and retains any generated OpenSSH
+// config until the tunnel is stopped.
+func StartResolved(cfg *config.Config, server *model.Server, forwards []*model.Forward, forwardOnly bool, resolve ssh.ProfileResolver) (*model.TunnelState, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -105,9 +111,11 @@ func Start(cfg *config.Config, server *model.Server, forwards []*model.Forward, 
 		}
 	}
 
-	sshArgs := ssh.BuildSSHArgs(server, active, forwardOnly)
-	args := make([]string, len(sshArgs))
-	copy(args, sshArgs)
+	invocation, err := ssh.PrepareSSHInvocation(server, active, forwardOnly, resolve)
+	if err != nil {
+		return nil, err
+	}
+	args := append([]string(nil), invocation.Args...)
 
 	cmd := exec.Command(cfg.SSH.Binary, args...)
 	cmd.Env = os.Environ()
@@ -116,6 +124,7 @@ func Start(cfg *config.Config, server *model.Server, forwards []*model.Forward, 
 	cmd.Stderr = nil
 
 	if err := cmd.Start(); err != nil {
+		invocation.Cleanup()
 		return nil, fmt.Errorf("start tunnel: %w", err)
 	}
 
@@ -132,6 +141,7 @@ func Start(cfg *config.Config, server *model.Server, forwards []*model.Forward, 
 		Name:        fmt.Sprintf("Tunnel to %s", server.Alias),
 		PID:         cmd.Process.Pid,
 		ForwardIDs:  forwardIDs,
+		ConfigPath:  invocation.ConfigPath,
 		StartedAt:   time.Now(),
 	}
 
@@ -139,10 +149,12 @@ func Start(cfg *config.Config, server *model.Server, forwards []*model.Forward, 
 	if err := saveStates(); err != nil {
 		delete(states, id)
 		_ = cmd.Process.Kill()
+		invocation.Cleanup()
 		return nil, fmt.Errorf("save tunnel state: %w", err)
 	}
 	if err := cmd.Process.Release(); err != nil {
 		delete(states, id)
+		invocation.Cleanup()
 		return nil, fmt.Errorf("release tunnel process: %w", err)
 	}
 
@@ -166,6 +178,9 @@ func Stop(id int64) error {
 		}
 	}
 
+	if state.ConfigPath != "" {
+		_ = os.Remove(state.ConfigPath)
+	}
 	delete(states, id)
 	return saveStates()
 }
@@ -181,6 +196,9 @@ func StopAll() error {
 			if proc != nil {
 				proc.Kill()
 			}
+		}
+		if state.ConfigPath != "" {
+			_ = os.Remove(state.ConfigPath)
 		}
 		delete(states, id)
 	}

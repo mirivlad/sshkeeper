@@ -8,11 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// --- Route commands ---
-
 var routeCmd = &cobra.Command{
 	Use:   "route",
-	Short: "Manage server routes (ProxyJump)",
+	Short: "Manage server routes (bastions / ProxyJump)",
 }
 
 var routeShowCmd = &cobra.Command{
@@ -20,30 +18,29 @@ var routeShowCmd = &cobra.Command{
 	Short: "Show route for a server",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		alias := args[0]
-		server, err := appDB.GetServer(alias)
+		server, err := appDB.GetServer(args[0])
 		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
+			return fmt.Errorf("server not found: %s", args[0])
 		}
-		target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
-		if len(server.Route.Hops) > 0 {
-			fmt.Printf("Route: %s\n", server.Route.DisplaySummary(target))
-			fmt.Printf("Mode: %s\n", server.Route.RouteMode())
-			fmt.Printf("ProxyJump: %s\n", server.Route.ProxyJumpString())
-			if server.Route.HasProfileLinks() {
-				fmt.Println("Hops:")
-				for _, h := range server.Route.Hops {
-					if h.IsProfile {
-						fmt.Printf("  - %s (profile)\n", h.Alias)
-					} else {
-						fmt.Printf("  - %s (raw)\n", h.Raw)
-					}
-				}
-			}
-		} else if server.ProxyJump != "" {
-			fmt.Printf("ProxyJump: %s\n", server.ProxyJump)
-		} else {
+		target := server.Host
+		if server.User != "" {
+			target = server.User + "@" + server.Host
+		}
+		target = fmt.Sprintf("%s:%d", target, server.Port)
+		if len(server.Route.Hops) == 0 {
 			fmt.Println("Direct connection (no route)")
+			return nil
+		}
+		fmt.Printf("Route: %s\n", server.Route.DisplaySummary(target))
+		fmt.Printf("Mode: %s\n", server.Route.RouteMode())
+		fmt.Printf("Spec: %s\n", model.FormatRouteSpec(server.Route))
+		fmt.Println("Hops:")
+		for index, hop := range server.Route.Hops {
+			if hop.Profile() {
+				fmt.Printf("  %d. %s (sshkeeper profile #%d)\n", index+1, hop.Alias, hop.ServerID)
+			} else {
+				fmt.Printf("  %d. %s (raw OpenSSH target)\n", index+1, hop.Raw)
+			}
 		}
 		return nil
 	},
@@ -52,47 +49,38 @@ var routeShowCmd = &cobra.Command{
 var routeSetCmd = &cobra.Command{
 	Use:   "set <alias>",
 	Short: "Set route for a server",
-	Args:  cobra.MinimumNArgs(1),
+	Long: `Set an ordered route. Known aliases are resolved to stable sshkeeper profile IDs.
+Use profile:<alias> to require a profile reference and raw:<target> to force a literal OpenSSH target.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		alias := args[0]
-		server, err := appDB.GetServer(alias)
+		server, err := appDB.GetServer(args[0])
 		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
+			return fmt.Errorf("server not found: %s", args[0])
 		}
-
 		mode, _ := cmd.Flags().GetString("mode")
 		jumps, _ := cmd.Flags().GetString("jumps")
-
-		if mode == "clear" || jumps == "" {
+		mode = strings.ToLower(strings.TrimSpace(mode))
+		if mode == "clear" || mode == "direct" {
 			server.Route = model.Route{}
 			server.ProxyJump = ""
 		} else {
-			parts := strings.Split(jumps, ",")
-			hops := make([]model.RouteHop, 0, len(parts))
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p == "" {
-					continue
-				}
-				if strings.Contains(p, "@") || strings.Contains(p, ":") {
-					hops = append(hops, model.RouteHop{Raw: p, IsProfile: false})
-				} else {
-					hops = append(hops, model.RouteHop{Alias: p, IsProfile: true})
-				}
+			if strings.TrimSpace(jumps) == "" {
+				return fmt.Errorf("--jumps is required unless --mode=direct/clear")
 			}
-			server.Route = model.Route{Hops: hops}
-			server.ProxyJump = server.Route.ProxyJumpString()
+			route, err := parseRouteSpec(jumps)
+			if err != nil {
+				return err
+			}
+			server.Route = route
+			server.ProxyJump = route.ProxyJumpString()
 		}
-
 		if err := appDB.UpdateServer(server); err != nil {
 			return fmt.Errorf("update route: %w", err)
 		}
-
-		target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
-		if len(server.Route.Hops) > 0 {
-			fmt.Printf("✓ Route set: %s\n", server.Route.DisplaySummary(target))
-		} else {
+		if len(server.Route.Hops) == 0 {
 			fmt.Println("✓ Route cleared (direct connection)")
+		} else {
+			fmt.Printf("✓ Route set: %s\n", model.FormatRouteSpec(server.Route))
 		}
 		return nil
 	},
@@ -103,10 +91,9 @@ var routeClearCmd = &cobra.Command{
 	Short: "Clear route for a server (set direct)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		alias := args[0]
-		server, err := appDB.GetServer(alias)
+		server, err := appDB.GetServer(args[0])
 		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
+			return fmt.Errorf("server not found: %s", args[0])
 		}
 		server.Route = model.Route{}
 		server.ProxyJump = ""
@@ -119,9 +106,8 @@ var routeClearCmd = &cobra.Command{
 }
 
 func init() {
-	routeSetCmd.Flags().String("mode", "via", "Route mode: direct, via, chain, or clear")
-	routeSetCmd.Flags().String("jumps", "", "Comma-separated jump hosts (aliases or raw addresses)")
-
+	routeSetCmd.Flags().String("mode", "via", "Route mode: via, chain, direct, or clear")
+	routeSetCmd.Flags().String("jumps", "", "Comma-separated hops; use profile:<alias> or raw:<target> for explicit type")
 	routeCmd.AddCommand(routeShowCmd)
 	routeCmd.AddCommand(routeSetCmd)
 	routeCmd.AddCommand(routeClearCmd)
