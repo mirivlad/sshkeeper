@@ -240,6 +240,10 @@ func TestSearchServersMatchesTagsRoutesAndForwardPorts(t *testing.T) {
 	}
 	defer db.Close()
 
+	bastion := &model.Server{Alias: "bastion", Host: "bastion.internal", Port: 22, User: "root", AuthMethod: model.AuthKey}
+	if err := db.CreateServer(bastion); err != nil {
+		t.Fatalf("create bastion: %v", err)
+	}
 	server := &model.Server{
 		Alias:      "db",
 		Host:       "db.internal",
@@ -247,8 +251,8 @@ func TestSearchServersMatchesTagsRoutesAndForwardPorts(t *testing.T) {
 		User:       "postgres",
 		AuthMethod: model.AuthKey,
 		Route: model.Route{Hops: []model.RouteHop{
-			{Alias: "bastion", IsProfile: true},
-			{Raw: "dmz.example.org", IsProfile: false},
+			{ServerID: bastion.ID, Alias: "bastion", IsProfile: true},
+			{Raw: "dmz.example.org"},
 		}},
 	}
 	if err := db.CreateServer(server); err != nil {

@@ -28,6 +28,9 @@ func Open(dataDir string) (*DB, error) {
 	if err := conn.Ping(); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
+	if _, err := conn.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
 
 	db := &DB{conn: conn}
 
@@ -67,6 +70,10 @@ func (db *DB) ensureSchema() error {
 		if _, err := db.conn.Exec("UPDATE servers SET route_hops = proxy_jump WHERE proxy_jump != ''"); err != nil {
 			return fmt.Errorf("migrate proxy_jump to route_hops: %w", err)
 		}
+	}
+
+	if err := db.ensureV040Schema(); err != nil {
+		return err
 	}
 
 	// Add forwards name/description/enabled columns
