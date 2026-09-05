@@ -13,8 +13,9 @@ runs, and how to reproduce it by hand when needed.
 | `nightly.yml` | push to `main` | rebuilds the tip of `main` and replaces the `nightly` prerelease |
 
 `release.yml` builds through `release.sh` rather than reimplementing packaging,
-so CI and a local run stay in step. See [Reproducibility](#reproducibility) for
-what that guarantees.
+so CI and a local run stay in step. Linux `.deb` and `.rpm` packages are built
+with nFPM v2.47.0 from the exact Linux tarball binaries. See
+[Reproducibility](#reproducibility) for what that guarantees.
 
 ### Release notes
 
@@ -90,7 +91,14 @@ This runs:
 
 ## Build Artifacts
 
-Run:
+Linux package generation requires nFPM v2.47.0. GitHub Actions installs this
+exact version; for a local release build install the same tool first:
+
+```bash
+go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+```
+
+Then run:
 
 ```bash
 ./release.sh v0.2.0
@@ -104,6 +112,10 @@ sshkeeper_v0.2.0_linux_arm64.tar.gz
 sshkeeper_v0.2.0_darwin_amd64.tar.gz
 sshkeeper_v0.2.0_darwin_arm64.tar.gz
 sshkeeper_v0.2.0_windows_amd64.zip
+sshkeeper_0.2.0-1_amd64.deb
+sshkeeper_0.2.0-1_arm64.deb
+sshkeeper-0.2.0-1.x86_64.rpm
+sshkeeper-0.2.0-1.aarch64.rpm
 checksums.txt
 ```
 
@@ -113,6 +125,11 @@ Each archive contains:
 - `README.md`
 - `LICENSE`
 - `docs/guide.md`
+
+Linux packages install the same release binary as `/usr/bin/sshkeeper` and add
+README, LICENSE, and the user guide under `/usr/share/doc/sshkeeper/`. Debian
+packages depend on `openssh-client`; RPM packages depend on `openssh-clients`.
+The package revision starts at `1` and is reset when the upstream version changes.
 
 ## Verify Checksums
 
@@ -138,7 +155,10 @@ byte for byte. `release.sh` pins everything that would otherwise vary:
   everything else, so the builder's umask cannot leak into the archive.
 
 - the Windows zip is packaged under `LC_ALL=C` and `TZ=UTC`, because `sort`
-  orders entries by locale and zip stores DOS local time with no zone.
+  orders entries by locale and zip stores DOS local time with no zone;
+- nFPM receives the same `SOURCE_DATE_EPOCH` and packages files extracted from
+  the already-built Linux tarballs, so `.deb`/`.rpm` contain the identical Linux
+  binary rather than triggering a second compile.
 
 With those in place the archives themselves reproduce across hosts: a build on
 `ubuntu-latest` (umask 022, C locale, UTC) and one on a workstation (umask 002,
@@ -172,11 +192,10 @@ Release notes should mention platform status:
 
 ## Packaging TODO
 
-Prepare these package channels after the first archive-based release:
+Native `.deb` and `.rpm` packages are part of the release pipeline. Remaining
+package channels:
 
-- deb package
 - Arch PKGBUILD / AUR
-- rpm later
 - Homebrew tap
 - Scoop manifest
 - Winget later

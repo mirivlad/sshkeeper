@@ -9,6 +9,7 @@ VERSION=${VERSION:-${1:-$(git describe --tags --match 'v*' --always --dirty 2>/d
 LDFLAGS="-s -w -X main.version=${VERSION}"
 DIST_DIR="dist"
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || date +%s)}
+export SOURCE_DATE_EPOCH
 
 echo "==> Building release ${APP} ${VERSION}..."
 echo "==> SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
@@ -88,7 +89,9 @@ build_tarball darwin amd64
 build_tarball darwin arm64
 build_zip windows amd64
 
-(cd "${DIST_DIR}" && sha256sum *.tar.gz *.zip > checksums.txt)
+./packaging/build-linux-packages.sh "${VERSION}"
+
+(cd "${DIST_DIR}" && sha256sum *.tar.gz *.zip *.deb *.rpm > checksums.txt)
 
 echo "==> Done."
-ls -lh "${DIST_DIR}/"*.tar.gz "${DIST_DIR}/"*.zip "${DIST_DIR}/checksums.txt"
+ls -lh "${DIST_DIR}/"*.tar.gz "${DIST_DIR}/"*.zip "${DIST_DIR}/"*.deb "${DIST_DIR}/"*.rpm "${DIST_DIR}/checksums.txt"

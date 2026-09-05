@@ -52,7 +52,7 @@ Platform status:
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Linux | Primary release target | `linux/amd64` and `linux/arm64` release tarballs are available. |
+| Linux | Primary release target | `amd64`/`arm64` tarballs plus native `.deb` and `.rpm` packages. |
 | macOS | Primary release target | `darwin/amd64` and `darwin/arm64` release tarballs are available. Requires system `ssh` client. Homebrew formula planned. |
 | Windows | Experimental | Requires OpenSSH Client available as `ssh.exe` in `PATH`. Password/key-passphrase PTY flows are not validated on Windows. |
 
@@ -67,6 +67,21 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 - Self-hosted mirror: `git@git.mirv.top:mirivlad/sshkeeper`
 
 ### Install from release
+
+Debian/Ubuntu (amd64):
+
+```bash
+sudo apt install ./sshkeeper_0.4.0-1_amd64.deb
+```
+
+Fedora/RHEL-family (x86_64):
+
+```bash
+sudo dnf install ./sshkeeper-0.4.0-1.x86_64.rpm
+```
+
+`arm64`/`aarch64` packages are published alongside the x86_64 builds. The
+traditional tar.gz archive remains available too:
 
 ```bash
 tar -xzf sshkeeper_v0.4.0_linux_amd64.tar.gz

@@ -23,6 +23,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: install nfpm
+        env:
+          NFPM_VERSION: v2.47.0
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/goreleaser/nfpm/v2/cmd/nfpm@"$NFPM_VERSION"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
       # Gate the release on the same checks used locally. A red suite must not
       # be able to publish.
       - name: release checks
@@ -53,6 +61,7 @@ jobs:
             set -- --generate-notes
           fi
 
+          PKG_VERSION="${VERSION#v}"
           gh release create "$VERSION" \
             --title "sshkeeper $VERSION" \
             --verify-tag \
@@ -62,4 +71,8 @@ jobs:
             "dist/sshkeeper_${VERSION}_darwin_amd64.tar.gz" \
             "dist/sshkeeper_${VERSION}_darwin_arm64.tar.gz" \
             "dist/sshkeeper_${VERSION}_windows_amd64.zip" \
+            "dist/sshkeeper_${PKG_VERSION}-1_amd64.deb" \
+            "dist/sshkeeper_${PKG_VERSION}-1_arm64.deb" \
+            "dist/sshkeeper-${PKG_VERSION}-1.x86_64.rpm" \
+            "dist/sshkeeper-${PKG_VERSION}-1.aarch64.rpm" \
             dist/checksums.txt

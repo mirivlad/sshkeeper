@@ -69,7 +69,7 @@ go build -o ~/.local/bin/sshkeeper .
 
 | Платформа | Статус | Примечание |
 |-----------|--------|------------|
-| Linux | Основная релизная платформа | Архивы `linux/amd64` и `linux/arm64`. |
+| Linux | Основная релизная платформа | Архивы `amd64`/`arm64`, а также `.deb` и `.rpm`. |
 | macOS | Основная релизная платформа | Архивы `darwin/amd64` и `darwin/arm64`, нужен системный `ssh`. Homebrew formula запланирована. |
 | Windows | Experimental | Нужен OpenSSH Client как `ssh.exe` в `PATH`; password/key-passphrase PTY-сценарии на Windows пока не подтверждены. |
 
@@ -79,11 +79,26 @@ go build -o ~/.local/bin/sshkeeper .
 Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 ```
 
-### Из релиза (после публикации v0.2.0)
+### Из релиза
+
+Для Debian/Ubuntu (amd64):
 
 ```bash
-tar -xzf sshkeeper_v0.2.0_linux_amd64.tar.gz
-sudo install -m 0755 sshkeeper_v0.2.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
+sudo apt install ./sshkeeper_0.4.0-1_amd64.deb
+```
+
+Для Fedora/RHEL-подобных систем (x86_64):
+
+```bash
+sudo dnf install ./sshkeeper-0.4.0-1.x86_64.rpm
+```
+
+Для ARM64 публикуются `sshkeeper_0.4.0-1_arm64.deb` и
+`sshkeeper-0.4.0-1.aarch64.rpm`. Архивный вариант остаётся доступен:
+
+```bash
+tar -xzf sshkeeper_v0.4.0_linux_amd64.tar.gz
+sudo install -m 0755 sshkeeper_v0.4.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 ```
 
 ---
