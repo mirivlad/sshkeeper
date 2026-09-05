@@ -166,7 +166,8 @@ Auth: agent  Group: -  Status: ?
 | `Enter` | Подключиться к серверу |
 | `Ctrl+A` | Добавить сервер |
 | `Ctrl+E` | Редактировать сервер |
-| `Ctrl+X` | Меню действий |
+| `Ctrl+X` | Действия выбранного сервера |
+| `m` | Глобальное меню Manage |
 | `Ctrl+F` | Поиск |
 | `Ins` | Выбрать/снять выбор |
 | `?` | Краткая справка по клавишам |
@@ -201,7 +202,8 @@ sshkeeper — Quick Help
   Ctrl+A          Add server
   Ctrl+E          Edit server
   Ctrl+F          Search
-  Ctrl+X          Action menu
+  Ctrl+X          Server actions
+  m               Manage
   Ins             Select / deselect
 
   Port forwards
@@ -252,7 +254,8 @@ sshkeeper — Full Help
   Ctrl+A          Add server
   Ctrl+E          Edit server
   Ctrl+F          Search
-  Ctrl+X          Action menu
+  Ctrl+X          Server actions
+  m               Manage
   Ins             Select / deselect
 
   ...
@@ -287,7 +290,7 @@ Add Server
   User:               root
   Auth Method:        key
   Identity File:      ~/.ssh/id_ed25519
-  Route hops:         bastion
+  Route:              profile:bastion
   Group:              KP
   Notes:              Main mail server
   Startup Command:    tmux attach -t ops
@@ -311,8 +314,12 @@ Add Server
 |---------|----------|
 | `Tab` или `↓` | Следующее поле |
 | `Shift+Tab` или `↑` | Предыдущее поле |
-| `/` на Auth Method | Выбрать из списка (password/key/key_passphrase/agent) |
-| `/` на Group | Выбрать из существующих групп |
+| `/` на Auth Method | Выбрать password/key/key_passphrase/agent |
+| `/` на Identity File | Выбрать приватный ключ из `~/.ssh` |
+| `/` на Route | Открыть редактор цепочки бастионов |
+| `/` на Group | Выбрать существующую группу |
+| `/` на Startup Command | Скопировать команду из глобального шаблона |
+| `/` на Tags | Multi-select существующих тегов; новые можно ввести вручную |
 | `Enter` на Test | Проверить подключение |
 | `Enter` на Save | Сохранить |
 | `Esc` | Назад; при изменённых данных сначала запросить подтверждение сброса |
@@ -378,9 +385,16 @@ ROUTE:   ⇒ bastion → dmz-gw → … → root@secure.internal:22
 ### Настройка маршрута
 
 **Через TUI:**
-1. Добавьте/редактируйте сервер или выберите `Ctrl+X` → "Manage route"
-2. В поле "Route hops" введите бастионы через запятую: `bastion,dmz-gw`
-3. Или введите адрес напрямую: `user@bastion.example.com:2222`
+1. Добавьте/редактируйте сервер или выберите `Ctrl+X` → **Route**.
+2. Нажмите `/` на поле Route — откроется список существующих профилей.
+3. `Enter` добавляет выбранный профиль в ordered chain, `x`/Delete удаляет hop, `[`/`]` меняет порядок.
+4. Для произвольной OpenSSH-цели оставьте escape hatch в поле: `raw:user@bastion.example.com:2222`.
+
+Ссылка на профиль хранится по стабильному ID. Переименование alias бастиона не
+ломает зависимые маршруты, а удалить используемый бастион sshkeeper не даст,
+пока он присутствует в route других серверов. Во время подключения profile-hop
+разрешается из БД sshkeeper; отдельная запись с тем же alias в `~/.ssh/config`
+не требуется.
 
 **Через CLI:**
 
@@ -413,7 +427,7 @@ sshkeeper route clear web
 ### Управление forwards через TUI
 
 1. Выберите сервер на главном экране
-2. Нажмите `Ctrl+X` → "Manage port forwards"
+2. Нажмите `Ctrl+X` → **Port forwards**
 3. Откроется список forwards:
 
 ```
@@ -426,7 +440,7 @@ Selected
   Port 127.0.0.1:15432 on this machine will be forwarded through web to 127.0.0.1:5432.
   ssh -L 127.0.0.1:15432:127.0.0.1:5432
 
-  Ctrl+A: add | Ctrl+E/Enter: edit | Ctrl+D: delete | Esc: back
+  Ctrl+A: add | Ctrl+E/Enter: edit | Space: enable/disable | Ctrl+D: delete | Esc: back
 ```
 
 Строки и пояснение выбранного forward сокращаются по экранным ячейкам, а не
@@ -438,6 +452,7 @@ Selected
 |---------|----------|
 | `Ctrl+A` | Добавить forward |
 | `Enter` или `Ctrl+E` | Редактировать выбранный |
+| `Space` | Включить/выключить правило |
 | `Ctrl+D` | Удалить (с подтверждением) |
 | `Esc` | Назад |
 
@@ -514,7 +529,7 @@ forward и сейчас поддерживает только `key` или `agen
 ### Управление туннелями
 
 **Через TUI:**
-1. Нажмите `Ctrl+X` → "Manage tunnels"
+1. Нажмите `m` → **Running tunnels**
 2. Список запущенных туннелей:
 
 ```
@@ -730,7 +745,7 @@ sshkeeper connect secure
 
 ```bash
 # В TUI: выбрать несколько серверов (Ins), затем:
-# Ctrl+X → Run template → выбрать шаблон
+# Ctrl+R → выбрать шаблон
 # Команда выполнится на всех выбранных серверах
 ```
 
@@ -746,13 +761,14 @@ sshkeeper connect secure
 | `Ctrl+A` | Добавить сервер |
 | `Ctrl+E` | Редактировать сервер |
 | `Ctrl+F` | Поиск |
-| `Ctrl+X` | Меню действий |
+| `Ctrl+X` | Действия выбранного сервера |
+| `m` | Глобальное меню Manage |
 | `Ins` | Выбрать/снять выбор |
 | `?` | Краткая справка по клавишам |
 | `Ctrl+H` | Полная справка по приложению |
 | `Ctrl+Q` | Выход |
 
-### Меню действий (Ctrl+X)
+### Действия сервера (Ctrl+X)
 
 | Действие | Описание |
 |----------|----------|
@@ -760,13 +776,21 @@ sshkeeper connect secure
 | Connect with tunnels | SSH + все активные forwards |
 | Start tunnels only | Туннель без shell |
 | Start tunnels in background | Фоновый туннель |
-| Manage port forwards | Управление forwards |
-| Manage tunnels | Список туннелей |
-| Manage route | Настройка маршрута |
+| Port forwards | Управление forwards выбранного сервера |
+| Route | Ordered chain бастионов выбранного сервера |
 | Test connection | Проверка подключения |
 | Edit | Редактирование сервера |
 | Delete | Удаление (с подтверждением) |
-| Import | Импорт из `~/.ssh/config` и обновление списка |
+
+### Manage (`m`)
+
+| Действие | Описание |
+|----------|----------|
+| Groups | Создание, переименование и удаление групп с количеством серверов |
+| Tags | Управление тегами |
+| Command templates | Глобальные шаблоны команд |
+| Running tunnels | Список и остановка фоновых туннелей |
+| Import SSH config | Импорт из `~/.ssh/config` |
 | Export | Выход в терминал и печать экспорта |
 | Vault: lock | Заблокировать vault в текущем процессе |
 | Vault: change password | Выход в терминал и смена master password |
@@ -777,7 +801,7 @@ sshkeeper connect secure
 |---------|----------|
 | `Tab` / `↓` | Следующее поле |
 | `Shift+Tab` / `↑` | Предыдущее поле |
-| `/` | Выбрать из списка (Auth Method, Group) |
+| `/` | Открыть picker/editor для Auth, key, Route, Group, Startup Command или Tags |
 | `Enter` | Действие / переход |
 | `Esc` | Назад / отмена |
 
