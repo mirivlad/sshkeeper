@@ -1,0 +1,47 @@
+name: sshkeeper
+arch: ${NFPM_ARCH}
+platform: linux
+version: ${NFPM_VERSION}
+release: ${NFPM_RELEASE}
+section: utils
+priority: optional
+maintainer: mirivlad <mirvtop@yandex.ru>
+description: |
+  Console manager for SSH profiles, bastion routes, port forwards,
+  background tunnels, and encrypted SSH secrets.
+vendor: sshkeeper
+homepage: https://github.com/mirivlad/sshkeeper
+license: MIT
+
+contents:
+  - src: ${NFPM_BINARY}
+    dst: /usr/bin/sshkeeper
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${NFPM_README}
+    dst: /usr/share/doc/sshkeeper/README.md
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${NFPM_GUIDE}
+    dst: /usr/share/doc/sshkeeper/guide.md
+    expand: true
+    file_info:
+      mode: 0644
+  - src: ${NFPM_LICENSE}
+    dst: /usr/share/doc/sshkeeper/LICENSE
+    expand: true
+    file_info:
+      mode: 0644
+
+overrides:
+  deb:
+    depends:
+      - openssh-client
+  rpm:
+    depends:
+      - openssh-clients
+
+rpm:
+  compression: gzip
