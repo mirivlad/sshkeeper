@@ -26,7 +26,8 @@ func newHelpScreenModel(w, h int) *helpScreenModel {
 		helpScreenItem{key: "Ctrl+A", action: "Add server", section: "Server list"},
 		helpScreenItem{key: "Ctrl+E", action: "Edit server", section: "Server list"},
 		helpScreenItem{key: "Ctrl+F", action: "Search", section: "Server list"},
-		helpScreenItem{key: "Ctrl+X", action: "Action menu", section: "Server list"},
+		helpScreenItem{key: "Ctrl+X", action: "Server actions", section: "Server list"},
+		helpScreenItem{key: "m", action: "Manage groups / tags / templates / tunnels / vault", section: "Server list"},
 		helpScreenItem{key: "Ins", action: "Select / deselect", section: "Server list"},
 		helpScreenItem{key: "Ctrl+W", action: "Manage port forwards", section: "Forwards"},
 		helpScreenItem{key: "?", action: "This quick help", section: "Other"},
@@ -207,20 +208,28 @@ func (m *fullHelpModel) View() string {
 			{"Ctrl+A", "Add server"},
 			{"Ctrl+E", "Edit server"},
 			{"Ctrl+F", "Search"},
-			{"Ctrl+X", "Action menu"},
+			{"Ctrl+X", "Server actions"},
+			{"m", "Manage global entities"},
 			{"Ins", "Select / deselect"},
 		}},
-		{"Action menu (Ctrl+X)", [][2]string{
+		{"Server actions (Ctrl+X)", [][2]string{
 			{"Connect", "Standard SSH session"},
 			{"Connect with tunnels", "SSH + all enabled forwards"},
 			{"Start tunnels only", "Forwards without shell"},
 			{"Start tunnels in bg", "Background tunnel process"},
-			{"Manage port forwards", "Add / edit / delete forwards"},
-			{"Manage tunnels", "View and stop running tunnels"},
-			{"Manage route", "Configure ProxyJump / bastions"},
+			{"Port forwards", "Add / edit / enable / delete forwards"},
+			{"Route", "Configure ordered bastions"},
 			{"Test connection", "Check if server is reachable"},
 			{"Edit", "Edit server profile"},
 			{"Delete", "Remove server profile"},
+		}},
+		{"Manage (m)", [][2]string{
+			{"Groups", "Create / rename / remove groups"},
+			{"Tags", "Manage and apply tags"},
+			{"Command templates", "Manage reusable commands"},
+			{"Running tunnels", "View and stop tracked tunnels"},
+			{"Import / Export", "Move server profile data"},
+			{"Vault", "Lock or change master password"},
 		}},
 		{"Routes / ProxyJump", [][2]string{
 			{"", "Routes define how to reach a server through jump hosts."},
@@ -296,6 +305,7 @@ func (i actionMenuItem) FilterValue() string { return i.label }
 
 type actionMenuModel struct {
 	list   list.Model
+	title  string
 	width  int
 	height int
 }
@@ -306,26 +316,37 @@ func newActionMenuModel(w, h int) *actionMenuModel {
 		actionMenuItem{label: "Connect with tunnels", action: "tunnel", description: "Open SSH and activate enabled port forwards."},
 		actionMenuItem{label: "Start tunnels only", action: "tunnel_n", description: "Activate enabled forwards without a shell."},
 		actionMenuItem{label: "Start tunnels in background", action: "tunnel_bg", description: "Run enabled forwards as a background process."},
-		actionMenuItem{label: "Manage port forwards", action: "forwards", description: "Add, edit, enable, or remove forwarding rules."},
-		actionMenuItem{label: "Manage tunnels", action: "tunnels", description: "Inspect and stop running tunnel processes."},
-		actionMenuItem{label: "Manage route", action: "route", description: "Configure direct or ProxyJump routing."},
+		actionMenuItem{label: "Port forwards", action: "forwards", description: "Add, edit, enable, or remove forwarding rules for this server."},
+		actionMenuItem{label: "Route", action: "route", description: "Configure direct or bastion routing for this server."},
 		actionMenuItem{label: "Test connection", action: "test", description: "Check SSH reachability for this profile."},
 		actionMenuItem{label: "Edit", action: "edit", description: "Change this server profile."},
 		actionMenuItem{label: "Delete", action: "delete", description: "Permanently remove this server profile."},
-		actionMenuItem{label: "Import", action: "import", description: "Import profiles from a supported source."},
-		actionMenuItem{label: "Export", action: "export", description: "Export selected server profiles."},
+	}
+	return newMenuModel("Server Actions", items, w, h)
+}
+
+func newManageMenuModel(w, h int) *actionMenuModel {
+	items := []list.Item{
+		actionMenuItem{label: "Groups", action: "groups", description: "Create, rename, and remove server groups."},
+		actionMenuItem{label: "Tags", action: "tags", description: "Manage tags and apply them to selected servers."},
+		actionMenuItem{label: "Command templates", action: "templates", description: "Manage reusable commands."},
+		actionMenuItem{label: "Running tunnels", action: "tunnels", description: "Inspect and stop tracked background tunnels."},
+		actionMenuItem{label: "Import SSH config", action: "import", description: "Import profiles from ~/.ssh/config."},
+		actionMenuItem{label: "Export", action: "export", description: "Export server profiles."},
 		actionMenuItem{label: "Vault: lock", action: "vault_lock", description: "Lock secrets for the current session."},
 		actionMenuItem{label: "Vault: change password", action: "vault_change_pw", description: "Change the password protecting stored secrets."},
 	}
+	return newMenuModel("Manage", items, w, h)
+}
 
-	l := list.New(items, list.NewDefaultDelegate(), 30, len(items)+2)
-	l.Title = "Actions"
+func newMenuModel(title string, items []list.Item, w, h int) *actionMenuModel {
+	l := list.New(items, list.NewDefaultDelegate(), 34, len(items)+2)
+	l.Title = title
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
 	l.Styles.Title = titleStyle
-
-	return &actionMenuModel{list: l, width: w, height: h}
+	return &actionMenuModel{list: l, title: title, width: w, height: h}
 }
 
 func (m *actionMenuModel) Update(msg tea.Msg) (*actionMenuModel, *string) {
@@ -368,7 +389,7 @@ func (m *actionMenuModel) View() string {
 		return renderPaddedPanel(width, height, listLines)
 	}
 	return renderScreenShell(screenShell{
-		breadcrumb: "Actions",
+		breadcrumb: m.title,
 		status:     fmt.Sprintf("%d actions", len(m.list.Items())),
 		width:      m.width,
 		height:     m.height,

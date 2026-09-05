@@ -78,35 +78,46 @@ func (fm *formModel) setRouteProfiles(servers []*model.Server) {
 // --- Form model ---
 
 type formModel struct {
-	edit           bool
-	server         *model.Server
-	inputs         []textinput.Model
-	labels         []string
-	password       textinput.Model
-	passwordLabel  string
-	focusIdx       int
-	testResult     string
-	testOK         bool
-	testResultTime time.Time
-	testing        bool
-	saving         bool
-	saved          bool
-	savedTime      time.Time
-	err            error
-	spinner        spinner.Model
-	width          int
-	height         int
-	groups         []string
-	groupList      list.Model
-	showGroupList  bool
-	authList       list.Model
-	showAuthList   bool
-	routeProfiles  []*model.Server
-	routeList      list.Model
-	showRouteList  bool
-	routePane      int // 0=current route, 1=available profiles
-	routeCursor    int
-	initial        formSnapshot
+	edit               bool
+	server             *model.Server
+	inputs             []textinput.Model
+	labels             []string
+	password           textinput.Model
+	passwordLabel      string
+	focusIdx           int
+	testResult         string
+	testOK             bool
+	testResultTime     time.Time
+	testing            bool
+	saving             bool
+	saved              bool
+	savedTime          time.Time
+	err                error
+	spinner            spinner.Model
+	width              int
+	height             int
+	groups             []string
+	groupList          list.Model
+	showGroupList      bool
+	authList           list.Model
+	showAuthList       bool
+	identityFiles      []string
+	identityList       list.Model
+	showIdentityList   bool
+	tagValues          []string
+	tagList            list.Model
+	showTagList        bool
+	startupTemplates   []*model.CommandTemplate
+	startupList        list.Model
+	showStartupList    bool
+	hasSavedPassword   bool
+	hasSavedPassphrase bool
+	routeProfiles      []*model.Server
+	routeList          list.Model
+	showRouteList      bool
+	routePane          int // 0=current route, 1=available profiles
+	routeCursor        int
+	initial            formSnapshot
 }
 
 type formSnapshot struct {
@@ -136,6 +147,7 @@ func newFormModel(w, h int) *formModel {
 		inputs[i].CharLimit = 128
 	}
 	inputs[3].SetValue("22")
+	inputs[5].SetValue(string(model.AuthKey))
 
 	pw := textinput.New()
 	pw.Placeholder = "optional"
@@ -231,18 +243,8 @@ func newEditFormModel(s *model.Server, w, h int) *formModel {
 	fm.inputs[10].SetValue(s.StartupCommand)
 	fm.inputs[11].SetValue(strings.Join(s.Tags, ", "))
 	if HasSecret != nil {
-		switch s.AuthMethod {
-		case model.AuthPassword:
-			if HasSecret(s.Alias, "ssh_password") {
-				fm.passwordLabel = "Password (secret saved; leave blank to keep)"
-				fm.password.Placeholder = ""
-			}
-		case model.AuthKeyPassphrase:
-			if HasSecret(s.Alias, "key_passphrase") {
-				fm.passwordLabel = "Key passphrase (secret saved; leave blank to keep)"
-				fm.password.Placeholder = ""
-			}
-		}
+		fm.hasSavedPassword = HasSecret(s.Alias, "ssh_password")
+		fm.hasSavedPassphrase = HasSecret(s.Alias, "key_passphrase")
 	}
 	fm.updateFocus()
 	fm.initial = fm.snapshot()
@@ -268,6 +270,197 @@ func (fm *formModel) Dirty() bool {
 		}
 	}
 	return false
+}
+
+func (fm *formModel) authMethodValue() model.AuthMethod {
+	method := model.AuthMethod(strings.TrimSpace(fm.inputs[5].Value()))
+	if method == "" {
+		return model.AuthKey
+	}
+	return method
+}
+
+func (fm *formModel) usesIdentityFile() bool {
+	switch fm.authMethodValue() {
+	case model.AuthKey, model.AuthKeyPassphrase:
+		return true
+	default:
+		return false
+	}
+}
+
+func (fm *formModel) usesSecretInput() bool {
+	switch fm.authMethodValue() {
+	case model.AuthPassword, model.AuthKeyPassphrase:
+		return true
+	default:
+		return false
+	}
+}
+
+func (fm *formModel) currentPasswordLabel() string {
+	switch fm.authMethodValue() {
+	case model.AuthPassword:
+		if fm.edit && fm.hasSavedPassword {
+			return "Password (secret saved; leave blank to keep)"
+		}
+		return "Password"
+	case model.AuthKeyPassphrase:
+		if fm.edit && fm.hasSavedPassphrase {
+			return "Key passphrase (secret saved; leave blank to keep)"
+		}
+		return "Key passphrase"
+	default:
+		return ""
+	}
+}
+
+func (fm *formModel) focusAllowed(index int) bool {
+	if index == 6 && !fm.usesIdentityFile() {
+		return false
+	}
+	if index == len(fm.inputs) && !fm.usesSecretInput() {
+		return false
+	}
+	return index >= 0 && index < len(fm.inputs)+3
+}
+
+func (fm *formModel) advanceFocus(delta int) {
+	total := len(fm.inputs) + 3
+	for tries := 0; tries < total; tries++ {
+		fm.focusIdx = (fm.focusIdx + delta + total) % total
+		if fm.focusAllowed(fm.focusIdx) {
+			break
+		}
+	}
+	fm.updateFocus()
+}
+
+func (fm *formModel) loadIdentityPicker() {
+	fm.identityFiles = nil
+	if ListIdentityFiles != nil {
+		if files, err := ListIdentityFiles(); err == nil {
+			fm.identityFiles = files
+		}
+	}
+	fm.identityList = newStringList(fm.identityFiles, "Select SSH private key", 52, 14)
+	fm.identityList.SetFilteringEnabled(true)
+	fm.showIdentityList = true
+}
+
+func (fm *formModel) loadTagPicker() {
+	fm.tagValues = nil
+	if ListTags != nil {
+		if tags, err := ListTags(); err == nil {
+			fm.tagValues = tags
+		}
+	}
+	fm.tagList = newStringList(fm.tagValues, "Select tags", 40, 14)
+	fm.tagList.SetFilteringEnabled(true)
+	fm.showTagList = true
+}
+
+func (fm *formModel) loadStartupPicker() {
+	fm.startupTemplates = nil
+	if ListCommandTemplates != nil {
+		if templates, err := ListCommandTemplates(); err == nil {
+			fm.startupTemplates = templates
+		}
+	}
+	items := make([]list.Item, 0, len(fm.startupTemplates))
+	for _, template := range fm.startupTemplates {
+		if template != nil {
+			items = append(items, templateItem{template: template})
+		}
+	}
+	l := list.New(items, list.NewDefaultDelegate(), 64, 14)
+	l.Title = "Insert command template"
+	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
+	l.SetFilteringEnabled(true)
+	l.Styles.Title = titleStyle
+	fm.startupList = l
+	fm.showStartupList = true
+}
+
+func (fm *formModel) updateStartupPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.Type {
+		case tea.KeyEsc:
+			fm.showStartupList = false
+			return fm, nil
+		case tea.KeyEnter:
+			if item, ok := fm.startupList.SelectedItem().(templateItem); ok && item.template != nil {
+				fm.inputs[10].SetValue(item.template.Command)
+			}
+			fm.showStartupList = false
+			return fm, nil
+		}
+	}
+	var cmd tea.Cmd
+	fm.startupList, cmd = fm.startupList.Update(msg)
+	return fm, cmd
+}
+
+func containsString(values []string, value string) bool {
+	for _, item := range values {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func toggleTagValue(values []string, value string) []string {
+	if containsString(values, value) {
+		result := make([]string, 0, len(values)-1)
+		for _, item := range values {
+			if item != value {
+				result = append(result, item)
+			}
+		}
+		return result
+	}
+	return append(values, value)
+}
+
+func (fm *formModel) updateIdentityPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.Type {
+		case tea.KeyEsc:
+			fm.showIdentityList = false
+			return fm, nil
+		case tea.KeyEnter:
+			if item, ok := fm.identityList.SelectedItem().(groupItem); ok {
+				fm.inputs[6].SetValue(item.name)
+			}
+			fm.showIdentityList = false
+			return fm, nil
+		}
+	}
+	var cmd tea.Cmd
+	fm.identityList, cmd = fm.identityList.Update(msg)
+	return fm, cmd
+}
+
+func (fm *formModel) updateTagPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.Type {
+		case tea.KeyEsc:
+			fm.showTagList = false
+			return fm, nil
+		case tea.KeySpace, tea.KeyEnter:
+			if item, ok := fm.tagList.SelectedItem().(groupItem); ok {
+				tags := splitCSV(fm.inputs[11].Value())
+				tags = toggleTagValue(tags, item.name)
+				fm.inputs[11].SetValue(strings.Join(tags, ", "))
+			}
+			return fm, nil
+		}
+	}
+	var cmd tea.Cmd
+	fm.tagList, cmd = fm.tagList.Update(msg)
+	return fm, cmd
 }
 
 func (fm *formModel) resolveRouteAlias(alias string) (int64, bool) {
@@ -440,6 +633,15 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return fm, cmd
 	}
 
+	if fm.showIdentityList {
+		return fm.updateIdentityPicker(msg)
+	}
+	if fm.showTagList {
+		return fm.updateTagPicker(msg)
+	}
+	if fm.showStartupList {
+		return fm.updateStartupPicker(msg)
+	}
 	if fm.showRouteList {
 		return fm.updateRouteEditor(msg)
 	}
@@ -476,6 +678,7 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					fm.inputs[5].SetValue(item.name)
 				}
 				fm.showAuthList = false
+				fm.updateFocus()
 				return fm, nil
 			}
 		}
@@ -488,26 +691,20 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyTab:
-			fm.focusIdx++
-			total := len(fm.inputs) + 3
-			if fm.focusIdx >= total {
-				fm.focusIdx = 0
-			}
-			fm.updateFocus()
+			fm.advanceFocus(1)
 			return fm, nil
 
 		case tea.KeyShiftTab:
-			fm.focusIdx--
-			if fm.focusIdx < 0 {
-				total := len(fm.inputs) + 3
-				fm.focusIdx = total - 1
-			}
-			fm.updateFocus()
+			fm.advanceFocus(-1)
 			return fm, nil
 
 		case tea.KeyRunes:
 			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 5 {
 				fm.showAuthList = true
+				return fm, nil
+			}
+			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 6 && fm.usesIdentityFile() {
+				fm.loadIdentityPicker()
 				return fm, nil
 			}
 			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 7 {
@@ -523,6 +720,14 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				fm.showGroupList = true
 				return fm, nil
 			}
+			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 10 {
+				fm.loadStartupPicker()
+				return fm, nil
+			}
+			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 11 {
+				fm.loadTagPicker()
+				return fm, nil
+			}
 
 		case tea.KeyEnter:
 			switch {
@@ -531,12 +736,7 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case fm.focusIdx == len(fm.inputs)+2:
 				return fm, fm.runSave()
 			default:
-				fm.focusIdx++
-				total := len(fm.inputs) + 3
-				if fm.focusIdx >= total {
-					fm.focusIdx = 0
-				}
-				fm.updateFocus()
+				fm.advanceFocus(1)
 				return fm, nil
 			}
 
@@ -544,21 +744,11 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return fm, nil
 
 		case tea.KeyDown:
-			fm.focusIdx++
-			total := len(fm.inputs) + 3
-			if fm.focusIdx >= total {
-				fm.focusIdx = 0
-			}
-			fm.updateFocus()
+			fm.advanceFocus(1)
 			return fm, nil
 
 		case tea.KeyUp:
-			fm.focusIdx--
-			if fm.focusIdx < 0 {
-				total := len(fm.inputs) + 3
-				fm.focusIdx = total - 1
-			}
-			fm.updateFocus()
+			fm.advanceFocus(-1)
 			return fm, nil
 		}
 	}
@@ -599,7 +789,24 @@ func (fm *formModel) applySaveError(err error) {
 	fm.updateFocus()
 }
 
+func (fm *formModel) updateCredentialPresentation() {
+	fm.passwordLabel = fm.currentPasswordLabel()
+	if !fm.usesSecretInput() {
+		return
+	}
+	fm.password.Placeholder = "optional"
+	if (fm.authMethodValue() == model.AuthPassword && fm.hasSavedPassword) || (fm.authMethodValue() == model.AuthKeyPassphrase && fm.hasSavedPassphrase) {
+		fm.password.Placeholder = ""
+	}
+	prompt := blurredStyle.Render(fm.passwordLabel + ": ")
+	if fm.focusIdx == len(fm.inputs) {
+		prompt = focusedStyle.Render(fm.passwordLabel + "> ")
+	}
+	fm.password.Prompt = prompt
+}
+
 func (fm *formModel) updateFocus() {
+	fm.updateCredentialPresentation()
 	for i := range fm.inputs {
 		fm.inputs[i].Blur()
 		fm.inputs[i].Prompt = blurredStyle.Render(fm.labelAt(i) + ": ")
@@ -612,8 +819,8 @@ func (fm *formModel) updateFocus() {
 		fm.inputs[fm.focusIdx].Prompt = focusedStyle.Render(fm.labelAt(fm.focusIdx) + "> ")
 	} else if fm.focusIdx == len(fm.inputs) {
 		fm.password.Focus()
-		fm.password.Prompt = focusedStyle.Render(fm.passwordLabel + "> ")
 	}
+	fm.updateCredentialPresentation()
 }
 
 func (fm *formModel) labelAt(index int) string {
@@ -629,14 +836,23 @@ func (fm *formModel) labelAt(index int) string {
 		if index == 5 {
 			return "Auth Method (/ pick)"
 		}
+		if index == 6 {
+			return "Identity File (/ pick)"
+		}
 		if index == 7 {
 			return "Route (/ edit)"
+		}
+		if index == 10 {
+			return "Startup Command (/ template)"
 		}
 		if index == 8 {
 			if len(fm.groups) > 0 {
 				return "Group (/ pick)"
 			}
 			return "Group"
+		}
+		if index == 11 {
+			return "Tags (/ pick, type to create)"
 		}
 		return fm.labels[index]
 	}
@@ -773,9 +989,52 @@ func parsePort(value string) (int, error) {
 }
 
 func (fm *formModel) View() string {
+	fm.updateCredentialPresentation()
 	title := "Add Server"
 	if fm.edit {
 		title = "Edit Server: " + fm.server.Alias
+	}
+	if fm.showIdentityList {
+		return renderScreenShell(screenShell{
+			breadcrumb: title + " / Identity File", status: "Choose a private key", width: fm.width, height: fm.height,
+			body: func(width, height int) string {
+				return renderPaddedPanel(width, height, splitBlock(renderDropdown(fm.identityList)))
+			},
+			footer: []helpItem{{Key: "/", Action: "filter"}, {Key: "↑/↓", Action: "move"}, {Key: "Enter", Action: "select"}, {Key: "Esc", Action: "cancel"}},
+		})
+	}
+	if fm.showStartupList {
+		return renderScreenShell(screenShell{
+			breadcrumb: title + " / Startup Command",
+			status:     "Choose a command template",
+			width:      fm.width,
+			height:     fm.height,
+			body: func(width, height int) string {
+				lines := []string{fm.inputs[10].View(), ""}
+				if len(fm.startupList.Items()) == 0 {
+					lines = append(lines, dashboardHelp("No command templates yet. Use Manage → Command templates to create one."))
+				} else {
+					capacity := max(1, height-4)
+					start, end := visibleServerRange(len(fm.startupList.Items()), fm.startupList.Index(), capacity)
+					for index := start; index < end; index++ {
+						item, ok := fm.startupList.Items()[index].(templateItem)
+						if !ok || item.template == nil {
+							continue
+						}
+						marker := "  "
+						if index == fm.startupList.Index() {
+							marker = "> "
+						}
+						lines = append(lines, marker+item.template.Name+"  "+item.template.Command)
+					}
+				}
+				return renderPaddedPanel(width, height, lines)
+			},
+			footer: []helpItem{{Key: "↑/↓", Action: "move"}, {Key: "Enter", Action: "insert copy"}, {Key: "Esc", Action: "cancel"}},
+		})
+	}
+	if fm.showTagList {
+		return fm.tagPickerView(title)
 	}
 	if fm.showRouteList {
 		return fm.routeEditorView(title)
@@ -818,6 +1077,9 @@ func (fm *formModel) View() string {
 		allFields := make([]string, 0, len(fm.inputs)+5)
 		focusRows := make([]int, len(fm.inputs)+1)
 		for i := range fm.inputs {
+			if i == 6 && !fm.usesIdentityFile() {
+				continue
+			}
 			if richLayout {
 				if section := formSectionTitle(i); section != "" {
 					allFields = append(allFields, sectionStyle.Copy().MarginTop(0).Render(section))
@@ -832,10 +1094,12 @@ func (fm *formModel) View() string {
 			focusRows[i] = len(allFields)
 			allFields = append(allFields, fm.inputs[i].View())
 		}
-		focusRows[len(fm.inputs)] = len(allFields)
-		allFields = append(allFields, fm.password.View())
-		focusField := len(allFields) - 1
-		if fm.focusIdx <= len(fm.inputs) {
+		if fm.usesSecretInput() {
+			focusRows[len(fm.inputs)] = len(allFields)
+			allFields = append(allFields, fm.password.View())
+		}
+		focusField := max(0, len(allFields)-1)
+		if fm.focusIdx <= len(fm.inputs) && fm.focusAllowed(fm.focusIdx) {
 			focusField = focusRows[fm.focusIdx]
 		}
 		actionRows := 1
@@ -872,6 +1136,43 @@ func (fm *formModel) View() string {
 			{Key: "Ctrl+H", Action: "help"},
 			{Key: "Esc", Action: "back"},
 		},
+	})
+}
+
+func (fm *formModel) tagPickerView(title string) string {
+	selected := splitCSV(fm.inputs[11].Value())
+	body := func(width, height int) string {
+		lines := []string{dashboardSection("Existing tags")}
+		if len(fm.tagList.Items()) == 0 {
+			lines = append(lines, dashboardHelp("No saved tags yet. Esc and type a new tag in the field."))
+		} else {
+			capacity := max(1, height-4)
+			start, end := visibleServerRange(len(fm.tagList.Items()), fm.tagList.Index(), capacity)
+			for index := start; index < end; index++ {
+				item, ok := fm.tagList.Items()[index].(groupItem)
+				if !ok {
+					continue
+				}
+				mark := "[ ]"
+				if containsString(selected, item.name) {
+					mark = "[x]"
+				}
+				line := "  " + mark + " " + item.name
+				if index == fm.tagList.Index() {
+					line = selectedRowStyle.Render("> " + mark + " " + item.name)
+				}
+				lines = append(lines, line)
+			}
+		}
+		return renderPaddedPanel(width, height, lines)
+	}
+	return renderScreenShell(screenShell{
+		breadcrumb: title + " / Tags",
+		status:     fmt.Sprintf("%d selected", len(selected)),
+		width:      fm.width,
+		height:     fm.height,
+		body:       body,
+		footer:     []helpItem{{Key: "/", Action: "filter"}, {Key: "↑/↓", Action: "move"}, {Key: "Space/Enter", Action: "toggle"}, {Key: "Esc", Action: "done"}},
 	})
 }
 

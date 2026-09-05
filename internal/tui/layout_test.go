@@ -140,9 +140,23 @@ func TestActionMenuFitsSupportedTerminalSizes(t *testing.T) {
 		view := menu.View()
 		assertViewFits(t, view, size.width, size.height)
 		assertUnifiedScreen(t, view, size.width, size.height)
-		for _, want := range []string{"Actions", "Connect", "Manage port forwards", "Esc"} {
+		for _, want := range []string{"Server Actions", "Connect", "Port forwards", "Esc"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("action menu at %dx%d missing %q:\n%s", size.width, size.height, want, view)
+			}
+		}
+	}
+}
+
+func TestManageMenuFitsSupportedTerminalSizes(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
+		menu := newManageMenuModel(size.width, size.height)
+		view := menu.View()
+		assertViewFits(t, view, size.width, size.height)
+		assertUnifiedScreen(t, view, size.width, size.height)
+		for _, want := range []string{"Manage", "Groups", "Command templates", "Vault", "Esc"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("manage menu at %dx%d missing %q:\n%s", size.width, size.height, want, view)
 			}
 		}
 	}
@@ -214,6 +228,7 @@ func TestManagerScreensUseUnifiedShell(t *testing.T) {
 		template := &model.CommandTemplate{Name: "Disk usage", Command: "df -h", Description: "Show mounted filesystems"}
 		m.setTemplates([]*model.CommandTemplate{template})
 		m.setTags([]string{"production"})
+		m.setGroups([]*model.Group{{ID: 1, Name: "Production", ServerCount: 1}})
 		m.pendingTemplate = template
 		m.bgResults = []templateRunResult{{Alias: "prod", Output: "ok\n数据库 ready"}}
 
@@ -224,6 +239,8 @@ func TestManagerScreensUseUnifiedShell(t *testing.T) {
 			{"search", screenSearch},
 			{"tags", screenTags},
 			{"tag-input", screenTagInput},
+			{"groups", screenGroups},
+			{"group-input", screenGroupInput},
 			{"templates", screenTemplates},
 			{"template-picker", screenTemplatePicker},
 			{"template-mode", screenTemplateMode},
@@ -248,6 +265,8 @@ func TestLayoutMatrixInventoriesEveryScreen(t *testing.T) {
 		screenSearch:            "manager matrix",
 		screenTags:              "manager matrix",
 		screenTagInput:          "manager matrix",
+		screenGroups:            "manager matrix",
+		screenGroupInput:        "manager matrix",
 		screenTemplates:         "manager matrix",
 		screenTemplateForm:      "template form",
 		screenTemplatePicker:    "manager matrix",
@@ -255,6 +274,7 @@ func TestLayoutMatrixInventoriesEveryScreen(t *testing.T) {
 		screenBackgroundResults: "manager matrix",
 		screenHelp:              "help matrix",
 		screenActionMenu:        "action matrix",
+		screenManageMenu:        "manage matrix",
 		screenForwardList:       "forward matrix",
 		screenForwardForm:       "forward form matrix",
 		screenTunnelManager:     "manager matrix",

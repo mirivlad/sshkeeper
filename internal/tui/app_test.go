@@ -148,7 +148,7 @@ func TestServerListHelpWrapsSelectionAndResultHints(t *testing.T) {
 		plainLines = append(plainLines, plainHelpLine(line))
 	}
 	joined := strings.Join(plainLines, "\n")
-	for _, want := range []string{"Ins: select (2 selected)", "Esc: clear result", "Ctrl+X: actions", "Ctrl+Q: quit"} {
+	for _, want := range []string{"Ins: select (2 selected)", "Esc: clear result", "Ctrl+X: server actions", "m: manage", "Ctrl+Q: quit"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected wrapped help to contain %q\nlines:%#v", want, lines)
 		}
@@ -444,11 +444,33 @@ func TestFormViewUsesSectionsAndStableLabels(t *testing.T) {
 		"Alias",
 		"Display Name",
 		"Auth Method",
-		"Password / Passphrase",
+		"Identity File",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected form view to contain %q\nview:\n%s", want, view)
 		}
+	}
+}
+
+func TestFormAuthFieldsAreContextual(t *testing.T) {
+	fm := newFormModel(100, 30)
+
+	fm.inputs[5].SetValue(string(model.AuthPassword))
+	view := fm.View()
+	if !strings.Contains(view, "Password") || strings.Contains(view, "Identity File") {
+		t.Fatalf("password auth fields are not contextual:\n%s", view)
+	}
+
+	fm.inputs[5].SetValue(string(model.AuthKeyPassphrase))
+	view = fm.View()
+	if !strings.Contains(view, "Key passphrase") || !strings.Contains(view, "Identity File") {
+		t.Fatalf("key passphrase auth fields are not contextual:\n%s", view)
+	}
+
+	fm.inputs[5].SetValue(string(model.AuthAgent))
+	view = fm.View()
+	if strings.Contains(view, "Identity File") || strings.Contains(view, "Password") || strings.Contains(view, "passphrase") {
+		t.Fatalf("agent auth still shows credential fields:\n%s", view)
 	}
 }
 
@@ -791,7 +813,12 @@ func TestActionMenuClosesOnAllActions(t *testing.T) {
 	// Test delete closes menu
 	m.actionMenu = newActionMenuModel(m.width, m.height)
 	m.screen = screenActionMenu
-	m.actionMenu.list.Select(3) // Delete
+	for i := 0; i < len(m.actionMenu.list.Items()); i++ {
+		m.actionMenu.list.Select(i)
+		if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "delete" {
+			break
+		}
+	}
 	DeleteServer = func(alias string) error { return nil }
 	ListServers = func() ([]*model.Server, error) { return []*model.Server{server}, nil }
 	updated, _ := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
@@ -848,7 +875,7 @@ func TestActionMenuManageRouteOpensRouteField(t *testing.T) {
 	}
 }
 
-func TestActionMenuImportUsesCallbackAndRefreshesList(t *testing.T) {
+func TestManageMenuImportUsesCallbackAndRefreshesList(t *testing.T) {
 	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root", AuthMethod: model.AuthKey}
 	imported := false
 	ImportServers = func() (int, error) {
@@ -866,16 +893,16 @@ func TestActionMenuImportUsesCallbackAndRefreshesList(t *testing.T) {
 	m := New([]*model.Server{})
 	m.width = 100
 	m.height = 30
-	m.actionMenu = newActionMenuModel(m.width, m.height)
-	m.screen = screenActionMenu
-	for i := 0; i < len(m.actionMenu.list.Items()); i++ {
-		m.actionMenu.list.Select(i)
-		if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "import" {
+	m.manageMenu = newManageMenuModel(m.width, m.height)
+	m.screen = screenManageMenu
+	for i := 0; i < len(m.manageMenu.list.Items()); i++ {
+		m.manageMenu.list.Select(i)
+		if item, ok := m.manageMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "import" {
 			break
 		}
 	}
 
-	updated, cmd := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.updateManageMenu(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(*tuiModel)
 	if cmd == nil {
 		t.Fatal("expected import command")
@@ -895,23 +922,23 @@ func TestActionMenuImportUsesCallbackAndRefreshesList(t *testing.T) {
 	}
 }
 
-func TestActionMenuExportAndVaultChangePasswordExitTUI(t *testing.T) {
+func TestManageMenuExportAndVaultChangePasswordExitTUI(t *testing.T) {
 	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root", AuthMethod: model.AuthKey}
 	for _, action := range []string{"export", "vault_change_pw"} {
 		t.Run(action, func(t *testing.T) {
 			m := New([]*model.Server{server})
 			m.width = 100
 			m.height = 30
-			m.actionMenu = newActionMenuModel(m.width, m.height)
-			m.screen = screenActionMenu
-			for i := 0; i < len(m.actionMenu.list.Items()); i++ {
-				m.actionMenu.list.Select(i)
-				if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == action {
+			m.manageMenu = newManageMenuModel(m.width, m.height)
+			m.screen = screenManageMenu
+			for i := 0; i < len(m.manageMenu.list.Items()); i++ {
+				m.manageMenu.list.Select(i)
+				if item, ok := m.manageMenu.list.SelectedItem().(actionMenuItem); ok && item.action == action {
 					break
 				}
 			}
 
-			updated, cmd := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+			updated, cmd := m.updateManageMenu(tea.KeyMsg{Type: tea.KeyEnter})
 			m = updated.(*tuiModel)
 			if cmd == nil {
 				t.Fatalf("expected %s to quit TUI", action)
@@ -923,7 +950,7 @@ func TestActionMenuExportAndVaultChangePasswordExitTUI(t *testing.T) {
 	}
 }
 
-func TestActionMenuVaultLockUsesCallback(t *testing.T) {
+func TestManageMenuVaultLockUsesCallback(t *testing.T) {
 	server := &model.Server{ID: 1, Alias: "web", Host: "web.example.org", Port: 22, User: "root", AuthMethod: model.AuthKey}
 	locked := false
 	LockVault = func() error {
@@ -935,16 +962,16 @@ func TestActionMenuVaultLockUsesCallback(t *testing.T) {
 	m := New([]*model.Server{server})
 	m.width = 100
 	m.height = 30
-	m.actionMenu = newActionMenuModel(m.width, m.height)
-	m.screen = screenActionMenu
-	for i := 0; i < len(m.actionMenu.list.Items()); i++ {
-		m.actionMenu.list.Select(i)
-		if item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "vault_lock" {
+	m.manageMenu = newManageMenuModel(m.width, m.height)
+	m.screen = screenManageMenu
+	for i := 0; i < len(m.manageMenu.list.Items()); i++ {
+		m.manageMenu.list.Select(i)
+		if item, ok := m.manageMenu.list.SelectedItem().(actionMenuItem); ok && item.action == "vault_lock" {
 			break
 		}
 	}
 
-	updated, _ := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.updateManageMenu(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(*tuiModel)
 
 	if !locked {
@@ -952,5 +979,62 @@ func TestActionMenuVaultLockUsesCallback(t *testing.T) {
 	}
 	if !strings.Contains(m.success, "Vault locked") {
 		t.Fatalf("expected vault lock success, got %q", m.success)
+	}
+}
+
+func TestServerActionMenuContainsOnlyServerScopedActions(t *testing.T) {
+	menu := newActionMenuModel(100, 30)
+	for _, raw := range menu.list.Items() {
+		item := raw.(actionMenuItem)
+		switch item.action {
+		case "import", "export", "vault_lock", "vault_change_pw", "groups", "tags", "templates", "tunnels":
+			t.Fatalf("global action %q leaked into server actions", item.action)
+		}
+	}
+}
+
+func TestManageMenuOpensGroups(t *testing.T) {
+	oldList := ListGroups
+	t.Cleanup(func() { ListGroups = oldList })
+	ListGroups = func() ([]*model.Group, error) { return []*model.Group{{ID: 1, Name: "Prod", ServerCount: 3}}, nil }
+	m := New(nil)
+	m.width, m.height = 100, 30
+	m.manageMenu = newManageMenuModel(m.width, m.height)
+	m.screen = screenManageMenu
+	for i := range m.manageMenu.list.Items() {
+		m.manageMenu.list.Select(i)
+		if item := m.manageMenu.list.SelectedItem().(actionMenuItem); item.action == "groups" {
+			break
+		}
+	}
+	updated, cmd := m.updateManageMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*tuiModel)
+	if m.screen != screenGroups || cmd == nil {
+		t.Fatalf("manage groups did not open: screen=%v cmd=%v", m.screen, cmd)
+	}
+	updated, _ = m.Update(cmd())
+	m = updated.(*tuiModel)
+	if len(m.groups) != 1 || m.groups[0].ServerCount != 3 {
+		t.Fatalf("groups were not loaded: %#v", m.groups)
+	}
+}
+
+func TestStartupTemplatePickerCopiesCommand(t *testing.T) {
+	oldList := ListCommandTemplates
+	t.Cleanup(func() { ListCommandTemplates = oldList })
+	ListCommandTemplates = func() ([]*model.CommandTemplate, error) {
+		return []*model.CommandTemplate{{ID: 1, Name: "Ops", Command: "tmux attach -t ops"}}, nil
+	}
+	fm := newFormModel(100, 30)
+	fm.focusIdx = 10
+	updated, _ := fm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	fm = updated.(*formModel)
+	if !fm.showStartupList {
+		t.Fatal("startup template picker did not open")
+	}
+	updated, _ = fm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	fm = updated.(*formModel)
+	if got := fm.inputs[10].Value(); got != "tmux attach -t ops" {
+		t.Fatalf("startup command = %q", got)
 	}
 }

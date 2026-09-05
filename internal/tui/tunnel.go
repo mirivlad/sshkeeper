@@ -93,6 +93,16 @@ func (m *tunnelScreenModel) stopSelected() tea.Cmd {
 	return nil
 }
 
+func (m *tunnelScreenModel) runningCount() int {
+	count := 0
+	for _, state := range m.tunnels {
+		if state != nil && tunnel.IsRunning(state.ID) {
+			count++
+		}
+	}
+	return count
+}
+
 func (m *tunnelScreenModel) View() string {
 	notification := ""
 	if m.err != nil {
@@ -100,7 +110,7 @@ func (m *tunnelScreenModel) View() string {
 	}
 	body := func(width, height int) string {
 		if len(m.tunnels) == 0 {
-			return renderPaddedPanel(width, height, []string{dashboardHelp("No running tunnels.")})
+			return renderPaddedPanel(width, height, []string{dashboardHelp("No tracked tunnels.")})
 		}
 		capacity := max(1, height-2)
 		start, end := visibleServerRange(len(m.tunnels), m.list.Index(), max(1, capacity/3))
@@ -120,7 +130,7 @@ func (m *tunnelScreenModel) View() string {
 	}
 	return renderScreenShell(screenShell{
 		breadcrumb:   "Tunnel Manager",
-		status:       fmt.Sprintf("%d running", len(m.tunnels)),
+		status:       fmt.Sprintf("%d running · %d tracked", m.runningCount(), len(m.tunnels)),
 		notification: notification,
 		width:        m.width,
 		height:       m.height,

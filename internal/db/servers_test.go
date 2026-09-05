@@ -1,6 +1,7 @@
 package db
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mirivlad/sshkeeper/internal/model"
@@ -284,5 +285,75 @@ func TestSearchServersMatchesTagsRoutesAndForwardPorts(t *testing.T) {
 				t.Fatalf("search %q returned %#v", query, results)
 			}
 		})
+	}
+}
+
+func TestRouteProfileReferenceSurvivesAliasRename(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	bastion := &model.Server{Alias: "bastion", Host: "gw.example", Port: 22, User: "root", AuthMethod: model.AuthKey}
+	if err := db.CreateServer(bastion); err != nil {
+		t.Fatalf("create bastion: %v", err)
+	}
+	target := &model.Server{Alias: "prod", Host: "10.0.0.10", Port: 22, User: "ops", AuthMethod: model.AuthKey, Route: model.Route{Hops: []model.RouteHop{{ServerID: bastion.ID, Alias: bastion.Alias, IsProfile: true}}}}
+	if err := db.CreateServer(target); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	bastion.Alias = "edge-gw"
+	if err := db.UpdateServerByAlias("bastion", bastion); err != nil {
+		t.Fatalf("rename bastion: %v", err)
+	}
+	got, err := db.GetServer("prod")
+	if err != nil {
+		t.Fatalf("load target: %v", err)
+	}
+	if len(got.Route.Hops) != 1 || got.Route.Hops[0].ServerID != bastion.ID || got.Route.Hops[0].Alias != "edge-gw" {
+		t.Fatalf("route did not follow renamed profile: %#v", got.Route.Hops)
+	}
+}
+
+func TestDeleteServerRejectsReferencedRouteProfile(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	bastion := &model.Server{Alias: "bastion", Host: "gw.example", Port: 22, AuthMethod: model.AuthKey}
+	if err := db.CreateServer(bastion); err != nil {
+		t.Fatalf("create bastion: %v", err)
+	}
+	target := &model.Server{Alias: "prod", Host: "10.0.0.10", Port: 22, AuthMethod: model.AuthKey, Route: model.Route{Hops: []model.RouteHop{{ServerID: bastion.ID, Alias: bastion.Alias, IsProfile: true}}}}
+	if err := db.CreateServer(target); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	if err := db.DeleteServer("bastion"); err == nil || !strings.Contains(err.Error(), "prod") {
+		t.Fatalf("expected dependent-route delete error, got %v", err)
+	}
+}
+
+func TestRouteCycleIsRejected(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	a := &model.Server{Alias: "a", Host: "a.example", Port: 22, AuthMethod: model.AuthKey}
+	b := &model.Server{Alias: "b", Host: "b.example", Port: 22, AuthMethod: model.AuthKey}
+	if err := db.CreateServer(a); err != nil {
+		t.Fatalf("create a: %v", err)
+	}
+	if err := db.CreateServer(b); err != nil {
+		t.Fatalf("create b: %v", err)
+	}
+	a.Route = model.Route{Hops: []model.RouteHop{{ServerID: b.ID, Alias: b.Alias, IsProfile: true}}}
+	if err := db.UpdateServer(a); err != nil {
+		t.Fatalf("set a route: %v", err)
+	}
+	b.Route = model.Route{Hops: []model.RouteHop{{ServerID: a.ID, Alias: a.Alias, IsProfile: true}}}
+	if err := db.UpdateServer(b); err == nil || !strings.Contains(strings.ToLower(err.Error()), "cycle") {
+		t.Fatalf("expected cycle error, got %v", err)
 	}
 }
