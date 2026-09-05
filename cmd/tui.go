@@ -17,19 +17,6 @@ func runTUI() error {
 		return fmt.Errorf("load servers: %w", err)
 	}
 
-	vaultFunc := func(sa string, st string) (string, error) {
-		v := getOrCreateVault()
-		if !v.IsUnlocked() {
-			return "", fmt.Errorf("vault is locked")
-		}
-		key := fmt.Sprintf("server:%s:%s", sa, st)
-		data, err := v.Get(key)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	}
-
 	tui.ListServers = func() ([]*model.Server, error) {
 		return appDB.ListServers()
 	}
@@ -37,55 +24,80 @@ func runTUI() error {
 		return appDB.SearchServers(query)
 	}
 	tui.DeleteServer = func(alias string) error {
+		server, err := appDB.GetServer(alias)
+		if err != nil {
+			return err
+		}
 		if err := appDB.DeleteServer(alias); err != nil {
 			return err
 		}
 		v := getOrCreateVault()
 		if v.IsUnlocked() {
-			cleanupServerSecrets(v, alias)
+			cleanupServerSecretsForServer(v, server)
 			if err := v.Save(); err != nil {
+				// The vault file is unchanged on save failure; restore the DB profile.
+				_ = appDB.CreateServer(server)
+				_ = appDB.SetServerTags(server.ID, server.Tags)
 				return fmt.Errorf("save vault after cleanup: %w", err)
 			}
 		}
 		return nil
 	}
 	tui.TestConnection = func(server *model.Server) (bool, string) {
-		return ssh.Test(cfg, server, vaultFunc)
+		return ssh.TestResolved(cfg, server, dbProfileResolver, serverVaultFunc(server))
 	}
 	tui.TestConnectionWithPassword = func(server *model.Server, password string) (bool, string) {
-		return ssh.Test(cfg, server, formTestVaultFunc(vaultFunc, server, password))
+		base := serverVaultFunc(server)
+		return ssh.TestResolved(cfg, server, dbProfileResolver, formTestVaultFunc(base, server, password))
 	}
 	tui.SaveServer = func(server *model.Server, password string, oldAlias string) error {
-		v := getOrCreateVault()
-		if v.IsUnlocked() {
-			if err := syncServerSecrets(v, oldAlias, server, password); err != nil {
-				return fmt.Errorf("sync vault secrets: %w", err)
-			}
-			if err := v.Save(); err != nil {
-				return fmt.Errorf("save vault: %w", err)
-			}
-		}
-
 		lookupAlias := server.Alias
 		if oldAlias != "" {
 			lookupAlias = oldAlias
 		}
 		existing, _ := appDB.GetServer(lookupAlias)
+		var original *model.Server
 		if existing != nil {
+			original = cloneServer(existing)
 			server.ID = existing.ID
 			if err := appDB.UpdateServerByAlias(existing.Alias, server); err != nil {
 				return err
 			}
-			return appDB.SetServerTags(existing.ID, server.Tags)
+		} else {
+			if err := appDB.CreateServer(server); err != nil {
+				return err
+			}
 		}
-		if err := appDB.CreateServer(server); err != nil {
+		if err := appDB.SetServerTags(server.ID, server.Tags); err != nil {
+			if original != nil {
+				_ = appDB.UpdateServerByAlias(server.Alias, original)
+				_ = appDB.SetServerTags(original.ID, original.Tags)
+			} else {
+				_ = appDB.DeleteServer(server.Alias)
+			}
 			return err
 		}
-		return appDB.SetServerTags(server.ID, server.Tags)
+
+		v := getOrCreateVault()
+		if !v.IsUnlocked() {
+			return nil
+		}
+		if err := syncServerSecrets(v, oldAlias, server, password); err != nil {
+			rollbackSavedServer(server, original)
+			return fmt.Errorf("sync vault secrets: %w", err)
+		}
+		if err := v.Save(); err != nil {
+			rollbackSavedServer(server, original)
+			return fmt.Errorf("save vault: %w", err)
+		}
+		return nil
 	}
 
 	tui.GetGroups = func() ([]string, error) {
 		return appDB.GetGroups()
+	}
+	tui.ResolveRouteAlias = func(alias string) (int64, bool) {
+		return appDB.ResolveAlias(alias)
 	}
 	tui.RenameGroup = func(oldName, newName string) error {
 		return appDB.RenameGroup(oldName, newName)
@@ -123,7 +135,7 @@ func runTUI() error {
 		if err != nil {
 			return "", err
 		}
-		return ssh.RunCommandOutput(cfg, fresh, vaultFunc, command)
+		return ssh.RunCommandOutputResolved(cfg, fresh, dbProfileResolver, serverVaultFunc(fresh), command)
 	}
 	tui.ListForwards = func(serverID int64) ([]*model.Forward, error) {
 		return appDB.GetForwards(serverID)
@@ -157,7 +169,11 @@ func runTUI() error {
 		if !v.IsUnlocked() {
 			return false
 		}
-		return v.HasSecret(serverSecretID(alias, secretType))
+		server, err := appDB.GetServer(alias)
+		if err != nil {
+			return false
+		}
+		return hasServerSecret(v, server, secretType)
 	}
 
 	// Run TUI in a loop — if user requests connect, handle it and restart TUI
@@ -185,7 +201,7 @@ func runTUI() error {
 
 			fmt.Printf("Connecting to %s@%s:%d...\n", fresh.User, fresh.Host, fresh.Port)
 
-			if err := ssh.Connect(cfg, fresh, vaultFunc); err != nil {
+			if err := ssh.ConnectResolved(cfg, fresh, dbProfileResolver, serverVaultFunc(fresh)); err != nil {
 				fmt.Fprintf(os.Stderr, "Connection error: %v\n", err)
 			} else {
 				fmt.Println("Connection closed.")
@@ -210,7 +226,7 @@ func runTUI() error {
 					continue
 				}
 				fmt.Printf("Running template %q on %s...\n", result.TemplateName, fresh.Alias)
-				if err := ssh.RunCommand(cfg, fresh, vaultFunc, result.Command); err != nil {
+				if err := ssh.RunCommandResolved(cfg, fresh, dbProfileResolver, serverVaultFunc(fresh), result.Command); err != nil {
 					fmt.Fprintf(os.Stderr, "Command error on %s: %v\n", fresh.Alias, err)
 				}
 				appDB.UpdateLastConnected(fresh.Alias)
@@ -279,7 +295,7 @@ func runTUI() error {
 					servers, _ = appDB.ListServers()
 					continue
 				}
-				state, err := tunnelpkg.Start(cfg, fresh, forwards, forwardOnly)
+				state, err := tunnelpkg.StartResolved(cfg, fresh, forwards, forwardOnly, dbProfileResolver)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Start tunnel: %v\n", err)
 				} else {
@@ -295,8 +311,7 @@ func runTUI() error {
 				fmt.Printf("Starting session to %s...\n", fresh.Alias)
 			}
 
-			sshArgs := ssh.BuildSSHArgs(fresh, forwards, forwardOnly)
-			if err := ssh.ConnectWithArgs(cfg, sshArgs, vaultFunc, fresh); err != nil {
+			if err := ssh.ConnectWithForwardsResolved(cfg, fresh, forwards, forwardOnly, dbProfileResolver, serverVaultFunc(fresh)); err != nil {
 				fmt.Fprintf(os.Stderr, "Tunnel error: %v\n", err)
 			} else {
 				fmt.Println("Tunnel closed.")

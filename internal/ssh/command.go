@@ -266,7 +266,11 @@ func BuildForwardArgs(forwards []*model.Forward, exitOnForwardFailure bool) []st
 func BuildSSHArgs(server *model.Server, forwards []*model.Forward, forwardOnly bool) []string {
 	var args []string
 
-	args = append(args, "-p", fmt.Sprintf("%d", server.Port))
+	port := server.Port
+	if port == 0 {
+		port = 22
+	}
+	args = append(args, "-p", fmt.Sprintf("%d", port))
 
 	if server.IdentityFile != "" {
 		args = append(args, "-i", server.IdentityFile)
@@ -291,7 +295,10 @@ func BuildSSHArgs(server *model.Server, forwards []*model.Forward, forwardOnly b
 		args = append(args, "-N")
 	}
 
-	target := fmt.Sprintf("%s@%s", server.User, server.Host)
+	target := server.Host
+	if strings.TrimSpace(server.User) != "" {
+		target = fmt.Sprintf("%s@%s", server.User, server.Host)
+	}
 	args = append(args, target)
 
 	return args

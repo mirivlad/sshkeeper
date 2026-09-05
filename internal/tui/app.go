@@ -180,6 +180,7 @@ var (
 	UpdateTestResult           func(alias string, status model.TestStatus, testErr string) error
 	HasSecret                  func(alias string, secretType string) bool
 	GetGroups                  func() ([]string, error)
+	ResolveRouteAlias          func(alias string) (int64, bool)
 	RenameGroup                func(oldName, newName string) error
 	DeleteGroup                func(name string) error
 	ListTags                   func() ([]string, error)
@@ -769,12 +770,14 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlA:
 		m.form = newFormModel(m.width, m.height)
+		m.form.setRouteProfiles(m.servers)
 		m.screen = screenForm
 		return m, nil
 
 	case tea.KeyCtrlE:
 		if item, ok := m.list.SelectedItem().(serverItem); ok {
 			m.form = newEditFormModel(item.server, m.width, m.height)
+			m.form.setRouteProfiles(m.servers)
 			m.screen = screenForm
 		}
 		return m, nil
@@ -1355,6 +1358,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "route":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
 				m.form = newEditFormModel(item.server, m.width, m.height)
+				m.form.setRouteProfiles(m.servers)
 				m.form.focusIdx = 7
 				m.form.updateFocus()
 				m.screen = screenForm
@@ -1372,6 +1376,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "edit":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
 				m.form = newEditFormModel(item.server, m.width, m.height)
+				m.form.setRouteProfiles(m.servers)
 				m.screen = screenForm
 				m.actionMenu = nil
 				return m, nil
@@ -1444,6 +1449,21 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlE, tea.KeyEnter:
 		if m.forwardScreen != nil {
 			return m, m.forwardScreen.editSelected()
+		}
+	case tea.KeySpace:
+		if m.forwardScreen != nil && m.forwardScreen.selected >= 0 && m.forwardScreen.selected < len(m.forwardScreen.list) {
+			selected := *m.forwardScreen.list[m.forwardScreen.selected]
+			selected.Enabled = !selected.Enabled
+			return m, func() tea.Msg {
+				if UpdateForward == nil {
+					return forwardsLoadedMsg{err: fmt.Errorf("forward update is unavailable")}
+				}
+				if err := UpdateForward(&selected); err != nil {
+					return forwardsLoadedMsg{err: err}
+				}
+				forwards, err := ListForwards(m.forwardScreen.serverID)
+				return forwardsLoadedMsg{forwards: forwards, err: err}
+			}
 		}
 	case tea.KeyRunes:
 		switch msg.String() {

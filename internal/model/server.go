@@ -245,6 +245,7 @@ type TunnelState struct {
 	Name        string    `json:"name"`
 	PID         int       `json:"pid"`
 	ForwardIDs  []int64   `json:"forward_ids"`
+	ConfigPath  string    `json:"config_path,omitempty"`
 	StartedAt   time.Time `json:"started_at"`
 	LastError   string    `json:"last_error"`
 }

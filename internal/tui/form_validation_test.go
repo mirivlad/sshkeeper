@@ -81,8 +81,8 @@ func TestForwardValidationMovesFocusToInvalidPort(t *testing.T) {
 	fm.inputs[3].SetValue("5432")
 	updated, _ := fm.Update(fm.runSave()())
 	fm = updated.(*forwardFormModel)
-	if fm.focusIdx != 6 {
-		t.Fatalf("invalid listen port focus = %d, want 6", fm.focusIdx)
+	if fm.focusIdx != 7 {
+		t.Fatalf("invalid listen port focus = %d, want 7", fm.focusIdx)
 	}
 	view := fm.View()
 	if !strings.Contains(view, "Listen Port") || !strings.Contains(view, "must be a number") {

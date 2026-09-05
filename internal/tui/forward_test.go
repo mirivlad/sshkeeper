@@ -11,7 +11,7 @@ import (
 
 func TestForwardFormDigitsReachFocusedInput(t *testing.T) {
 	fm := newForwardFormModel(1, 100, 30)
-	fm.focusIdx = 2 + len(forwardTypes) + 1
+	fm.focusIdx = 2 + len(forwardTypes) + 2
 	fm.updateFocus()
 
 	for _, digit := range []rune{'1', '2', '3'} {
@@ -69,6 +69,40 @@ func TestRemoteForwardEditPopulatesSemanticFields(t *testing.T) {
 		if got := fm.inputs[index].Value(); got != value {
 			t.Fatalf("input[%d] = %q, want %q", index, got, value)
 		}
+	}
+}
+
+func TestForwardEditPreservesDisabledState(t *testing.T) {
+	forward := &model.Forward{ID: 11, ServerID: 7, Name: "db", Type: model.ForwardLocal, LocalAddr: "127.0.0.1", LocalPort: 15432, RemoteAddr: "127.0.0.1", RemotePort: 5432, Enabled: false}
+	fm := newForwardEditModel(7, forward, 80, 24)
+	if fm.enabled {
+		t.Fatal("disabled forward became enabled in edit form")
+	}
+	built, err := fm.buildForwardFromForm()
+	if err != nil {
+		t.Fatalf("build forward: %v", err)
+	}
+	if built.Enabled {
+		t.Fatal("disabled forward would be saved as enabled")
+	}
+}
+
+func TestRemoteForwardPreviewUsesSavedEndpointMapping(t *testing.T) {
+	fm := newForwardFormModel(7, 100, 30)
+	fm.currentType = model.ForwardRemote
+	fm.typeIdx = typeIndex(model.ForwardRemote)
+	fm.nameInput.SetValue("remote web")
+	fm.inputs[0].SetValue("0.0.0.0")
+	fm.inputs[1].SetValue("18080")
+	fm.inputs[2].SetValue("127.0.0.1")
+	fm.inputs[3].SetValue("8080")
+	built, err := fm.buildForwardFromForm()
+	if err != nil {
+		t.Fatalf("build preview forward: %v", err)
+	}
+	want := []string{"-R", "0.0.0.0:18080:127.0.0.1:8080"}
+	if got := built.ForwardSSHArgs(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("preview args = %#v, want %#v", got, want)
 	}
 }
 

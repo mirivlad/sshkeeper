@@ -112,6 +112,7 @@ func (m *forwardScreenModel) View() string {
 		footer: []helpItem{
 			{Key: "Ctrl+A (a)", Action: "add"},
 			{Key: "Ctrl+E/Enter", Action: "edit"},
+			{Key: "Space", Action: "enable/disable"},
 			{Key: "Ctrl+D (d)", Action: "delete"},
 			{Key: "Ctrl+H", Action: "help"},
 			{Key: "Esc", Action: "back"},
@@ -221,6 +222,7 @@ type forwardFormModel struct {
 	nameInput   textinput.Model
 	descInput   textinput.Model
 	typeIdx     int // 0=local, 1=remote, 2=socks
+	enabled     bool
 	width       int
 	height      int
 	initial     forwardFormSnapshot
@@ -231,6 +233,7 @@ type forwardFormSnapshot struct {
 	description string
 	values      []string
 	forwardType model.ForwardType
+	enabled     bool
 }
 
 var forwardTypes = []forwardTypeItem{
@@ -262,6 +265,7 @@ func newForwardFormModel(serverID int64, w, h int) *forwardFormModel {
 		focusIdx:    0,
 		currentType: model.ForwardLocal,
 		typeIdx:     0,
+		enabled:     true,
 		nameInput:   nameInput,
 		descInput:   descInput,
 		width:       w,
@@ -280,6 +284,7 @@ func newForwardEditModel(serverID int64, fwd *model.Forward, w, h int) *forwardF
 	fm.descInput.SetValue(fwd.Description)
 	fm.currentType = fwd.Type
 	fm.typeIdx = typeIndex(fwd.Type)
+	fm.enabled = fwd.Enabled
 	if fwd.Type == model.ForwardRemote {
 		fm.inputs[0].SetValue(fwd.RemoteAddr)
 		fm.inputs[1].SetValue(strconv.Itoa(fwd.RemotePort))
@@ -306,12 +311,13 @@ func (fm *forwardFormModel) snapshot() forwardFormSnapshot {
 		description: fm.descInput.Value(),
 		values:      values,
 		forwardType: fm.currentType,
+		enabled:     fm.enabled,
 	}
 }
 
 func (fm *forwardFormModel) Dirty() bool {
 	current := fm.snapshot()
-	if current.name != fm.initial.name || current.description != fm.initial.description || current.forwardType != fm.initial.forwardType || len(current.values) != len(fm.initial.values) {
+	if current.name != fm.initial.name || current.description != fm.initial.description || current.forwardType != fm.initial.forwardType || current.enabled != fm.initial.enabled || len(current.values) != len(fm.initial.values) {
 		return true
 	}
 	for i := range current.values {
@@ -382,7 +388,7 @@ func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyTab:
 			fm.focusIdx++
-			total := 2 + 3 + len(fm.visibleFields()) + 1 // name + desc + type(3) + fields + save
+			total := 2 + 3 + 1 + len(fm.visibleFields()) + 1 // name + desc + type(3) + fields + save
 			if fm.focusIdx >= total {
 				fm.focusIdx = 0
 			}
@@ -391,7 +397,7 @@ func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyShiftTab:
 			fm.focusIdx--
 			if fm.focusIdx < 0 {
-				total := 2 + 3 + len(fm.visibleFields()) + 1
+				total := 2 + 3 + 1 + len(fm.visibleFields()) + 1
 				fm.focusIdx = total - 1
 			}
 			fm.updateFocus()
@@ -405,7 +411,11 @@ func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				fm.updateFocus()
 				return fm, nil
 			}
-			if fm.focusIdx == 2+3+len(fm.visibleFields()) {
+			if fm.focusIdx == 2+3 {
+				fm.enabled = !fm.enabled
+				return fm, nil
+			}
+			if fm.focusIdx == 2+3+1+len(fm.visibleFields()) {
 				return fm, fm.runSave()
 			}
 			fm.focusIdx++
@@ -415,7 +425,7 @@ func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return fm, nil
 		case tea.KeyDown:
 			fm.focusIdx++
-			total := 2 + 3 + len(fm.visibleFields()) + 1
+			total := 2 + 3 + 1 + len(fm.visibleFields()) + 1
 			if fm.focusIdx >= total {
 				fm.focusIdx = 0
 			}
@@ -424,12 +434,16 @@ func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyUp:
 			fm.focusIdx--
 			if fm.focusIdx < 0 {
-				total := 2 + 3 + len(fm.visibleFields()) + 1
+				total := 2 + 3 + 1 + len(fm.visibleFields()) + 1
 				fm.focusIdx = total - 1
 			}
 			fm.updateFocus()
 			return fm, nil
 		case tea.KeyRunes:
+			if fm.focusIdx == 2+3 && msg.String() == " " {
+				fm.enabled = !fm.enabled
+				return fm, nil
+			}
 			// Direct number keys select a type only while the type selector has focus.
 			if fm.focusIdx >= 2 && fm.focusIdx < 2+len(forwardTypes) && len(msg.Runes) == 1 {
 				switch msg.Runes[0] {
@@ -465,8 +479,8 @@ func (fm *forwardFormModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return fm, cmd
 	}
 	visible := fm.visibleFields()
-	if fm.focusIdx >= 2+3 && fm.focusIdx < 2+3+len(visible) {
-		fieldIdx := visible[fm.focusIdx-(2+3)]
+	if fm.focusIdx >= 2+3+1 && fm.focusIdx < 2+3+1+len(visible) {
+		fieldIdx := visible[fm.focusIdx-(2+3+1)]
 		var cmd tea.Cmd
 		fm.inputs[fieldIdx], cmd = fm.inputs[fieldIdx].Update(msg)
 		return fm, cmd
@@ -485,7 +499,7 @@ func (fm *forwardFormModel) updateFocus() {
 		fm.inputs[i].Prompt = blurredStyle.Render(fm.labelForField(i) + ": ")
 	}
 
-	total := 2 + 3 + len(fm.visibleFields()) + 1
+	total := 2 + 3 + 1 + len(fm.visibleFields()) + 1
 	switch {
 	case fm.focusIdx == 0:
 		fm.nameInput.Focus()
@@ -495,98 +509,96 @@ func (fm *forwardFormModel) updateFocus() {
 		fm.descInput.Prompt = focusedStyle.Render("Description> ")
 	case fm.focusIdx >= 2 && fm.focusIdx < 2+3:
 		// Type selector focused — no input to focus
-	case fm.focusIdx >= 2+3 && fm.focusIdx < total-1:
+	case fm.focusIdx == 2+3:
+		// Enabled toggle focused.
+	case fm.focusIdx >= 2+3+1 && fm.focusIdx < total-1:
 		visible := fm.visibleFields()
-		fieldIdx := visible[fm.focusIdx-(2+3)]
+		fieldIdx := visible[fm.focusIdx-(2+3+1)]
 		fm.inputs[fieldIdx].Focus()
 		fm.inputs[fieldIdx].Prompt = focusedStyle.Render(fm.labelForField(fieldIdx) + "> ")
 	}
 }
 
+func (fm *forwardFormModel) buildForwardFromForm() (*model.Forward, error) {
+	name := strings.TrimSpace(fm.nameInput.Value())
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	forward := &model.Forward{
+		ID:          fm.editID,
+		ServerID:    fm.serverID,
+		Name:        name,
+		Description: strings.TrimSpace(fm.descInput.Value()),
+		Type:        fm.currentType,
+		Enabled:     fm.enabled,
+	}
+	var err error
+	switch fm.currentType {
+	case model.ForwardLocal:
+		forward.LocalAddr = strings.TrimSpace(fm.inputs[0].Value())
+		if forward.LocalAddr == "" {
+			forward.LocalAddr = "127.0.0.1"
+		}
+		forward.LocalPort, err = parseNamedPort("Listen port", fm.inputs[1].Value())
+		if err != nil {
+			return nil, err
+		}
+		forward.RemoteAddr = strings.TrimSpace(fm.inputs[2].Value())
+		if forward.RemoteAddr == "" {
+			return nil, fmt.Errorf("target host is required for local forward")
+		}
+		forward.RemotePort, err = parseNamedPort("Target port", fm.inputs[3].Value())
+		if err != nil {
+			return nil, err
+		}
+	case model.ForwardRemote:
+		forward.RemoteAddr = strings.TrimSpace(fm.inputs[0].Value())
+		if forward.RemoteAddr == "" {
+			return nil, fmt.Errorf("remote listen address is required")
+		}
+		forward.RemotePort, err = parseNamedPort("Remote listen port", fm.inputs[1].Value())
+		if err != nil {
+			return nil, err
+		}
+		forward.LocalAddr = strings.TrimSpace(fm.inputs[2].Value())
+		if forward.LocalAddr == "" {
+			forward.LocalAddr = "127.0.0.1"
+		}
+		forward.LocalPort, err = parseNamedPort("Local target port", fm.inputs[3].Value())
+		if err != nil {
+			return nil, err
+		}
+	case model.ForwardDynamic:
+		forward.LocalAddr = strings.TrimSpace(fm.inputs[0].Value())
+		if forward.LocalAddr == "" {
+			forward.LocalAddr = "127.0.0.1"
+		}
+		forward.LocalPort, err = parseNamedPort("Listen port", fm.inputs[1].Value())
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported forward type: %s", fm.currentType)
+	}
+	return forward, nil
+}
+
 func (fm *forwardFormModel) runSave() tea.Cmd {
 	return func() tea.Msg {
-		name := strings.TrimSpace(fm.nameInput.Value())
-		desc := strings.TrimSpace(fm.descInput.Value())
-		localAddr, remoteAddr := "", ""
-		localPort, remotePort := 0, 0
-		var err error
-
-		if name == "" {
-			return saveDoneMsg{err: fmt.Errorf("name is required")}
+		forward, err := fm.buildForwardFromForm()
+		if err != nil {
+			return saveDoneMsg{err: err}
 		}
-		switch fm.currentType {
-		case model.ForwardLocal:
-			localAddr = strings.TrimSpace(fm.inputs[0].Value())
-			if localAddr == "" {
-				localAddr = "127.0.0.1"
-			}
-			localPort, err = parseNamedPort("Listen port", fm.inputs[1].Value())
-			if err != nil {
-				return saveDoneMsg{err: err}
-			}
-			remoteAddr = strings.TrimSpace(fm.inputs[2].Value())
-			if remoteAddr == "" {
-				return saveDoneMsg{err: fmt.Errorf("target host is required for local forward")}
-			}
-			remotePort, err = parseNamedPort("Target port", fm.inputs[3].Value())
-			if err != nil {
-				return saveDoneMsg{err: err}
-			}
-		case model.ForwardRemote:
-			remoteAddr = strings.TrimSpace(fm.inputs[0].Value())
-			if remoteAddr == "" {
-				return saveDoneMsg{err: fmt.Errorf("remote listen address is required")}
-			}
-			remotePort, err = parseNamedPort("Remote listen port", fm.inputs[1].Value())
-			if err != nil {
-				return saveDoneMsg{err: err}
-			}
-			localAddr = strings.TrimSpace(fm.inputs[2].Value())
-			if localAddr == "" {
-				localAddr = "127.0.0.1"
-			}
-			localPort, err = parseNamedPort("Local target port", fm.inputs[3].Value())
-			if err != nil {
-				return saveDoneMsg{err: err}
-			}
-		case model.ForwardDynamic:
-			localAddr = strings.TrimSpace(fm.inputs[0].Value())
-			if localAddr == "" {
-				localAddr = "127.0.0.1"
-			}
-			localPort, err = parseNamedPort("Listen port", fm.inputs[1].Value())
-			if err != nil {
-				return saveDoneMsg{err: err}
-			}
-			remoteAddr = ""
-			remotePort = 0
-		}
-
-		fwd := &model.Forward{
-			ServerID:    fm.serverID,
-			Name:        name,
-			Description: desc,
-			Type:        fm.currentType,
-			LocalAddr:   localAddr,
-			LocalPort:   localPort,
-			RemoteAddr:  remoteAddr,
-			RemotePort:  remotePort,
-			Enabled:     true,
-		}
-
 		if fm.editMode {
-			fwd.ID = fm.editID
 			if UpdateForward == nil {
 				return saveDoneMsg{err: fmt.Errorf("update not available")}
 			}
-			return saveDoneMsg{err: UpdateForward(fwd)}
+			return saveDoneMsg{err: UpdateForward(forward)}
 		}
-
 		if SaveForward == nil {
 			return saveDoneMsg{err: fmt.Errorf("forward storage is unavailable")}
 		}
-		err = SaveForward(fwd)
-		return saveDoneMsg{err: err}
+		return saveDoneMsg{err: SaveForward(forward)}
 	}
 }
 
@@ -612,7 +624,7 @@ func (fm *forwardFormModel) applySaveError(err error) {
 		fieldIndex = 3
 	}
 	if fieldIndex >= 0 {
-		fm.focusIdx = 2 + len(forwardTypes) + fieldIndex
+		fm.focusIdx = 2 + len(forwardTypes) + 1 + fieldIndex
 		fm.updateFocus()
 	}
 }
@@ -658,6 +670,15 @@ func (fm *forwardFormModel) View() string {
 		if width >= 100 {
 			lines = append(lines, helpStyle.Copy().MarginLeft(0).Render(forwardTypes[fm.typeIdx].description))
 		}
+		enabledMark := "[ ]"
+		if fm.enabled {
+			enabledMark = "[x]"
+		}
+		enabledLine := "  Enabled " + enabledMark
+		if fm.focusIdx == 2+3 {
+			enabledLine = selectedStyle.Render("> Enabled " + enabledMark + "  Enter/Space toggles")
+		}
+		lines = append(lines, enabledLine)
 		visible := fm.visibleFields()
 		for _, idx := range visible {
 			lines = append(lines, fm.inputs[idx].View())
@@ -666,13 +687,12 @@ func (fm *forwardFormModel) View() string {
 			lines = append(lines, helpStyle.Copy().MarginLeft(0).Render("⚠ This port will be accessible from the network."))
 		}
 		if width >= 70 && fm.currentType != "" && fm.inputs[1].Value() != "" {
-			fwd := &model.Forward{Type: fm.currentType, LocalAddr: fm.inputs[0].Value(), RemoteAddr: fm.inputs[2].Value()}
-			fmt.Sscanf(fm.inputs[1].Value(), "%d", &fwd.LocalPort)
-			fmt.Sscanf(fm.inputs[3].Value(), "%d", &fwd.RemotePort)
-			preview := "Preview  ssh " + strings.Join(fwd.ForwardSSHArgs(), " ") + " -o ExitOnForwardFailure=yes"
-			lines = append(lines, wrapCells(preview, contentWidth)...)
+			if fwd, err := fm.buildForwardFromForm(); err == nil {
+				preview := "Preview  ssh " + strings.Join(fwd.ForwardSSHArgs(), " ") + " -o ExitOnForwardFailure=yes"
+				lines = append(lines, wrapCells(preview, contentWidth)...)
+			}
 		}
-		total := 2 + 3 + len(visible) + 1
+		total := 2 + 3 + 1 + len(visible) + 1
 		button := "  [ Save ]"
 		if fm.focusIdx == total-1 {
 			button = selectedStyle.Render("> [ Save ]")
@@ -691,7 +711,7 @@ func (fm *forwardFormModel) View() string {
 			{Key: "Tab/↓", Action: "next"},
 			{Key: "↑", Action: "prev"},
 			{Key: "1/2/3", Action: "select type"},
-			{Key: "Enter", Action: "save"},
+			{Key: "Enter/Space", Action: "toggle/save"},
 			{Key: "Ctrl+H", Action: "help"},
 			{Key: "Esc", Action: "back"},
 		},

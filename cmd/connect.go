@@ -19,33 +19,9 @@ var connectCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("server not found: %s", alias)
 		}
-
-		v := getOrCreateVault()
-		vaultFunc := func(serverAlias string, secretType string) (string, error) {
-			if !v.IsUnlocked() {
-				return "", fmt.Errorf("%s", vaultLockedProcessMessage())
-			}
-			key := fmt.Sprintf("server:%s:%s", serverAlias, secretType)
-			data, err := v.Get(key)
-			if err != nil {
-				return "", err
-			}
-			return string(data), nil
-		}
-
-		if err := ssh.Connect(cfg, &model.Server{
-			Alias:        server.Alias,
-			Host:         server.Host,
-			Port:         server.Port,
-			User:         server.User,
-			AuthMethod:   server.AuthMethod,
-			IdentityFile: server.IdentityFile,
-			ProxyJump:    server.ProxyJump,
-			Route:        server.Route,
-		}, vaultFunc); err != nil {
+		if err := ssh.ConnectResolved(cfg, server, dbProfileResolver, serverVaultFunc(server)); err != nil {
 			return err
 		}
-
 		appDB.UpdateLastConnected(alias)
 		return nil
 	},
@@ -61,31 +37,7 @@ var testCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("server not found: %s", alias)
 		}
-
-		v := getOrCreateVault()
-		vaultFunc := func(serverAlias string, secretType string) (string, error) {
-			if !v.IsUnlocked() {
-				return "", fmt.Errorf("%s", vaultLockedProcessMessage())
-			}
-			key := fmt.Sprintf("server:%s:%s", serverAlias, secretType)
-			data, err := v.Get(key)
-			if err != nil {
-				return "", err
-			}
-			return string(data), nil
-		}
-
-		ok, testErr := ssh.Test(cfg, &model.Server{
-			Alias:        server.Alias,
-			Host:         server.Host,
-			Port:         server.Port,
-			User:         server.User,
-			AuthMethod:   server.AuthMethod,
-			IdentityFile: server.IdentityFile,
-			ProxyJump:    server.ProxyJump,
-			Route:        server.Route,
-		}, vaultFunc)
-
+		ok, testErr := ssh.TestResolved(cfg, server, dbProfileResolver, serverVaultFunc(server))
 		if ok {
 			fmt.Println("Connection OK.")
 			appDB.UpdateTestResult(alias, model.TestOK, "")
@@ -93,7 +45,6 @@ var testCmd = &cobra.Command{
 			fmt.Printf("Connection failed:\n%s\n", testErr)
 			appDB.UpdateTestResult(alias, model.TestFailed, testErr)
 		}
-
 		return nil
 	},
 }

@@ -23,6 +23,22 @@ func (i groupItem) Title() string       { return i.name }
 func (i groupItem) Description() string { return "" }
 func (i groupItem) FilterValue() string { return i.name }
 
+type routeProfileItem struct {
+	server *model.Server
+}
+
+func (i routeProfileItem) Title() string { return i.server.Alias }
+func (i routeProfileItem) Description() string {
+	target := i.server.Host
+	if i.server.User != "" {
+		target = i.server.User + "@" + i.server.Host
+	}
+	return fmt.Sprintf("%s:%d", target, i.server.Port)
+}
+func (i routeProfileItem) FilterValue() string {
+	return strings.Join([]string{i.server.Alias, i.server.DisplayName, i.server.Host, i.server.User, i.server.GroupName}, " ")
+}
+
 func newStringList(values []string, title string, width, height int) list.Model {
 	items := make([]list.Item, len(values))
 	for i, value := range values {
@@ -35,6 +51,28 @@ func newStringList(values []string, title string, width, height int) list.Model 
 	l.Title = title
 	l.Styles.Title = titleStyle
 	return l
+}
+
+func (fm *formModel) setRouteProfiles(servers []*model.Server) {
+	fm.routeProfiles = nil
+	items := []list.Item{}
+	for _, server := range servers {
+		if server == nil {
+			continue
+		}
+		if fm.server != nil && ((fm.server.ID > 0 && server.ID == fm.server.ID) || server.Alias == fm.server.Alias) {
+			continue
+		}
+		fm.routeProfiles = append(fm.routeProfiles, server)
+		items = append(items, routeProfileItem{server: server})
+	}
+	l := list.New(items, list.NewDefaultDelegate(), 44, 14)
+	l.Title = "Available server profiles"
+	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
+	l.SetFilteringEnabled(true)
+	l.Styles.Title = titleStyle
+	fm.routeList = l
 }
 
 // --- Form model ---
@@ -63,6 +101,11 @@ type formModel struct {
 	showGroupList  bool
 	authList       list.Model
 	showAuthList   bool
+	routeProfiles  []*model.Server
+	routeList      list.Model
+	showRouteList  bool
+	routePane      int // 0=current route, 1=available profiles
+	routeCursor    int
 	initial        formSnapshot
 }
 
@@ -81,7 +124,7 @@ func newFormModel(w, h int) *formModel {
 		"User",
 		"Auth Method (password/key/key_passphrase/agent)",
 		"Identity File",
-		"Route hops (comma-separated, or pick from profiles)",
+		"Route (direct / ordered bastions)",
 		"Group (type new or pick from list)",
 		"Notes",
 		"Startup Command",
@@ -128,7 +171,6 @@ func newFormModel(w, h int) *formModel {
 			fm.groupList = newStringList(groups, "Select group", 30, 8)
 		}
 	}
-
 	fm.updateFocus()
 	fm.initial = fm.snapshot()
 	return fm
@@ -150,8 +192,8 @@ func placeholderForLabel(label string) string {
 		return "key"
 	case "Identity File":
 		return "~/.ssh/id_ed25519"
-	case "Route hops (comma-separated, or pick from profiles)":
-		return "bastion, dmz-gw"
+	case "Route (direct / ordered bastions)":
+		return "profile:bastion, raw:user@gw.example"
 	case "Group (type new or pick from list)":
 		return "KP"
 	case "Notes":
@@ -177,17 +219,9 @@ func newEditFormModel(s *model.Server, w, h int) *formModel {
 	fm.inputs[5].SetValue(string(s.AuthMethod))
 	fm.inputs[6].SetValue(s.IdentityFile)
 
-	// Populate Route hops
+	// Store an unambiguous route spec in the editable field.
 	if len(s.Route.Hops) > 0 {
-		hopStrs := make([]string, len(s.Route.Hops))
-		for i, h := range s.Route.Hops {
-			if h.IsProfile {
-				hopStrs[i] = h.Alias
-			} else {
-				hopStrs[i] = h.Raw
-			}
-		}
-		fm.inputs[7].SetValue(strings.Join(hopStrs, ", "))
+		fm.inputs[7].SetValue(model.FormatRouteSpec(s.Route))
 	} else if s.ProxyJump != "" {
 		fm.inputs[7].SetValue(s.ProxyJump)
 	}
@@ -236,6 +270,136 @@ func (fm *formModel) Dirty() bool {
 	return false
 }
 
+func (fm *formModel) resolveRouteAlias(alias string) (int64, bool) {
+	alias = strings.TrimSpace(alias)
+	for _, server := range fm.routeProfiles {
+		if server != nil && server.Alias == alias && server.ID > 0 {
+			return server.ID, true
+		}
+	}
+	if ResolveRouteAlias != nil {
+		return ResolveRouteAlias(alias)
+	}
+	return 0, false
+}
+
+func (fm *formModel) parseRouteInput() (model.Route, error) {
+	return model.ParseRouteSpec(fm.inputs[7].Value(), fm.resolveRouteAlias)
+}
+
+func (fm *formModel) currentRoute() model.Route {
+	route, err := fm.parseRouteInput()
+	if err != nil {
+		return model.Route{}
+	}
+	return route
+}
+
+func (fm *formModel) setCurrentRoute(route model.Route) {
+	fm.inputs[7].SetValue(model.FormatRouteSpec(route))
+	if len(route.Hops) == 0 {
+		fm.routeCursor = 0
+	} else if fm.routeCursor >= len(route.Hops) {
+		fm.routeCursor = len(route.Hops) - 1
+	}
+}
+
+func (fm *formModel) routeContainsProfile(route model.Route, serverID int64) bool {
+	for _, hop := range route.Hops {
+		if hop.Profile() && hop.ServerID == serverID {
+			return true
+		}
+	}
+	return false
+}
+
+func (fm *formModel) updateRouteEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		if fm.routePane == 1 {
+			var cmd tea.Cmd
+			fm.routeList, cmd = fm.routeList.Update(msg)
+			return fm, cmd
+		}
+		return fm, nil
+	}
+	if key.Type == tea.KeyEsc {
+		fm.showRouteList = false
+		fm.inputs[7].Focus()
+		return fm, nil
+	}
+	if key.Type == tea.KeyTab || key.Type == tea.KeyShiftTab {
+		if fm.routePane == 0 {
+			fm.routePane = 1
+		} else {
+			fm.routePane = 0
+		}
+		return fm, nil
+	}
+
+	route := fm.currentRoute()
+	if fm.routePane == 0 {
+		switch key.Type {
+		case tea.KeyUp:
+			if fm.routeCursor > 0 {
+				fm.routeCursor--
+			}
+			return fm, nil
+		case tea.KeyDown:
+			if fm.routeCursor+1 < len(route.Hops) {
+				fm.routeCursor++
+			}
+			return fm, nil
+		case tea.KeyBackspace, tea.KeyDelete:
+			if len(route.Hops) > 0 && fm.routeCursor < len(route.Hops) {
+				route.Hops = append(route.Hops[:fm.routeCursor], route.Hops[fm.routeCursor+1:]...)
+				fm.setCurrentRoute(route)
+			}
+			return fm, nil
+		case tea.KeyRunes:
+			switch key.String() {
+			case "x", "X":
+				if len(route.Hops) > 0 && fm.routeCursor < len(route.Hops) {
+					route.Hops = append(route.Hops[:fm.routeCursor], route.Hops[fm.routeCursor+1:]...)
+					fm.setCurrentRoute(route)
+				}
+				return fm, nil
+			case "[":
+				if fm.routeCursor > 0 && fm.routeCursor < len(route.Hops) {
+					i := fm.routeCursor
+					route.Hops[i-1], route.Hops[i] = route.Hops[i], route.Hops[i-1]
+					fm.routeCursor--
+					fm.setCurrentRoute(route)
+				}
+				return fm, nil
+			case "]":
+				if fm.routeCursor >= 0 && fm.routeCursor+1 < len(route.Hops) {
+					i := fm.routeCursor
+					route.Hops[i], route.Hops[i+1] = route.Hops[i+1], route.Hops[i]
+					fm.routeCursor++
+					fm.setCurrentRoute(route)
+				}
+				return fm, nil
+			}
+		}
+		return fm, nil
+	}
+
+	if key.Type == tea.KeyEnter {
+		if item, ok := fm.routeList.SelectedItem().(routeProfileItem); ok && item.server != nil {
+			if !fm.routeContainsProfile(route, item.server.ID) {
+				route.Hops = append(route.Hops, model.RouteHop{ServerID: item.server.ID, Alias: item.server.Alias, IsProfile: true})
+				fm.routeCursor = len(route.Hops) - 1
+				fm.setCurrentRoute(route)
+			}
+			return fm, nil
+		}
+	}
+	var cmd tea.Cmd
+	fm.routeList, cmd = fm.routeList.Update(msg)
+	return fm, cmd
+}
+
 func (fm *formModel) Init() tea.Cmd {
 	return nil
 }
@@ -274,6 +438,10 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return fm, cmd
 		}
 		return fm, cmd
+	}
+
+	if fm.showRouteList {
+		return fm.updateRouteEditor(msg)
 	}
 
 	if fm.showGroupList {
@@ -340,6 +508,15 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyRunes:
 			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 5 {
 				fm.showAuthList = true
+				return fm, nil
+			}
+			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 7 {
+				fm.showRouteList = true
+				fm.routePane = 1
+				route := fm.currentRoute()
+				if len(route.Hops) > 0 {
+					fm.routeCursor = len(route.Hops) - 1
+				}
 				return fm, nil
 			}
 			if len(msg.Runes) == 1 && msg.Runes[0] == '/' && !msg.Alt && fm.focusIdx == 8 && len(fm.groups) > 0 {
@@ -414,6 +591,8 @@ func (fm *formModel) applySaveError(err error) {
 		fm.focusIdx = 2
 	case strings.Contains(message, "port"):
 		fm.focusIdx = 3
+	case strings.Contains(message, "route"):
+		fm.focusIdx = 7
 	default:
 		return
 	}
@@ -450,6 +629,9 @@ func (fm *formModel) labelAt(index int) string {
 		if index == 5 {
 			return "Auth Method (/ pick)"
 		}
+		if index == 7 {
+			return "Route (/ edit)"
+		}
 		if index == 8 {
 			if len(fm.groups) > 0 {
 				return "Group (/ pick)"
@@ -471,7 +653,11 @@ func (fm *formModel) runTest() tea.Cmd {
 		fm.testing = false
 		return func() tea.Msg { return testDoneMsg{ok: false, err: err.Error()} }
 	}
-	s := fm.buildServer()
+	s, err := fm.buildServerValidated()
+	if err != nil {
+		fm.testing = false
+		return func() tea.Msg { return testDoneMsg{ok: false, err: err.Error()} }
+	}
 	pw := fm.password.Value()
 
 	return tea.Batch(
@@ -499,7 +685,10 @@ func (fm *formModel) runSave() tea.Cmd {
 	if _, err := parsePort(fm.inputs[3].Value()); err != nil {
 		return func() tea.Msg { return saveDoneMsg{err: err} }
 	}
-	s := fm.buildServer()
+	s, err := fm.buildServerValidated()
+	if err != nil {
+		return func() tea.Msg { return saveDoneMsg{err: err} }
+	}
 	pw := fm.password.Value()
 
 	return tea.Batch(
@@ -521,55 +710,54 @@ func (fm *formModel) runSave() tea.Cmd {
 	)
 }
 
-// parseRouteHops parses the route hops input string into a model.Route.
-// Format: comma-separated list of aliases or raw addresses.
-func parseRouteHops(input string) model.Route {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return model.Route{}
-	}
-	parts := strings.Split(input, ",")
-	hops := make([]model.RouteHop, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		// Heuristic: if it contains @ or :, treat as raw address
-		if strings.Contains(p, "@") || strings.Contains(p, ":") {
-			hops = append(hops, model.RouteHop{Raw: p, IsProfile: false})
-		} else {
-			// Treat as profile alias
-			hops = append(hops, model.RouteHop{Alias: p, IsProfile: true})
-		}
-	}
-	return model.Route{Hops: hops}
+// parseRouteHops parses an explicit route spec. Exact known aliases become
+// stable profile references; unknown unprefixed values remain raw OpenSSH targets.
+func parseRouteHops(input string) (model.Route, error) {
+	return model.ParseRouteSpec(input, ResolveRouteAlias)
 }
 
-func (fm *formModel) buildServer() *model.Server {
-	port, _ := parsePort(fm.inputs[3].Value())
-	authMethod := model.AuthMethod(fm.inputs[5].Value())
+func (fm *formModel) buildServerValidated() (*model.Server, error) {
+	port, err := parsePort(fm.inputs[3].Value())
+	if err != nil {
+		return nil, err
+	}
+	authMethod := model.AuthMethod(strings.TrimSpace(fm.inputs[5].Value()))
 	if authMethod == "" {
 		authMethod = model.AuthKey
 	}
-
-	route := parseRouteHops(fm.inputs[7].Value())
-
-	return &model.Server{
-		Alias:          fm.inputs[0].Value(),
-		DisplayName:    fm.inputs[1].Value(),
-		Host:           fm.inputs[2].Value(),
+	route, err := fm.parseRouteInput()
+	if err != nil {
+		return nil, fmt.Errorf("route: %w", err)
+	}
+	server := &model.Server{
+		Alias:          strings.TrimSpace(fm.inputs[0].Value()),
+		DisplayName:    strings.TrimSpace(fm.inputs[1].Value()),
+		Host:           strings.TrimSpace(fm.inputs[2].Value()),
 		Port:           port,
-		User:           fm.inputs[4].Value(),
+		User:           strings.TrimSpace(fm.inputs[4].Value()),
 		AuthMethod:     authMethod,
-		IdentityFile:   fm.inputs[6].Value(),
+		IdentityFile:   strings.TrimSpace(fm.inputs[6].Value()),
 		ProxyJump:      route.ProxyJumpString(),
 		Route:          route,
-		GroupName:      fm.inputs[8].Value(),
+		GroupName:      strings.TrimSpace(fm.inputs[8].Value()),
 		Notes:          fm.inputs[9].Value(),
 		StartupCommand: fm.inputs[10].Value(),
 		Tags:           splitCSV(fm.inputs[11].Value()),
 	}
+	if fm.edit && fm.server != nil {
+		server.ID = fm.server.ID
+	}
+	if err := model.ValidateServerBasics(server); err != nil {
+		return nil, err
+	}
+	return server, nil
+}
+
+// buildServer is kept as a convenience for view/tests that already populate
+// valid fields. Save/Test paths use buildServerValidated and surface errors.
+func (fm *formModel) buildServer() *model.Server {
+	server, _ := fm.buildServerValidated()
+	return server
 }
 
 func parsePort(value string) (int, error) {
@@ -588,6 +776,9 @@ func (fm *formModel) View() string {
 	title := "Add Server"
 	if fm.edit {
 		title = "Edit Server: " + fm.server.Alias
+	}
+	if fm.showRouteList {
+		return fm.routeEditorView(title)
 	}
 	if fm.showAuthList || fm.showGroupList {
 		var dropdown list.Model
@@ -680,6 +871,89 @@ func (fm *formModel) View() string {
 			{Key: "Enter", Action: "select"},
 			{Key: "Ctrl+H", Action: "help"},
 			{Key: "Esc", Action: "back"},
+		},
+	})
+}
+
+func (fm *formModel) routeEditorView(title string) string {
+	route := fm.currentRoute()
+	body := func(width, height int) string {
+		lines := []string{dashboardSection("Current route")}
+		if len(route.Hops) == 0 {
+			line := "  Direct connection"
+			if fm.routePane == 0 {
+				line = selectedRowStyle.Render("> Direct connection")
+			}
+			lines = append(lines, line)
+		} else {
+			for index, hop := range route.Hops {
+				kind := "raw"
+				name := hop.Raw
+				if hop.Profile() {
+					kind = "profile"
+					name = hop.Alias
+				}
+				prefix := "  "
+				line := fmt.Sprintf("%s%d. %-24s [%s]", prefix, index+1, name, kind)
+				if fm.routePane == 0 && index == fm.routeCursor {
+					line = selectedRowStyle.Render(fmt.Sprintf("> %d. %-24s [%s]", index+1, name, kind))
+				}
+				lines = append(lines, line)
+			}
+		}
+		target := strings.TrimSpace(fm.inputs[2].Value())
+		if target == "" {
+			target = "target"
+		}
+		lines = append(lines, dashboardHelp("Preview: "+route.DisplaySummary(target)), "", dashboardSection("Available server profiles"))
+
+		if len(fm.routeList.Items()) == 0 {
+			lines = append(lines, dashboardHelp("No other server profiles are available."))
+		} else {
+			capacity := max(1, height-len(lines)-4)
+			start, end := visibleServerRange(len(fm.routeList.Items()), fm.routeList.Index(), capacity)
+			for index := start; index < end; index++ {
+				item, ok := fm.routeList.Items()[index].(routeProfileItem)
+				if !ok || item.server == nil {
+					continue
+				}
+				prefix := "  "
+				mark := " "
+				if fm.routeContainsProfile(route, item.server.ID) {
+					mark = "✓"
+				}
+				target := item.server.Host
+				if item.server.User != "" {
+					target = item.server.User + "@" + item.server.Host
+				}
+				line := fmt.Sprintf("%s%s %-20s %s:%d", prefix, mark, item.server.Alias, target, item.server.Port)
+				if fm.routePane == 1 && index == fm.routeList.Index() {
+					line = selectedRowStyle.Render(fmt.Sprintf("> %s %-20s %s:%d", mark, item.server.Alias, target, item.server.Port))
+				}
+				lines = append(lines, fitLine(line, max(1, width-4)))
+			}
+		}
+		lines = append(lines, "", dashboardHelp("Need a host that is not a sshkeeper profile? Esc and type raw:<user@host:port> in the Route field."))
+		return renderPaddedPanel(width, height, lines)
+	}
+	pane := "profiles"
+	if fm.routePane == 0 {
+		pane = "current route"
+	}
+	return renderScreenShell(screenShell{
+		breadcrumb: title + " / Route Editor",
+		status:     "Editing " + pane,
+		width:      fm.width,
+		height:     fm.height,
+		body:       body,
+		footer: []helpItem{
+			{Key: "Tab", Action: "switch pane"},
+			{Key: "↑/↓", Action: "move"},
+			{Key: "Enter", Action: "add profile"},
+			{Key: "x/Del", Action: "remove hop"},
+			{Key: "[/]", Action: "reorder hop"},
+			{Key: "/", Action: "filter profiles"},
+			{Key: "Esc", Action: "done"},
 		},
 	})
 }
