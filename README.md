@@ -22,11 +22,11 @@ port forwarding management.
 - Password and key-passphrase auth through a PTY prompt handler, without putting
   secrets in command-line arguments.
 - Key, SSH-agent, password, and key+passphrase auth modes.
-- **Routes / ProxyJump** — manage bastion hosts and jump chains with human-readable display.
+- **Routes / ProxyJump** — ordered bastion chains with stable references to sshkeeper profiles; profile renames do not break routes.
 - **Port forwarding** — named local/remote/SOCKS forwards with type selector, validation, and OpenSSH preview.
 - **Tunnel management** — start/stop/list background tunnels, PID tracking, runtime state.
 - **Tunnel vs Forward** — clear separation: forward = saved rule, tunnel = running SSH process.
-- Groups, tags, command templates, search by metadata/routes/forward ports, and OpenSSH config generation.
+- First-class groups, multi-select tags, command templates, search by metadata/routes/forward ports, and OpenSSH config generation.
 - Import from `~/.ssh/config` and simple tab-separated export.
 
 ## Install
@@ -66,11 +66,11 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 - Primary public repository: [github.com/mirivlad/sshkeeper](https://github.com/mirivlad/sshkeeper)
 - Self-hosted mirror: `git@git.mirv.top:mirivlad/sshkeeper`
 
-### Install from release (after v0.2.0 publication)
+### Install from release
 
 ```bash
-tar -xzf sshkeeper_v0.2.0_linux_amd64.tar.gz
-sudo install -m 0755 sshkeeper_v0.2.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
+tar -xzf sshkeeper_v0.4.0_linux_amd64.tar.gz
+sudo install -m 0755 sshkeeper_v0.4.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 sshkeeper
 ```
 
@@ -140,7 +140,8 @@ it to DEL (in xterm, `backarrowKey: false`).
 | Ctrl+E | Edit server |
 | Ctrl+F | Search |
 | Ctrl+W | Manage port forwards for selected server |
-| Ctrl+X | Action menu (connect, tunnels, forwards, route, test, edit, delete, import/export, vault actions) |
+| Ctrl+X | Server actions (connect, tunnels, forwards, route, test, edit, delete) |
+| m | Manage groups, tags, command templates, running tunnels, import/export, and vault |
 | Ins | Select / deselect a server |
 | ? | Quick help (hotkeys) |
 | Ctrl+H | Full documentation |
@@ -157,11 +158,24 @@ In add/edit forms:
 |-----|--------|
 | Tab / Down | Next field |
 | Shift+Tab / Up | Previous field |
-| `/` on Auth Method or Group | Pick from list |
+| `/` on Auth, Identity File, Route, Group, Startup Command, or Tags | Open the relevant picker/editor |
 | Enter | Move to action / activate |
 | Esc | Back |
 
 ## Routes, Tunnels, and Port Forwards
+
+Routes are stored as ordered hops. If a hop matches an existing sshkeeper profile,
+sshkeeper stores a stable reference to that profile ID, not the mutable alias. The
+connection planner resolves the profile's real host/user/port/key and writes a
+temporary OpenSSH config for the session, so a sshkeeper bastion does **not** need
+a matching `Host` entry in `~/.ssh/config`.
+
+Use `profile:<alias>` to require a profile reference and `raw:<target>` to require
+a literal OpenSSH jump target. An unprefixed exact known alias is treated as a
+profile; any other value remains a raw target.
+
+In the TUI, `/` on Route opens the ordered route editor: `Enter` adds a profile,
+`x`/Delete removes a hop, and `[`/`]` moves it.
 
 ### Jump host (single bastion)
 
@@ -248,11 +262,11 @@ key-passphrase authentication so the PTY prompt handler can provide the secret.
 | Action | Command | TUI | Description |
 |--------|---------|-----|-------------|
 | Connect | `sshkeeper connect <alias>` | `Enter` | Standard SSH session, no port forwards |
-| Connect with tunnels | `sshkeeper tunnel <alias>` | Action menu → Connect with tunnels | SSH session with all enabled forwards active |
-| Start tunnels only | `sshkeeper tunnel <alias> --forward-only` | Action menu → Start tunnels only | Foreground tunnel, no shell |
-| Start tunnels in background | `sshkeeper tunnel <alias> --background` | Action menu → Start tunnels in background | Detached tunnel process with PID tracking |
-| Manage port forwards | `sshkeeper forward` | Action menu → Manage port forwards | Add/edit/delete forward rules |
-| Manage tunnels | `sshkeeper tunnel list/stop/stop-all` | Action menu → Manage tunnels | View running tunnels and stop them |
+| Connect with tunnels | `sshkeeper tunnel <alias>` | Server Actions → Connect with tunnels | SSH session with all enabled forwards active |
+| Start tunnels only | `sshkeeper tunnel <alias> --forward-only` | Server Actions → Start tunnels only | Foreground tunnel, no shell |
+| Start tunnels in background | `sshkeeper tunnel <alias> --background` | Server Actions → Start tunnels in background | Detached tunnel process with PID tracking |
+| Port forwards | `sshkeeper forward` | Server Actions → Port forwards (or `Ctrl+W`) | Add/edit/enable/delete forward rules |
+| Running tunnels | `sshkeeper tunnel list/stop/stop-all` | `m` → Running tunnels | View tracked/running tunnels and stop them |
 
 ## Vault
 
