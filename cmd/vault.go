@@ -250,7 +250,16 @@ func formatVaultSecretsList(v *vault.Vault) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%-24s %-18s\n", "ALIAS", "TYPE")
 	for _, meta := range metas {
-		fmt.Fprintf(&b, "%-24s %-18s\n", meta.Alias, meta.Type)
+		alias := meta.Alias
+		if alias == "" && meta.ServerID > 0 {
+			alias = fmt.Sprintf("#%d", meta.ServerID)
+			if appDB != nil {
+				if server, err := appDB.GetServerByID(meta.ServerID); err == nil && server != nil {
+					alias = server.Alias
+				}
+			}
+		}
+		fmt.Fprintf(&b, "%-24s %-18s\n", alias, meta.Type)
 	}
 	return b.String(), nil
 }

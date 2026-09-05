@@ -18,16 +18,16 @@ func TestVaultStatusTracksSuccessfulLock(t *testing.T) {
 	if !strings.Contains(m.View(), "Vault unlocked") {
 		t.Fatalf("initial status is not unlocked:\n%s", m.View())
 	}
-	m.actionMenu = newActionMenuModel(80, 24)
-	m.screen = screenActionMenu
-	for i := range m.actionMenu.list.Items() {
-		m.actionMenu.list.Select(i)
-		item, ok := m.actionMenu.list.SelectedItem().(actionMenuItem)
+	m.manageMenu = newManageMenuModel(80, 24)
+	m.screen = screenManageMenu
+	for i := range m.manageMenu.list.Items() {
+		m.manageMenu.list.Select(i)
+		item, ok := m.manageMenu.list.SelectedItem().(actionMenuItem)
 		if ok && item.action == "vault_lock" {
 			break
 		}
 	}
-	updated, _ := m.updateActionMenu(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.updateManageMenu(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(*tuiModel)
 	view := m.View()
 	if !strings.Contains(view, "Vault locked") || strings.Contains(view, "Vault unlocked") {

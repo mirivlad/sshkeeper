@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -67,9 +68,10 @@ type derivedKey struct {
 }
 
 type SecretMeta struct {
-	ID    string
-	Alias string
-	Type  string
+	ID       string
+	Alias    string
+	ServerID int64
+	Type     string
 }
 
 func New(path string) *Vault {
@@ -271,24 +273,32 @@ func (v *Vault) ListSecrets() ([]SecretMeta, error) {
 
 	metas := make([]SecretMeta, 0, len(v.records))
 	for id, record := range v.records {
-		alias, secretType, ok := parseServerSecretID(id)
-		if !ok {
-			continue
+		alias, secretType, legacy := parseServerSecretID(id)
+		serverID := int64(0)
+		if !legacy {
+			var ok bool
+			serverID, secretType, ok = parseStableServerSecretID(id)
+			if !ok {
+				continue
+			}
 		}
 		if record.secretType != "" {
 			secretType = record.secretType
 		}
-		metas = append(metas, SecretMeta{
-			ID:    id,
-			Alias: alias,
-			Type:  secretType,
-		})
+		metas = append(metas, SecretMeta{ID: id, Alias: alias, ServerID: serverID, Type: secretType})
 	}
 	sort.Slice(metas, func(i, j int) bool {
-		if metas[i].Alias == metas[j].Alias {
+		left, right := metas[i].Alias, metas[j].Alias
+		if left == "" {
+			left = fmt.Sprintf("#%d", metas[i].ServerID)
+		}
+		if right == "" {
+			right = fmt.Sprintf("#%d", metas[j].ServerID)
+		}
+		if left == right {
 			return metas[i].Type < metas[j].Type
 		}
-		return metas[i].Alias < metas[j].Alias
+		return left < right
 	})
 	return metas, nil
 }
@@ -495,10 +505,14 @@ func inferSecretType(id string, recordType string) string {
 		return recordType
 	}
 	_, secretType, ok := parseServerSecretID(id)
-	if !ok {
-		return ""
+	if ok {
+		return secretType
 	}
-	return secretType
+	_, secretType, ok = parseStableServerSecretID(id)
+	if ok {
+		return secretType
+	}
+	return ""
 }
 
 func parseServerSecretID(id string) (string, string, bool) {
@@ -507,6 +521,18 @@ func parseServerSecretID(id string) (string, string, bool) {
 		return "", "", false
 	}
 	return parts[1], parts[2], true
+}
+
+func parseStableServerSecretID(id string) (int64, string, bool) {
+	parts := strings.Split(id, ":")
+	if len(parts) != 3 || parts[0] != "server-id" || parts[1] == "" || parts[2] == "" {
+		return 0, "", false
+	}
+	serverID, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || serverID <= 0 {
+		return 0, "", false
+	}
+	return serverID, parts[2], true
 }
 
 func decryptRecord(key []byte, rec Record) ([]byte, error) {

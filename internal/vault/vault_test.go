@@ -266,3 +266,24 @@ func TestHasSecretReportsPresenceWithoutReturningValue(t *testing.T) {
 		t.Fatal("expected missing passphrase to be reported absent")
 	}
 }
+
+func TestListSecretsIncludesStableServerIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault.bin")
+	if err := Create(path, "master"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	v := New(path)
+	if err := v.Unlock("master"); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if err := v.Put("server-id:42:ssh_password", "ssh_password", []byte("secret")); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	metas, err := v.ListSecrets()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(metas) != 1 || metas[0].ServerID != 42 || metas[0].Type != "ssh_password" || metas[0].Alias != "" {
+		t.Fatalf("unexpected stable metadata: %#v", metas)
+	}
+}

@@ -93,8 +93,15 @@ func runTUI() error {
 		return nil
 	}
 
+	tui.ListIdentityFiles = listIdentityFiles
 	tui.GetGroups = func() ([]string, error) {
 		return appDB.GetGroups()
+	}
+	tui.ListGroups = func() ([]*model.Group, error) {
+		return appDB.ListGroups()
+	}
+	tui.CreateGroup = func(name string) error {
+		return appDB.CreateGroup(name)
 	}
 	tui.ResolveRouteAlias = func(alias string) (int64, bool) {
 		return appDB.ResolveAlias(alias)

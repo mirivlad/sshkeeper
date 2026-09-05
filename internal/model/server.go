@@ -48,22 +48,6 @@ type Server struct {
 	LastTestError   string     `json:"last_test_error"`
 }
 
-type SecretType string
-
-const (
-	SecretSSHPassword   SecretType = "ssh_password"
-	SecretKeyPassphrase SecretType = "key_passphrase"
-	SecretSudoPassword  SecretType = "sudo_password"
-	SecretCustom        SecretType = "custom_secret"
-)
-
-type Secret struct {
-	ID    string     `json:"id"`
-	Type  SecretType `json:"type"`
-	Nonce []byte     `json:"nonce"`
-	Data  []byte     `json:"data"`
-}
-
 type ForwardType string
 
 const (

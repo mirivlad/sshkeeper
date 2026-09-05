@@ -74,6 +74,13 @@ type tagsLoadedMsg struct {
 	err         error
 }
 
+type groupsLoadedMsg struct {
+	groups      []*model.Group
+	deleted     bool
+	deletedName string
+	err         error
+}
+
 type backgroundRunDoneMsg struct {
 	results []templateRunResult
 }
@@ -146,6 +153,16 @@ func (i serverItem) FilterValue() string {
 	return strings.Join(parts, " ")
 }
 
+type groupManagerItem struct {
+	group *model.Group
+}
+
+func (i groupManagerItem) Title() string { return i.group.Name }
+func (i groupManagerItem) Description() string {
+	return fmt.Sprintf("%d servers", i.group.ServerCount)
+}
+func (i groupManagerItem) FilterValue() string { return i.group.Name }
+
 type templateItem struct {
 	template *model.CommandTemplate
 }
@@ -179,7 +196,10 @@ var (
 	SaveServer                 func(server *model.Server, password string, oldAlias string) error
 	UpdateTestResult           func(alias string, status model.TestStatus, testErr string) error
 	HasSecret                  func(alias string, secretType string) bool
+	ListIdentityFiles          func() ([]string, error)
 	GetGroups                  func() ([]string, error)
+	ListGroups                 func() ([]*model.Group, error)
+	CreateGroup                func(name string) error
 	ResolveRouteAlias          func(alias string) (int64, bool)
 	RenameGroup                func(oldName, newName string) error
 	DeleteGroup                func(name string) error
@@ -210,6 +230,8 @@ const (
 	screenSearch
 	screenTags
 	screenTagInput
+	screenGroups
+	screenGroupInput
 	screenTemplates
 	screenTemplateForm
 	screenTemplatePicker
@@ -217,6 +239,7 @@ const (
 	screenBackgroundResults
 	screenHelp
 	screenActionMenu
+	screenManageMenu
 	screenForwardList
 	screenForwardForm
 	screenTunnelManager
@@ -271,6 +294,11 @@ type tuiModel struct {
 	tagInput        textinput.Model
 	tagMode         string
 	tagOldName      string
+	groups          []*model.Group
+	groupList       list.Model
+	groupInput      textinput.Model
+	groupMode       string
+	groupOldName    string
 	selected        map[string]bool
 	tunnelScreen    *tunnelScreenModel
 	bgResults       []templateRunResult
@@ -281,6 +309,7 @@ type tuiModel struct {
 	result          *TUIResult
 	helpScreen      *helpScreenModel
 	actionMenu      *actionMenuModel
+	manageMenu      *actionMenuModel
 	forwardScreen   *forwardScreenModel
 	forwardForm     *forwardFormModel
 	confirm         *confirmState
@@ -308,11 +337,19 @@ func New(servers []*model.Server) *tuiModel {
 	tagInput := textinput.New()
 	tagInput.Placeholder = "tag"
 	tagInput.CharLimit = 64
+
+	groupInput := textinput.New()
+	groupInput.Placeholder = "group"
+	groupInput.CharLimit = 64
 	templateList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	templateList.SetShowStatusBar(false)
 	templateList.SetFilteringEnabled(false)
 	templateList.SetShowHelp(false)
 	tagList := newStringList(nil, "Tags", 0, 0)
+	groupList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	groupList.SetShowStatusBar(false)
+	groupList.SetFilteringEnabled(false)
+	groupList.SetShowHelp(false)
 
 	vaultIsUnlocked := true
 	if VaultUnlocked != nil {
@@ -326,8 +363,10 @@ func New(servers []*model.Server) *tuiModel {
 		searchInput:   search,
 		selected:      map[string]bool{},
 		tagInput:      tagInput,
+		groupInput:    groupInput,
 		templateList:  templateList,
 		tagList:       tagList,
+		groupList:     groupList,
 		vaultUnlocked: vaultIsUnlocked,
 	}
 }
@@ -385,6 +424,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.templateList.SetSize(msg.Width, managerListHeight(msg.Height))
 		m.tagList.SetSize(msg.Width, managerListHeight(msg.Height))
+		m.groupList.SetSize(msg.Width, managerListHeight(msg.Height))
 		return m, nil
 
 	case serversLoadedMsg:
@@ -432,6 +472,23 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setTags(msg.tags)
+		return m, nil
+
+	case groupsLoadedMsg:
+		if m.confirm != nil && m.confirm.pending && m.confirm.parent == screenGroups {
+			m.finishConfirm()
+		}
+		if msg.err != nil {
+			if msg.deleted {
+				m.removeGroup(msg.deletedName)
+				m.err = nil
+				m.success = fmt.Sprintf("Deleted %q; refresh failed: %v", msg.deletedName, msg.err)
+			} else {
+				m.err = msg.err
+			}
+			return m, nil
+		}
+		m.setGroups(msg.groups)
 		return m, nil
 
 	case connectRequestMsg:
@@ -707,6 +764,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateTags(msg)
 		case screenTagInput:
 			return m.updateTagInput(msg)
+		case screenGroups:
+			return m.updateGroups(msg)
+		case screenGroupInput:
+			return m.updateGroupInput(msg)
 		case screenTemplates:
 			return m.updateTemplates(msg)
 		case screenTemplateForm:
@@ -721,6 +782,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHelp(msg)
 		case screenActionMenu:
 			return m.updateActionMenu(msg)
+		case screenManageMenu:
+			return m.updateManageMenu(msg)
 		case screenForwardList:
 			return m.updateForwardList(msg)
 		case screenForwardForm:
@@ -813,6 +876,11 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openTemplatePicker()
 
 	case tea.KeyRunes:
+		if msg.String() == "m" || msg.String() == "M" {
+			m.manageMenu = newManageMenuModel(m.width, m.height)
+			m.screen = screenManageMenu
+			return m, nil
+		}
 		if msg.String() == "?" {
 			m.helpParent = m.screen
 			m.helpScreen = newHelpScreenModel(m.width, m.height)
@@ -1011,6 +1079,101 @@ func (m *tuiModel) updateTagInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.tagInput, cmd = m.tagInput.Update(msg)
+	return m, cmd
+}
+
+func (m *tuiModel) updateGroups(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenList
+		return m, m.reloadServersCmd()
+	case tea.KeyCtrlA:
+		m.groupMode = "add"
+		m.groupOldName = ""
+		m.groupInput.SetValue("")
+		m.groupInput.Focus()
+		m.screen = screenGroupInput
+		return m, nil
+	case tea.KeyCtrlE:
+		if item, ok := m.groupList.SelectedItem().(groupManagerItem); ok && item.group != nil {
+			m.groupMode = "rename"
+			m.groupOldName = item.group.Name
+			m.groupInput.SetValue(item.group.Name)
+			m.groupInput.Focus()
+			m.screen = screenGroupInput
+		}
+		return m, nil
+	case tea.KeyCtrlD:
+		if item, ok := m.groupList.SelectedItem().(groupManagerItem); ok && item.group != nil {
+			name := item.group.Name
+			count := item.group.ServerCount
+			m.beginConfirm(confirmState{
+				title:       "Delete group?",
+				target:      fmt.Sprintf("%q", name),
+				consequence: fmt.Sprintf("The group is removed; %d server profile(s) become ungrouped.", count),
+				verb:        "Delete",
+				parent:      screenGroups,
+				action: func() tea.Cmd {
+					return func() tea.Msg {
+						if DeleteGroup == nil {
+							return groupsLoadedMsg{err: fmt.Errorf("group deletion is unavailable")}
+						}
+						if err := DeleteGroup(name); err != nil {
+							return groupsLoadedMsg{err: err}
+						}
+						if ListGroups == nil {
+							return groupsLoadedMsg{deleted: true, deletedName: name, err: fmt.Errorf("group reload is unavailable")}
+						}
+						groups, err := ListGroups()
+						return groupsLoadedMsg{groups: groups, deleted: true, deletedName: name, err: err}
+					}
+				},
+			})
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.groupList, cmd = m.groupList.Update(msg)
+	return m, cmd
+}
+
+func (m *tuiModel) updateGroupInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenGroups
+		m.groupInput.Blur()
+		return m, nil
+	case tea.KeyEnter:
+		value := strings.TrimSpace(m.groupInput.Value())
+		if value == "" {
+			m.screen = screenGroups
+			return m, nil
+		}
+		mode := m.groupMode
+		oldName := m.groupOldName
+		return m, func() tea.Msg {
+			switch mode {
+			case "rename":
+				if RenameGroup == nil {
+					return groupsLoadedMsg{err: fmt.Errorf("group rename is unavailable")}
+				}
+				if err := RenameGroup(oldName, value); err != nil {
+					return groupsLoadedMsg{err: err}
+				}
+			default:
+				if CreateGroup == nil {
+					return groupsLoadedMsg{err: fmt.Errorf("group creation is unavailable")}
+				}
+				if err := CreateGroup(value); err != nil {
+					return groupsLoadedMsg{err: err}
+				}
+			}
+			groups, err := ListGroups()
+			return groupsLoadedMsg{groups: groups, err: err}
+		}
+	}
+	var cmd tea.Cmd
+	m.groupInput, cmd = m.groupInput.Update(msg)
 	return m, cmd
 }
 
@@ -1226,6 +1389,10 @@ func (m *tuiModel) View() string {
 
 	case screenTagInput:
 		b.WriteString(m.viewTagInput())
+	case screenGroups:
+		b.WriteString(m.viewGroups())
+	case screenGroupInput:
+		b.WriteString(m.viewGroupInput())
 
 	case screenTemplates:
 		b.WriteString(m.viewTemplates())
@@ -1255,6 +1422,10 @@ func (m *tuiModel) View() string {
 	case screenActionMenu:
 		if m.actionMenu != nil {
 			b.WriteString(m.actionMenu.View())
+		}
+	case screenManageMenu:
+		if m.manageMenu != nil {
+			b.WriteString(m.manageMenu.View())
 		}
 
 	case screenForwardList:
@@ -1350,11 +1521,6 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.actionMenu = nil
 				return m, m.forwardScreen.loadForwards()
 			}
-		case "tunnels":
-			m.tunnelScreen = newTunnelScreenModel(m.width, m.height)
-			m.screen = screenTunnelManager
-			m.actionMenu = nil
-			return m, m.tunnelScreen.loadTunnels()
 		case "route":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
 				m.form = newEditFormModel(item.server, m.width, m.height)
@@ -1387,43 +1553,69 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.confirmServerDelete(item.server)
 				return m, nil
 			}
-		case "import":
-			m.screen = screenList
-			m.actionMenu = nil
-			return m, func() tea.Msg {
-				if ImportServers == nil {
-					return importDoneMsg{err: fmt.Errorf("import is unavailable")}
-				}
-				count, err := ImportServers()
-				if err != nil {
-					return importDoneMsg{err: err}
-				}
-				servers, err := ListServers()
-				return importDoneMsg{servers: servers, count: count, err: err}
-			}
-		case "export":
-			m.actionMenu = nil
-			m.result = &TUIResult{Action: "export"}
-			return m, tea.Quit
-		case "vault_lock":
-			m.screen = screenList
-			m.actionMenu = nil
-			if LockVault == nil {
-				m.err = fmt.Errorf("vault lock is unavailable")
-			} else if err := LockVault(); err != nil {
-				m.err = err
-			} else {
-				m.vaultUnlocked = false
-				m.success = "Vault locked."
-			}
-		case "vault_change_pw":
-			m.actionMenu = nil
-			m.result = &TUIResult{Action: "vault_change_pw"}
-			return m, tea.Quit
 		}
 		return m, nil
 	}
 
+	return m, nil
+}
+
+func (m *tuiModel) updateManageMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	updated, action := m.manageMenu.Update(msg)
+	m.manageMenu = updated
+	if msg.Type == tea.KeyEsc {
+		m.screen = screenList
+		m.manageMenu = nil
+		return m, nil
+	}
+	if action == nil {
+		return m, nil
+	}
+	m.manageMenu = nil
+	switch *action {
+	case "groups":
+		m.screen = screenGroups
+		return m, m.loadGroupsCmd()
+	case "tags":
+		m.screen = screenTags
+		return m, m.loadTagsCmd()
+	case "templates":
+		m.screen = screenTemplates
+		return m, m.loadTemplatesCmd()
+	case "tunnels":
+		m.tunnelScreen = newTunnelScreenModel(m.width, m.height)
+		m.screen = screenTunnelManager
+		return m, m.tunnelScreen.loadTunnels()
+	case "import":
+		m.screen = screenList
+		return m, func() tea.Msg {
+			if ImportServers == nil {
+				return importDoneMsg{err: fmt.Errorf("import is unavailable")}
+			}
+			count, err := ImportServers()
+			if err != nil {
+				return importDoneMsg{err: err}
+			}
+			servers, err := ListServers()
+			return importDoneMsg{servers: servers, count: count, err: err}
+		}
+	case "export":
+		m.result = &TUIResult{Action: "export"}
+		return m, tea.Quit
+	case "vault_lock":
+		m.screen = screenList
+		if LockVault == nil {
+			m.err = fmt.Errorf("vault lock is unavailable")
+		} else if err := LockVault(); err != nil {
+			m.err = err
+		} else {
+			m.vaultUnlocked = false
+			m.success = "Vault locked."
+		}
+	case "vault_change_pw":
+		m.result = &TUIResult{Action: "vault_change_pw"}
+		return m, tea.Quit
+	}
 	return m, nil
 }
 
@@ -1758,7 +1950,7 @@ func (m *tuiModel) updateFullHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) screenOwnsPrintableInput() bool {
 	switch m.screen {
-	case screenForm, screenSearch, screenTagInput, screenTemplateForm, screenForwardForm:
+	case screenForm, screenSearch, screenTagInput, screenGroupInput, screenTemplateForm, screenForwardForm:
 		return true
 	default:
 		return false
@@ -1991,6 +2183,54 @@ func (m *tuiModel) viewTagInput() string {
 	})
 }
 
+func (m *tuiModel) viewGroups() string {
+	return renderScreenShell(screenShell{
+		breadcrumb:   "Groups",
+		status:       shellStatus(m.vaultUnlocked, fmt.Sprintf("%d groups", len(m.groups))),
+		notification: m.rootNotification(),
+		width:        m.width,
+		height:       m.height,
+		body: func(width, height int) string {
+			if len(m.groups) == 0 {
+				return renderPaddedPanel(width, height, []string{dashboardHelp("No groups yet. Ctrl+A creates one.")})
+			}
+			capacity := max(1, height-2)
+			start, end := visibleServerRange(len(m.groupList.Items()), m.groupList.Index(), capacity)
+			lines := make([]string, 0, capacity)
+			for index := start; index < end; index++ {
+				item, ok := m.groupList.Items()[index].(groupManagerItem)
+				if !ok || item.group == nil {
+					continue
+				}
+				marker := "  "
+				if index == m.groupList.Index() {
+					marker = "> "
+				}
+				lines = append(lines, fmt.Sprintf("%s%-28s %d server(s)", marker, item.group.Name, item.group.ServerCount))
+			}
+			return renderPaddedPanel(width, height, lines)
+		},
+		footer: []helpItem{{Key: "Ctrl+A", Action: "add"}, {Key: "Ctrl+E", Action: "rename"}, {Key: "Ctrl+D", Action: "delete"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+	})
+}
+
+func (m *tuiModel) viewGroupInput() string {
+	title := "Add Group"
+	if m.groupMode == "rename" {
+		title = "Rename Group"
+	}
+	return renderScreenShell(screenShell{
+		breadcrumb: title,
+		status:     shellStatus(m.vaultUnlocked, "Group editor"),
+		width:      m.width,
+		height:     m.height,
+		body: func(width, height int) string {
+			return renderPaddedPanel(width, height, []string{dashboardSection(title), "", m.groupInput.View()})
+		},
+		footer: []helpItem{{Key: "Enter", Action: "save"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "cancel"}},
+	})
+}
+
 func (m *tuiModel) viewTemplates() string {
 	return renderScreenShell(screenShell{
 		breadcrumb:   "Command Templates",
@@ -2144,6 +2384,41 @@ func (m *tuiModel) reloadServersCmd() tea.Cmd {
 	}
 }
 
+func (m *tuiModel) loadGroupsCmd() tea.Cmd {
+	return func() tea.Msg {
+		if ListGroups == nil {
+			return groupsLoadedMsg{err: fmt.Errorf("group storage is unavailable")}
+		}
+		groups, err := ListGroups()
+		return groupsLoadedMsg{groups: groups, err: err}
+	}
+}
+
+func (m *tuiModel) setGroups(groups []*model.Group) {
+	m.groups = groups
+	items := make([]list.Item, len(groups))
+	for i, group := range groups {
+		items[i] = groupManagerItem{group: group}
+	}
+	l := list.New(items, list.NewDefaultDelegate(), m.width, managerListHeight(m.height))
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowHelp(false)
+	l.Title = "Groups"
+	l.Styles.Title = titleStyle
+	m.groupList = l
+}
+
+func (m *tuiModel) removeGroup(name string) {
+	groups := make([]*model.Group, 0, len(m.groups))
+	for _, group := range m.groups {
+		if group != nil && group.Name != name {
+			groups = append(groups, group)
+		}
+	}
+	m.setGroups(groups)
+}
+
 func (m *tuiModel) loadTemplatesCmd() tea.Cmd {
 	return func() tea.Msg {
 		if ListCommandTemplates == nil {
@@ -2230,7 +2505,8 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 	}
 	items = append(items,
 		helpItem{Key: "Enter", Action: "connect"},
-		helpItem{Key: "Ctrl+X", Action: "actions"},
+		helpItem{Key: "Ctrl+X", Action: "server actions"},
+		helpItem{Key: "m", Action: "manage"},
 		helpItem{Key: "Ctrl+A", Action: "add"},
 		helpItem{Key: "Ctrl+E", Action: "edit"},
 		helpItem{Key: "Ctrl+F", Action: "search"},
