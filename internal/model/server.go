@@ -24,16 +24,18 @@ const (
 )
 
 type Server struct {
-	ID              int64      `json:"id"`
-	Alias           string     `json:"alias"`
-	DisplayName     string     `json:"display_name"`
-	Host            string     `json:"host"`
-	Port            int        `json:"port"`
-	User            string     `json:"user"`
-	AuthMethod      AuthMethod `json:"auth_method"`
-	IdentityFile    string     `json:"identity_file"`
+	ID           int64      `json:"id"`
+	Alias        string     `json:"alias"`
+	DisplayName  string     `json:"display_name"`
+	Host         string     `json:"host"`
+	Port         int        `json:"port"`
+	User         string     `json:"user"`
+	AuthMethod   AuthMethod `json:"auth_method"`
+	IdentityFile string     `json:"identity_file"`
+	// ProxyJump is a deprecated compatibility projection of Route.
 	ProxyJump       string     `json:"proxy_jump"`
 	Route           Route      `json:"route"`
+	GroupID         int64      `json:"group_id"`
 	GroupName       string     `json:"group_name"`
 	Notes           string     `json:"notes"`
 	StartupCommand  string     `json:"startup_command"`
@@ -141,18 +143,39 @@ func (f *Forward) ForwardTarget() string {
 }
 
 type Tag struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	ServerCount int    `json:"server_count,omitempty"`
+}
+
+type Group struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	ServerCount int    `json:"server_count,omitempty"`
 }
 
 // --- Route ---
 
-// RouteHop represents a single jump host in a route.
-// IsProfile: true = use Alias (references a sshkeeper profile), false = use Raw (literal address).
+// RouteHop is either a stable reference to another sshkeeper profile or a raw
+// OpenSSH jump target. Alias is a display/backward-compatibility cache only;
+// ServerID is the identity for profile hops.
 type RouteHop struct {
-	Alias     string `json:"alias"`
-	Raw       string `json:"raw"`
+	ServerID  int64  `json:"server_id,omitempty"`
+	Alias     string `json:"alias,omitempty"`
+	Raw       string `json:"raw,omitempty"`
 	IsProfile bool   `json:"is_profile"`
+}
+
+func (h RouteHop) Profile() bool { return h.IsProfile || h.ServerID != 0 }
+
+func (h RouteHop) DisplayName() string {
+	if h.Profile() {
+		if h.Alias != "" {
+			return h.Alias
+		}
+		return fmt.Sprintf("profile#%d", h.ServerID)
+	}
+	return h.Raw
 }
 
 // Route represents the SSH jump route for a server.
@@ -177,11 +200,7 @@ func (r Route) RouteMode() string {
 func (r Route) ProxyJumpString() string {
 	parts := make([]string, len(r.Hops))
 	for i, h := range r.Hops {
-		if h.IsProfile {
-			parts[i] = h.Alias
-		} else {
-			parts[i] = h.Raw
-		}
+		parts[i] = h.DisplayName()
 	}
 	return strings.Join(parts, ",")
 }
@@ -194,11 +213,7 @@ func (r Route) DisplaySummary(target string) string {
 	}
 	names := make([]string, len(r.Hops))
 	for i, h := range r.Hops {
-		if h.IsProfile {
-			names[i] = h.Alias
-		} else {
-			names[i] = h.Raw
-		}
+		names[i] = h.DisplayName()
 	}
 	return strings.Join(names, " → ") + " → " + target
 }
@@ -206,7 +221,7 @@ func (r Route) DisplaySummary(target string) string {
 // HasProfileLinks returns true if any hop references a known profile.
 func (r Route) HasProfileLinks() bool {
 	for _, h := range r.Hops {
-		if h.IsProfile {
+		if h.Profile() {
 			return true
 		}
 	}
@@ -215,7 +230,6 @@ func (r Route) HasProfileLinks() bool {
 
 type CommandTemplate struct {
 	ID          int64  `json:"id"`
-	ServerID    int64  `json:"server_id"`
 	Name        string `json:"name"`
 	Command     string `json:"command"`
 	Description string `json:"description"`

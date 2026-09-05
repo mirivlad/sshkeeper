@@ -36,90 +36,95 @@ func validateSSHBinaryForOS(goos string, binary string, lookPath func(string) (s
 	return nil
 }
 
-func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error {
+func runPrepared(cfg *config.Config, args []string, server *model.Server, getVault VaultFunc) error {
+	switch server.AuthMethod {
+	case model.AuthPassword:
+		password, err := getVault(server.Alias, "ssh_password")
+		if err != nil {
+			return fmt.Errorf("get password from vault: %w", err)
+		}
+		return ConnectWithPassword(cfg.SSH.Binary, args, password)
+	case model.AuthKeyPassphrase:
+		passphrase, err := getVault(server.Alias, "key_passphrase")
+		if err != nil {
+			return fmt.Errorf("get key passphrase from vault: %w", err)
+		}
+		return ConnectWithPassword(cfg.SSH.Binary, args, passphrase)
+	default:
+		cmd := exec.Command(cfg.SSH.Binary, args...)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start ssh: %w", err)
+		}
+		return cmd.Wait()
+	}
+}
+
+func insertBeforeTarget(args []string, values ...string) []string {
+	if len(args) == 0 {
+		return append([]string(nil), values...)
+	}
+	result := make([]string, 0, len(args)+len(values))
+	result = append(result, args[:len(args)-1]...)
+	result = append(result, values...)
+	result = append(result, args[len(args)-1])
+	return result
+}
+
+func ConnectResolved(cfg *config.Config, server *model.Server, resolve ProfileResolver, getVault VaultFunc) error {
 	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
 		return err
 	}
-
-	args := BuildSSHArgsSimple(server)
+	invocation, err := PrepareSSHInvocation(server, nil, false, resolve)
+	if err != nil {
+		return err
+	}
+	defer invocation.Cleanup()
+	args := append([]string(nil), invocation.Args...)
 	if strings.TrimSpace(server.StartupCommand) != "" {
 		args = append(args, server.StartupCommand)
 	}
-
-	switch server.AuthMethod {
-	case model.AuthPassword:
-		password, err := getVault(server.Alias, "ssh_password")
-		if err != nil {
-			return fmt.Errorf("get password from vault: %w", err)
-		}
-		return ConnectWithPassword(cfg.SSH.Binary, args, password)
-
-	case model.AuthKeyPassphrase:
-		passphrase, err := getVault(server.Alias, "key_passphrase")
-		if err != nil {
-			return fmt.Errorf("get key passphrase from vault: %w", err)
-		}
-		return ConnectWithPassword(cfg.SSH.Binary, args, passphrase)
-
-	default:
-		// key and agent auth use direct OpenSSH execution.
-		cmd := exec.Command(cfg.SSH.Binary, args...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("start ssh: %w", err)
-		}
-
-		return cmd.Wait()
-	}
+	return runPrepared(cfg, args, server, getVault)
 }
 
-func RunCommand(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) error {
+func Connect(cfg *config.Config, server *model.Server, getVault VaultFunc) error {
+	return ConnectResolved(cfg, server, nil, getVault)
+}
+
+func RunCommandResolved(cfg *config.Config, server *model.Server, resolve ProfileResolver, getVault VaultFunc, command string) error {
 	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
 		return err
 	}
-
-	args := BuildSSHArgsSimple(server)
-	args = append(args, command)
-
-	switch server.AuthMethod {
-	case model.AuthPassword:
-		password, err := getVault(server.Alias, "ssh_password")
-		if err != nil {
-			return fmt.Errorf("get password from vault: %w", err)
-		}
-		return ConnectWithPassword(cfg.SSH.Binary, args, password)
-	case model.AuthKeyPassphrase:
-		passphrase, err := getVault(server.Alias, "key_passphrase")
-		if err != nil {
-			return fmt.Errorf("get key passphrase from vault: %w", err)
-		}
-		return ConnectWithPassword(cfg.SSH.Binary, args, passphrase)
-	default:
-		cmd := exec.Command(cfg.SSH.Binary, args...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("start ssh: %w", err)
-		}
-		return cmd.Wait()
+	invocation, err := PrepareSSHInvocation(server, nil, false, resolve)
+	if err != nil {
+		return err
 	}
+	defer invocation.Cleanup()
+	args := append(append([]string(nil), invocation.Args...), command)
+	return runPrepared(cfg, args, server, getVault)
 }
 
-func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) (string, error) {
+func RunCommand(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) error {
+	return RunCommandResolved(cfg, server, nil, getVault, command)
+}
+
+func RunCommandOutputResolved(cfg *config.Config, server *model.Server, resolve ProfileResolver, getVault VaultFunc, command string) (string, error) {
 	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
 		return "", err
 	}
-
-	args := BuildSSHArgsSimple(server)
-	args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
+	invocation, err := PrepareSSHInvocation(server, nil, false, resolve)
+	if err != nil {
+		return "", err
+	}
+	defer invocation.Cleanup()
+	args := insertBeforeTarget(invocation.Args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
 
 	switch server.AuthMethod {
 	case model.AuthPassword:
-		args = append(args, "-o", "NumberOfPasswordPrompts=1", command)
+		args = insertBeforeTarget(args, "-o", "NumberOfPasswordPrompts=1")
+		args = append(args, command)
 		password, err := getVault(server.Alias, "ssh_password")
 		if err != nil {
 			return "", fmt.Errorf("get password from vault: %w", err)
@@ -130,7 +135,8 @@ func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFu
 		}
 		return output, nil
 	case model.AuthKeyPassphrase:
-		args = append(args, "-o", "NumberOfPasswordPrompts=1", command)
+		args = insertBeforeTarget(args, "-o", "NumberOfPasswordPrompts=1")
+		args = append(args, command)
 		passphrase, err := getVault(server.Alias, "key_passphrase")
 		if err != nil {
 			return "", fmt.Errorf("get key passphrase from vault: %w", err)
@@ -141,7 +147,8 @@ func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFu
 		}
 		return output, nil
 	default:
-		args = append(args, "-o", "BatchMode=yes", command)
+		args = insertBeforeTarget(args, "-o", "BatchMode=yes")
+		args = append(args, command)
 		cmd := exec.Command(cfg.SSH.Binary, args...)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -151,104 +158,88 @@ func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFu
 	}
 }
 
-func Test(cfg *config.Config, server *model.Server, getVault VaultFunc) (bool, string) {
+func RunCommandOutput(cfg *config.Config, server *model.Server, getVault VaultFunc, command string) (string, error) {
+	return RunCommandOutputResolved(cfg, server, nil, getVault, command)
+}
+
+func TestResolved(cfg *config.Config, server *model.Server, resolve ProfileResolver, getVault VaultFunc) (bool, string) {
 	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
 		return false, err.Error()
 	}
-
-	args := BuildSSHArgsSimple(server)
-	args = append(args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
+	invocation, err := PrepareSSHInvocation(server, nil, false, resolve)
+	if err != nil {
+		return false, err.Error()
+	}
+	defer invocation.Cleanup()
+	args := insertBeforeTarget(invocation.Args, "-o", fmt.Sprintf("ConnectTimeout=%d", cfg.SSH.ConnectTimeoutSec))
 
 	switch server.AuthMethod {
 	case model.AuthPassword:
-		args = append(args, "-o", "NumberOfPasswordPrompts=1")
+		args = insertBeforeTarget(args, "-o", "NumberOfPasswordPrompts=1")
 		password, err := getVault(server.Alias, "ssh_password")
 		if err != nil {
 			return false, fmt.Sprintf("vault error: %v", err)
 		}
-		return testWithPassword(cfg, args, password)
-
+		return testWithPassword(cfg, append(args, cfg.SSH.TestCommand), password)
 	case model.AuthKeyPassphrase:
-		args = append(args, "-o", "NumberOfPasswordPrompts=1")
+		args = insertBeforeTarget(args, "-o", "NumberOfPasswordPrompts=1")
 		passphrase, err := getVault(server.Alias, "key_passphrase")
 		if err != nil {
 			return false, fmt.Sprintf("vault error: %v", err)
 		}
-		return testWithPassword(cfg, args, passphrase)
-
+		return testWithPassword(cfg, append(args, cfg.SSH.TestCommand), passphrase)
 	default:
-		// key and agent auth should not prompt during tests.
-		args = append(args, "-o", "BatchMode=yes")
+		args = insertBeforeTarget(args, "-o", "BatchMode=yes")
 		args = append(args, cfg.SSH.TestCommand)
-
 		cmd := exec.Command(cfg.SSH.Binary, args...)
 		cmd.Stdin = nil
-
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return false, strings.TrimSpace(string(output))
 		}
-
 		result := strings.TrimSpace(string(output))
-		if result == "SSHKEEPER_OK" {
+		if result == "SSHKEEPER_OK" || strings.Contains(result, "SSHKEEPER_OK") {
 			return true, ""
 		}
 		return false, result
 	}
 }
 
-// testWithPassword tests SSH connection with password auth via PTY-wrapper.
-// It connects, sends the password, runs the test command, and checks the output.
-func testWithPassword(cfg *config.Config, args []string, password string) (bool, string) {
-	args = append(args, cfg.SSH.TestCommand)
+func Test(cfg *config.Config, server *model.Server, getVault VaultFunc) (bool, string) {
+	return TestResolved(cfg, server, nil, getVault)
+}
 
+func testWithPassword(cfg *config.Config, args []string, password string) (bool, string) {
 	ok, output := connectWithPasswordAndRead(cfg.SSH.Binary, args, password, cfg.SSH.ConnectTimeoutSec)
 	if !ok {
 		return false, output
 	}
-
 	result := strings.TrimSpace(output)
-	if result == "SSHKEEPER_OK" {
-		return true, ""
-	}
-	// The output might have the test command echo before the result
-	if strings.Contains(result, "SSHKEEPER_OK") {
+	if result == "SSHKEEPER_OK" || strings.Contains(result, "SSHKEEPER_OK") {
 		return true, ""
 	}
 	return false, result
+}
+
+func ConnectWithForwardsResolved(cfg *config.Config, server *model.Server, forwards []*model.Forward, forwardOnly bool, resolve ProfileResolver, getVault VaultFunc) error {
+	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
+		return err
+	}
+	invocation, err := PrepareSSHInvocation(server, forwards, forwardOnly, resolve)
+	if err != nil {
+		return err
+	}
+	defer invocation.Cleanup()
+	return runPrepared(cfg, invocation.Args, server, getVault)
 }
 
 func ConnectWithArgs(cfg *config.Config, args []string, vaultFunc VaultFunc, server *model.Server) error {
 	if err := EnsureSSHBinary(cfg.SSH.Binary); err != nil {
 		return err
 	}
-
-	switch server.AuthMethod {
-	case model.AuthPassword:
-		password, err := vaultFunc(server.Alias, "ssh_password")
-		if err != nil {
-			return fmt.Errorf("get password from vault: %w", err)
-		}
-		return ConnectWithPassword(cfg.SSH.Binary, args, password)
-
-	case model.AuthKeyPassphrase:
-		passphrase, err := vaultFunc(server.Alias, "key_passphrase")
-		if err != nil {
-			return fmt.Errorf("get key passphrase from vault: %w", err)
-		}
-		return ConnectWithPassword(cfg.SSH.Binary, args, passphrase)
-
-	default:
-		cmd := exec.Command(cfg.SSH.Binary, args...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("start ssh: %w", err)
-		}
-		return cmd.Wait()
-	}
+	return runPrepared(cfg, args, server, vaultFunc)
 }
+
 func BuildForwardArgs(forwards []*model.Forward, exitOnForwardFailure bool) []string {
 	var args []string
 	for _, f := range forwards {
