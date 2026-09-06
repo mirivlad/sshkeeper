@@ -24,6 +24,8 @@ func TestCommandRequiresStartupVaultUnlock(t *testing.T) {
 		{name: "background tunnel does not need startup vault", args: []string{"tunnel", "prod", "--background"}, want: false},
 		{name: "config path only reads config", args: []string{"config", "path"}, want: false},
 		{name: "help", args: []string{"--help"}, want: false},
+		{name: "version command", args: []string{"version"}, want: false},
+		{name: "version flag", args: []string{"--version"}, want: false},
 	}
 
 	for _, tt := range tests {
@@ -32,5 +34,25 @@ func TestCommandRequiresStartupVaultUnlock(t *testing.T) {
 				t.Fatalf("commandRequiresStartupVaultUnlock(%v) = %v; want %v", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCommandSkipsAppInitialization(t *testing.T) {
+	tests := []struct {
+		args []string
+		want bool
+	}{
+		{args: nil, want: false},
+		{args: []string{"list"}, want: false},
+		{args: []string{"version"}, want: true},
+		{args: []string{"--version"}, want: true},
+		{args: []string{"--help"}, want: true},
+		{args: []string{"list", "--help"}, want: true},
+	}
+
+	for _, tt := range tests {
+		if got := commandSkipsAppInitialization(tt.args); got != tt.want {
+			t.Fatalf("commandSkipsAppInitialization(%v) = %v; want %v", tt.args, got, tt.want)
+		}
 	}
 }

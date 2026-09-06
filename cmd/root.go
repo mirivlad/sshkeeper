@@ -19,8 +19,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "sshkeeper",
-	Short: "sshkeeper — SSH connection manager",
+	Use:     "sshkeeper",
+	Version: Version,
+	Short:   "sshkeeper — SSH connection manager",
 	Long: `sshkeeper is a console SSH connection manager.
 Linux and macOS are primary release targets; Windows is experimental.
 It manages server profiles, secrets, and provides a convenient way
@@ -38,7 +39,9 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.SetVersionTemplate("sshkeeper {{.Version}}\n")
 	cobra.OnInitialize(initApp)
+	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(listCmd)
@@ -63,6 +66,10 @@ func init() {
 }
 
 func initApp() {
+	if commandSkipsAppInitialization(os.Args[1:]) {
+		return
+	}
+
 	var err error
 
 	cfg, err = config.Load()
@@ -169,6 +176,18 @@ func initApp() {
 			return
 		}
 	}
+}
+
+func commandSkipsAppInitialization(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" || arg == "--version" {
+			return true
+		}
+	}
+	return args[0] == "version"
 }
 
 func commandRequiresStartupVaultUnlock(args []string) bool {
