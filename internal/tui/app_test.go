@@ -1038,3 +1038,35 @@ func TestStartupTemplatePickerCopiesCommand(t *testing.T) {
 		t.Fatalf("startup command = %q", got)
 	}
 }
+
+func menuHasAction(menu *actionMenuModel, action string) bool {
+	for _, item := range menu.list.Items() {
+		entry, ok := item.(actionMenuItem)
+		if ok && entry.action == action {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSessionActionsAreHiddenWhenTmuxUnavailable(t *testing.T) {
+	actions := newActionMenuModel(80, 24, false)
+	manage := newManageMenuModel(80, 24, false)
+	if menuHasAction(actions, "session_open") {
+		t.Fatal("server actions exposed tmux session action while unavailable")
+	}
+	if menuHasAction(manage, "sessions") {
+		t.Fatal("manage menu exposed Sessions while tmux unavailable")
+	}
+}
+
+func TestSessionActionsAreVisibleWhenTmuxAvailable(t *testing.T) {
+	actions := newActionMenuModel(80, 24, true)
+	manage := newManageMenuModel(80, 24, true)
+	if !menuHasAction(actions, "session_open") {
+		t.Fatal("server actions did not expose tmux session action")
+	}
+	if !menuHasAction(manage, "sessions") {
+		t.Fatal("manage menu did not expose Sessions")
+	}
+}
