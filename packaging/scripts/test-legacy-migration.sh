@@ -15,6 +15,18 @@ printf 'old-user\n' > "$legacy_user"
 printf 'old-local\n' > "$legacy_local"
 chmod +x "$system" "$legacy_user" "$legacy_local"
 
+# Discover ~/.local/bin/sshkeeper through passwd exactly as a real package install does.
+passwd_file="$tmp/passwd"
+printf 'test:x:1000:1000:test:%s:/bin/bash\n' "$tmp/home/test" > "$passwd_file"
+env SSHKEEPER_MIGRATION_RUN_AS_CURRENT=1 SSHKEEPER_SYSTEM_BINARY="$system" SSHKEEPER_STATE_FILE="$state" SSHKEEPER_PASSWD_FILE="$passwd_file" \
+  packaging/scripts/postinstall.sh configure
+test -L "$legacy_user"
+test "$(readlink "$legacy_user")" = "$system"
+test -f "${legacy_user}.legacy-backup"
+env SSHKEEPER_MIGRATION_RUN_AS_CURRENT=1 SSHKEEPER_SYSTEM_BINARY="$system" SSHKEEPER_STATE_FILE="$state" \
+  packaging/scripts/postremove.sh remove
+test "$(cat "$legacy_user")" = old-user
+
 paths=$(printf '%s\n%s' "$legacy_user" "$legacy_local")
 env SSHKEEPER_MIGRATION_RUN_AS_CURRENT=1 SSHKEEPER_SYSTEM_BINARY="$system" SSHKEEPER_STATE_FILE="$state" SSHKEEPER_LEGACY_PATHS="$paths" \
   packaging/scripts/postinstall.sh configure

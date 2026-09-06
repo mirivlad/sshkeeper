@@ -4,6 +4,7 @@ umask 077
 
 SYSTEM_BINARY=${SSHKEEPER_SYSTEM_BINARY:-/usr/bin/sshkeeper}
 STATE_FILE=${SSHKEEPER_STATE_FILE:-/var/lib/sshkeeper/package-legacy-paths}
+PASSWD_FILE=${SSHKEEPER_PASSWD_FILE:-/etc/passwd}
 
 candidate_paths() {
   if [ -n "${SSHKEEPER_LEGACY_PATHS:-}" ]; then
@@ -14,8 +15,8 @@ candidate_paths() {
   fi
 
   printf 'root\t%s\n' /usr/local/bin/sshkeeper
-  if [ -r /etc/passwd ]; then
-    awk -F: '$3 == 0 || $3 >= 1000 { if ($6 != "" && $6 != "/") printf "%s\\t%s/.local/bin/sshkeeper\\n", $1, $6 }' /etc/passwd
+  if [ -r "$PASSWD_FILE" ]; then
+    awk -F: '$3 == 0 || $3 >= 1000 { if ($6 != "" && $6 != "/") printf "%s\t%s/.local/bin/sshkeeper\n", $1, $6 }' "$PASSWD_FILE"
   fi
 }
 
