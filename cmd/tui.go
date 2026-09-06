@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mirivlad/sshkeeper/internal/model"
+	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
 	"github.com/mirivlad/sshkeeper/internal/ssh"
 	"github.com/mirivlad/sshkeeper/internal/tui"
 	tunnelpkg "github.com/mirivlad/sshkeeper/internal/tunnel"
@@ -193,6 +194,28 @@ func runTUI() error {
 
 		// Check if TUI requested a connect action
 		result := m.Result()
+		if result != nil && result.Action == "session_open" && result.Server != nil {
+			fresh, err := appDB.GetServer(result.Server.Alias)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Server not found: %s\n", result.Server.Alias)
+			} else {
+				windowID, _, openErr := sessionpkg.Open(fresh.Alias)
+				if openErr != nil {
+					fmt.Fprintf(os.Stderr, "Open session: %v\n", openErr)
+				} else if attachErr := sessionpkg.Attach(windowID); attachErr != nil {
+					fmt.Fprintf(os.Stderr, "Attach session: %v\n", attachErr)
+				}
+			}
+			servers, _ = appDB.ListServers()
+			continue
+		}
+		if result != nil && result.Action == "session_attach" && result.SessionID != "" {
+			if err := sessionpkg.Attach(result.SessionID); err != nil {
+				fmt.Fprintf(os.Stderr, "Attach session: %v\n", err)
+			}
+			servers, _ = appDB.ListServers()
+			continue
+		}
 		if result != nil && result.Action == "connect" && result.Server != nil {
 			// TUI has exited, terminal is restored by tea.WithAltScreen.
 			// Now connect.

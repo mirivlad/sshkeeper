@@ -310,9 +310,15 @@ type actionMenuModel struct {
 	height int
 }
 
-func newActionMenuModel(w, h int) *actionMenuModel {
+func newActionMenuModel(w, h int, availability ...bool) *actionMenuModel {
+	sessionsAvailable := len(availability) > 0 && availability[0]
 	items := []list.Item{
 		actionMenuItem{label: "Connect", action: "connect", description: "Open an interactive SSH session."},
+	}
+	if sessionsAvailable {
+		items = append(items, actionMenuItem{label: "Open in session", action: "session_open", description: "Open this server in a persistent tmux-backed SSH tab."})
+	}
+	items = append(items,
 		actionMenuItem{label: "Connect with tunnels", action: "tunnel", description: "Open SSH and activate enabled port forwards."},
 		actionMenuItem{label: "Start tunnels only", action: "tunnel_n", description: "Activate enabled forwards without a shell."},
 		actionMenuItem{label: "Start tunnels in background", action: "tunnel_bg", description: "Run enabled forwards as a background process."},
@@ -321,21 +327,27 @@ func newActionMenuModel(w, h int) *actionMenuModel {
 		actionMenuItem{label: "Test connection", action: "test", description: "Check SSH reachability for this profile."},
 		actionMenuItem{label: "Edit", action: "edit", description: "Change this server profile."},
 		actionMenuItem{label: "Delete", action: "delete", description: "Permanently remove this server profile."},
-	}
+	)
 	return newMenuModel("Server Actions", items, w, h)
 }
 
-func newManageMenuModel(w, h int) *actionMenuModel {
+func newManageMenuModel(w, h int, availability ...bool) *actionMenuModel {
+	sessionsAvailable := len(availability) > 0 && availability[0]
 	items := []list.Item{
 		actionMenuItem{label: "Groups", action: "groups", description: "Create, rename, and remove server groups."},
 		actionMenuItem{label: "Tags", action: "tags", description: "Manage tags and apply them to selected servers."},
 		actionMenuItem{label: "Command templates", action: "templates", description: "Manage reusable commands."},
+	}
+	if sessionsAvailable {
+		items = append(items, actionMenuItem{label: "Sessions", action: "sessions", description: "Attach to or close tmux-backed SSH sessions."})
+	}
+	items = append(items,
 		actionMenuItem{label: "Running tunnels", action: "tunnels", description: "Inspect and stop tracked background tunnels."},
 		actionMenuItem{label: "Import SSH config", action: "import", description: "Import profiles from ~/.ssh/config."},
 		actionMenuItem{label: "Export", action: "export", description: "Export server profiles."},
 		actionMenuItem{label: "Vault: lock", action: "vault_lock", description: "Lock secrets for the current session."},
 		actionMenuItem{label: "Vault: change password", action: "vault_change_pw", description: "Change the password protecting stored secrets."},
-	}
+	)
 	return newMenuModel("Manage", items, w, h)
 }
 

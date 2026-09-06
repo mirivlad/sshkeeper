@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mirivlad/sshkeeper/internal/model"
+	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
 )
 
 // --- Styles ---
@@ -242,6 +243,7 @@ const (
 	screenManageMenu
 	screenForwardList
 	screenForwardForm
+	screenSessionManager
 	screenTunnelManager
 	screenConfirm
 	screenFullHelp
@@ -275,47 +277,50 @@ type TUIResult struct {
 	Action       string // "connect" or "run_template_foreground"
 	Command      string
 	TemplateName string
+	SessionID    string
 }
 
 // --- Main TUI model ---
 
 type tuiModel struct {
-	screen          screen
-	list            list.Model
-	servers         []*model.Server
-	searchInput     textinput.Model
-	form            *formModel
-	templateForm    *templateFormModel
-	templates       []*model.CommandTemplate
-	templateList    list.Model
-	pendingTemplate *model.CommandTemplate
-	tagList         list.Model
-	tags            []string
-	tagInput        textinput.Model
-	tagMode         string
-	tagOldName      string
-	groups          []*model.Group
-	groupList       list.Model
-	groupInput      textinput.Model
-	groupMode       string
-	groupOldName    string
-	selected        map[string]bool
-	tunnelScreen    *tunnelScreenModel
-	bgResults       []templateRunResult
-	err             error
-	success         string
-	width           int
-	height          int
-	result          *TUIResult
-	helpScreen      *helpScreenModel
-	actionMenu      *actionMenuModel
-	manageMenu      *actionMenuModel
-	forwardScreen   *forwardScreenModel
-	forwardForm     *forwardFormModel
-	confirm         *confirmState
-	fullHelp        *fullHelpModel
-	helpParent      screen
-	vaultUnlocked   bool
+	screen            screen
+	list              list.Model
+	servers           []*model.Server
+	searchInput       textinput.Model
+	form              *formModel
+	templateForm      *templateFormModel
+	templates         []*model.CommandTemplate
+	templateList      list.Model
+	pendingTemplate   *model.CommandTemplate
+	tagList           list.Model
+	tags              []string
+	tagInput          textinput.Model
+	tagMode           string
+	tagOldName        string
+	groups            []*model.Group
+	groupList         list.Model
+	groupInput        textinput.Model
+	groupMode         string
+	groupOldName      string
+	selected          map[string]bool
+	sessionsAvailable bool
+	sessionScreen     *sessionScreenModel
+	tunnelScreen      *tunnelScreenModel
+	bgResults         []templateRunResult
+	err               error
+	success           string
+	width             int
+	height            int
+	result            *TUIResult
+	helpScreen        *helpScreenModel
+	actionMenu        *actionMenuModel
+	manageMenu        *actionMenuModel
+	forwardScreen     *forwardScreenModel
+	forwardForm       *forwardFormModel
+	confirm           *confirmState
+	fullHelp          *fullHelpModel
+	helpParent        screen
+	vaultUnlocked     bool
 }
 
 func New(servers []*model.Server) *tuiModel {
@@ -357,17 +362,18 @@ func New(servers []*model.Server) *tuiModel {
 	}
 
 	return &tuiModel{
-		screen:        screenList,
-		list:          l,
-		servers:       servers,
-		searchInput:   search,
-		selected:      map[string]bool{},
-		tagInput:      tagInput,
-		groupInput:    groupInput,
-		templateList:  templateList,
-		tagList:       tagList,
-		groupList:     groupList,
-		vaultUnlocked: vaultIsUnlocked,
+		screen:            screenList,
+		list:              l,
+		servers:           servers,
+		searchInput:       search,
+		selected:          map[string]bool{},
+		sessionsAvailable: sessionpkg.Available(),
+		tagInput:          tagInput,
+		groupInput:        groupInput,
+		templateList:      templateList,
+		tagList:           tagList,
+		groupList:         groupList,
+		vaultUnlocked:     vaultIsUnlocked,
 	}
 }
 
@@ -401,6 +407,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.forwardForm != nil {
 			m.forwardForm.width = msg.Width
 			m.forwardForm.height = msg.Height
+		}
+		if m.sessionScreen != nil {
+			m.sessionScreen.width = msg.Width
+			m.sessionScreen.height = msg.Height
+			m.sessionScreen.list.SetSize(msg.Width, managerListHeight(msg.Height))
 		}
 		if m.tunnelScreen != nil {
 			m.tunnelScreen.width = msg.Width
@@ -635,6 +646,18 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case sessionsLoadedMsg:
+		if msg.closed && m.confirm != nil && m.confirm.pending && m.confirm.parent == screenSessionManager {
+			m.finishConfirm()
+		}
+		if m.sessionScreen != nil {
+			m.sessionScreen.err = msg.err
+			if msg.err == nil {
+				m.sessionScreen.setSessions(msg.sessions)
+			}
+		}
+		return m, nil
+
 	case tunnelsLoadedMsg:
 		if m.tunnelScreen != nil {
 			m.tunnelScreen.tunnels = nil
@@ -788,6 +811,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForwardList(msg)
 		case screenForwardForm:
 			return m.updateForwardForm(msg)
+		case screenSessionManager:
+			return m.updateSessionManager(msg)
 		case screenTunnelManager:
 			return m.updateTunnelManager(msg)
 		case screenConfirm:
@@ -877,7 +902,7 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyRunes:
 		if msg.String() == "m" || msg.String() == "M" {
-			m.manageMenu = newManageMenuModel(m.width, m.height)
+			m.manageMenu = newManageMenuModel(m.width, m.height, m.sessionsAvailable)
 			m.screen = screenManageMenu
 			return m, nil
 		}
@@ -897,7 +922,7 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyCtrlX:
-		m.actionMenu = newActionMenuModel(m.width, m.height)
+		m.actionMenu = newActionMenuModel(m.width, m.height, m.sessionsAvailable)
 		m.screen = screenActionMenu
 		return m, nil
 
@@ -1438,6 +1463,11 @@ func (m *tuiModel) View() string {
 			b.WriteString(m.forwardForm.View())
 		}
 
+	case screenSessionManager:
+		if m.sessionScreen != nil {
+			b.WriteString(m.sessionScreen.View())
+		}
+
 	case screenTunnelManager:
 		if m.tunnelScreen != nil {
 			b.WriteString(m.tunnelScreen.View())
@@ -1483,6 +1513,12 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg {
 					return connectRequestMsg{server: item.server}
 				}
+			}
+		case "session_open":
+			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				m.actionMenu = nil
+				m.result = &TUIResult{Server: item.server, Action: "session_open"}
+				return m, tea.Quit
 			}
 		case "tunnel":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
@@ -1582,6 +1618,10 @@ func (m *tuiModel) updateManageMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "templates":
 		m.screen = screenTemplates
 		return m, m.loadTemplatesCmd()
+	case "sessions":
+		m.sessionScreen = newSessionScreenModel(m.width, m.height)
+		m.screen = screenSessionManager
+		return m, m.sessionScreen.loadSessions()
 	case "tunnels":
 		m.tunnelScreen = newTunnelScreenModel(m.width, m.height)
 		m.screen = screenTunnelManager
@@ -1682,6 +1722,45 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.forwardScreen.selected--
 		}
 		return m, nil
+	}
+	return m, nil
+}
+
+func (m *tuiModel) updateSessionManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.screen = screenList
+		m.sessionScreen = nil
+		return m, nil
+	case tea.KeyEnter:
+		if m.sessionScreen != nil {
+			if selected := m.sessionScreen.selected(); selected != nil {
+				m.result = &TUIResult{Action: "session_attach", SessionID: selected.ID}
+				return m, tea.Quit
+			}
+		}
+	case tea.KeyCtrlD:
+		m.confirmSessionClose()
+		return m, nil
+	case tea.KeyCtrlR:
+		if m.sessionScreen != nil {
+			return m, m.sessionScreen.loadSessions()
+		}
+	case tea.KeyRunes:
+		switch msg.String() {
+		case "d", "D":
+			m.confirmSessionClose()
+			return m, nil
+		case "r", "R":
+			if m.sessionScreen != nil {
+				return m, m.sessionScreen.loadSessions()
+			}
+		}
+	}
+	if m.sessionScreen != nil {
+		var cmd tea.Cmd
+		m.sessionScreen.list, cmd = m.sessionScreen.list.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -1910,6 +1989,26 @@ func (m *tuiModel) confirmForwardDelete(fwd *model.Forward) {
 				}
 				return forwardDeletedMsg{id: id, err: DeleteForward(id)}
 			}
+		},
+	})
+}
+
+func (m *tuiModel) confirmSessionClose() {
+	if m.sessionScreen == nil {
+		return
+	}
+	selected := m.sessionScreen.selected()
+	if selected == nil {
+		return
+	}
+	m.beginConfirm(confirmState{
+		title:       "Close SSH session?",
+		target:      fmt.Sprintf("%q · tmux %s", selected.ServerAlias, selected.ID),
+		consequence: "The interactive SSH process in this tmux window will be terminated.",
+		verb:        "Close",
+		parent:      screenSessionManager,
+		action: func() tea.Cmd {
+			return m.sessionScreen.closeSelected()
 		},
 	})
 }

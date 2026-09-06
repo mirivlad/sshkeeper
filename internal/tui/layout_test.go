@@ -253,6 +253,9 @@ func TestManagerScreensUseUnifiedShell(t *testing.T) {
 			})
 		}
 
+		sessionScreen := newSessionScreenModel(size.width, size.height)
+		assertUnifiedScreen(t, sessionScreen.View(), size.width, size.height)
+
 		tunnelScreen := newTunnelScreenModel(size.width, size.height)
 		assertUnifiedScreen(t, tunnelScreen.View(), size.width, size.height)
 	}
@@ -277,6 +280,7 @@ func TestLayoutMatrixInventoriesEveryScreen(t *testing.T) {
 		screenManageMenu:        "manage matrix",
 		screenForwardList:       "forward matrix",
 		screenForwardForm:       "forward form matrix",
+		screenSessionManager:    "manager matrix",
 		screenTunnelManager:     "manager matrix",
 		screenConfirm:           "confirmation matrix",
 		screenFullHelp:          "help matrix",

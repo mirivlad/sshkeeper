@@ -13,6 +13,10 @@ vendor: sshkeeper
 homepage: https://github.com/mirivlad/sshkeeper
 license: MIT
 
+# Optional: enables tmux-backed persistent SSH sessions.
+recommends:
+  - tmux
+
 contents:
   - src: ${NFPM_BINARY}
     dst: /usr/bin/sshkeeper

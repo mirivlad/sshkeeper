@@ -25,6 +25,7 @@ port forwarding management.
 - **Routes / ProxyJump** — ordered bastion chains with stable references to sshkeeper profiles; profile renames do not break routes.
 - **Port forwarding** — named local/remote/SOCKS forwards with type selector, validation, and OpenSSH preview.
 - **Tunnel management** — start/stop/list background tunnels, PID tracking, runtime state.
+- **Persistent sessions** — optional tmux-backed SSH tabs that stay alive while you switch between servers.
 - **Tunnel vs Forward** — clear separation: forward = saved rule, tunnel = running SSH process.
 - First-class groups, multi-select tags, command templates, search by metadata/routes/forward ports, and OpenSSH config generation.
 - Import from `~/.ssh/config` and simple tab-separated export.
@@ -46,15 +47,15 @@ Or use the build scripts:
 ./release.sh        # Build release archives to dist/
 ```
 
-Requirements: Go 1.25+ and system OpenSSH.
+Requirements: Go 1.25+ and system OpenSSH. `tmux` is optional and recommended for persistent multi-session tabs; without it, all Sessions UI is hidden.
 
 Platform status:
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Linux | Primary release target | `amd64`/`arm64` tarballs plus native `.deb` and `.rpm` packages. |
-| macOS | Primary release target | `darwin/amd64` and `darwin/arm64` release tarballs are available. Requires system `ssh` client. Homebrew formula planned. |
-| Windows | Experimental | Requires OpenSSH Client available as `ssh.exe` in `PATH`. Password/key-passphrase PTY flows are not validated on Windows. |
+| Linux | Primary release target | `amd64`/`arm64` tarballs plus native `.deb` and `.rpm` packages. Native packages recommend (but do not require) `tmux` for persistent Sessions. |
+| macOS | Primary release target | `darwin/amd64` and `darwin/arm64` release tarballs are available. Requires system `ssh`; install optional `tmux` with `brew install tmux` to enable Sessions. Homebrew formula planned. |
+| Windows | Experimental | Requires OpenSSH Client as `ssh.exe` in `PATH`. Native Windows builds do not expose tmux Sessions; running the Linux build inside WSL can use them when `tmux` is installed there. |
 
 On Windows, install OpenSSH Client via Windows Optional Features or PowerShell:
 
@@ -189,6 +190,19 @@ In add/edit forms:
 | `/` on Auth, Identity File, Route, Group, Startup Command, or Tags | Open the relevant picker/editor |
 | Enter | Move to action / activate |
 | Esc | Back |
+
+## Persistent Sessions (optional tmux)
+
+When `tmux` is available in `PATH`, sshkeeper exposes a persistent Sessions workflow.
+If `tmux` is missing, the feature is completely hidden: there is no disabled Sessions menu or broken action, and ordinary `Connect` behaves exactly as before.
+
+- **Server Actions → Open in session** creates a tmux window named after the server alias and attaches to it.
+- **Manage → Sessions** lists the SSH windows created by sshkeeper; `Enter` attaches, `Ctrl+D` closes with confirmation, and `Ctrl+R` refreshes.
+- If sshkeeper itself is already running inside tmux, new SSH windows are created in the current tmux session. Otherwise sshkeeper uses a dedicated `sshkeeper` tmux workspace.
+- Leaving a tmux client with the normal tmux detach key (`Ctrl+B`, then `D`) returns to sshkeeper while the SSH windows keep running. Standard tmux window switching (`Ctrl+B`, then `N`/`P` or a window number) provides the tab workflow.
+- Key and SSH-agent sessions start without unlocking the vault. Password and key-passphrase sessions ask for the vault master password inside their own tmux window, so secrets are never copied through command-line arguments or environment variables.
+
+`tmux` is intentionally optional. Debian/RPM packages mark it as a recommendation rather than a hard dependency. On macOS install it with `brew install tmux`. Native Windows builds do not expose Sessions; use the Linux build inside WSL if this workflow is needed on Windows.
 
 ## Routes, Tunnels, and Port Forwards
 
