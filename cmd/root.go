@@ -63,6 +63,7 @@ func init() {
 	rootCmd.AddCommand(routeCmd)
 	rootCmd.AddCommand(forwardCmd)
 	rootCmd.AddCommand(tunnelCmd)
+	rootCmd.AddCommand(sessionConnectCmd)
 }
 
 func initApp() {
