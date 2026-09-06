@@ -131,6 +131,14 @@ README, LICENSE, and the user guide under `/usr/share/doc/sshkeeper/`. Debian
 packages depend on `openssh-client`; RPM packages depend on `openssh-clients`.
 The package revision starts at `1` and is reset when the upstream version changes.
 
+Package maintainer scripts also migrate known legacy command paths. Existing
+`/usr/local/bin/sshkeeper` and per-user `~/.local/bin/sshkeeper` entries are moved
+to a non-destructive `*.legacy-backup` and replaced by symlinks to the packaged
+`/usr/bin/sshkeeper`. This makes package installation authoritative even for a
+shell that already cached the old command path. Home-directory changes are executed as the account owner rather than as root.
+Package removal restores backups; package upgrades keep the redirect active. Migration behavior is covered by
+`packaging/scripts/test-legacy-migration.sh` and is part of `make release-check`.
+
 ## Verify Checksums
 
 From the `dist/` directory:

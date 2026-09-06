@@ -39,9 +39,15 @@ overrides:
   deb:
     depends:
       - openssh-client
+    scripts:
+      postinstall: ./packaging/scripts/postinstall.sh
+      postremove: ./packaging/scripts/postremove.sh
   rpm:
     depends:
       - openssh-clients
+    scripts:
+      postinstall: ./packaging/scripts/postinstall.sh
+      postremove: ./packaging/scripts/postremove.sh
 
 rpm:
   compression: gzip

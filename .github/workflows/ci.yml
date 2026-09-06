@@ -46,6 +46,10 @@ jobs:
       - name: go test
         run: go test ./... -count=1
 
+      - name: package migration test
+        if: matrix.os == 'ubuntu-latest'
+        run: ./packaging/scripts/test-legacy-migration.sh
+
   cross-build:
     name: cross-build
     runs-on: ubuntu-latest

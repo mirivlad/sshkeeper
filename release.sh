@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 APP=sshkeeper
 # --match 'v*' ignores the rolling `nightly` tag; see build.sh for the details.
 VERSION=${VERSION:-${1:-$(git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo "dev")}}
-LDFLAGS="-s -w -X main.version=${VERSION}"
+LDFLAGS="-s -w -X github.com/mirivlad/sshkeeper/cmd.Version=${VERSION}"
 DIST_DIR="dist"
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || date +%s)}
 export SOURCE_DATE_EPOCH

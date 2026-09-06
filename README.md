@@ -71,21 +71,34 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 Debian/Ubuntu (amd64):
 
 ```bash
-sudo apt install ./sshkeeper_0.4.0-1_amd64.deb
+sudo apt install ./sshkeeper_0.4.1-1_amd64.deb
 ```
 
 Fedora/RHEL-family (x86_64):
 
 ```bash
-sudo dnf install ./sshkeeper-0.4.0-1.x86_64.rpm
+sudo dnf install ./sshkeeper-0.4.1-1.x86_64.rpm
 ```
 
-`arm64`/`aarch64` packages are published alongside the x86_64 builds. The
-traditional tar.gz archive remains available too:
+`arm64`/`aarch64` packages are published alongside the x86_64 builds. Native
+packages own command resolution: when installing or upgrading they detect old
+`/usr/local/bin/sshkeeper` and local-account `~/.local/bin/sshkeeper` copies, preserve
+each as `*.legacy-backup`, and redirect the old path to `/usr/bin/sshkeeper`.
+Removing the package restores preserved legacy binaries.
+
+Check the exact running binary and embedded version with:
 
 ```bash
-tar -xzf sshkeeper_v0.4.0_linux_amd64.tar.gz
-sudo install -m 0755 sshkeeper_v0.4.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
+command -v sshkeeper
+sshkeeper --version
+# or: sshkeeper version
+```
+
+The traditional tar.gz archive remains available too:
+
+```bash
+tar -xzf sshkeeper_v0.4.1_linux_amd64.tar.gz
+sudo install -m 0755 sshkeeper_v0.4.1_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 sshkeeper
 ```
 
