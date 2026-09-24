@@ -72,13 +72,13 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 Debian/Ubuntu (amd64):
 
 ```bash
-sudo apt install ./sshkeeper_0.5.1-1_amd64.deb
+sudo apt install ./sshkeeper_0.5.2-1_amd64.deb
 ```
 
 Fedora/RHEL-family (x86_64):
 
 ```bash
-sudo dnf install ./sshkeeper-0.5.1-1.x86_64.rpm
+sudo dnf install ./sshkeeper-0.5.2-1.x86_64.rpm
 ```
 
 `arm64`/`aarch64` packages are published alongside the x86_64 builds. Native
@@ -98,8 +98,8 @@ sshkeeper --version
 The traditional tar.gz archive remains available too:
 
 ```bash
-tar -xzf sshkeeper_v0.5.1_linux_amd64.tar.gz
-sudo install -m 0755 sshkeeper_v0.5.1_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
+tar -xzf sshkeeper_v0.5.2_linux_amd64.tar.gz
+sudo install -m 0755 sshkeeper_v0.5.2_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 sshkeeper
 ```
 
@@ -244,6 +244,11 @@ sshkeeper route show prod
 A **port forward** is a saved rule that describes how to tunnel traffic through SSH.
 It does not start any process — it is just configuration.
 
+In the TUI, select a server and press `Ctrl+W` to manage its rules. After saving
+and enabling at least one rule, press `Ctrl+B` on that screen to start a background
+tunnel, or `Ctrl+X` to choose a foreground or background mode. The result stays
+visible in the TUI; use `m` → **Running tunnels** to check or stop the process.
+
 ```bash
 # Local forward: access a remote service from your machine
 sshkeeper forward add web --name "Local PostgreSQL" --type local --local-port 15432 --remote-addr 127.0.0.1 --remote-port 5432
@@ -294,10 +299,12 @@ sshkeeper tunnel stop <id>
 sshkeeper tunnel stop-all
 ```
 
-Background tunnels run detached with `ssh -N`, require at least one enabled
-forward, and currently support key or SSH-agent authentication only. Use
-foreground `sshkeeper tunnel <alias>` or `--forward-only` for password and
+All TUI tunnel actions and CLI `--forward-only`/`--background` require at least
+one enabled forward. Background tunnels run detached with `ssh -N` and currently
+support key or SSH-agent authentication only. Use foreground
+`sshkeeper tunnel <alias>` or `--forward-only` for password and
 key-passphrase authentication so the PTY prompt handler can provide the secret.
+Stop the foreground no-shell mode with `Ctrl+C` to return to sshkeeper.
 
 ### Connect vs Tunnel
 
@@ -306,8 +313,8 @@ key-passphrase authentication so the PTY prompt handler can provide the secret.
 | Connect | `sshkeeper connect <alias>` | `Enter` | Standard SSH session, no port forwards |
 | Connect with tunnels | `sshkeeper tunnel <alias>` | Server Actions → Connect with tunnels | SSH session with all enabled forwards active |
 | Start tunnels only | `sshkeeper tunnel <alias> --forward-only` | Server Actions → Start tunnels only | Foreground tunnel, no shell |
-| Start tunnels in background | `sshkeeper tunnel <alias> --background` | Server Actions → Start tunnels in background | Detached tunnel process with PID tracking |
-| Port forwards | `sshkeeper forward` | Server Actions → Port forwards (or `Ctrl+W`) | Add/edit/enable/delete forward rules |
+| Start tunnels in background | `sshkeeper tunnel <alias> --background` | `Ctrl+W` → `Ctrl+B`, or Server Actions → Start tunnels in background | Detached tunnel process with PID tracking |
+| Port forwards | `sshkeeper forward` | Server Actions → Port forwards (or `Ctrl+W`) | Add/edit/enable/delete forward rules; `Ctrl+X` chooses start mode |
 | Running tunnels | `sshkeeper tunnel list/stop/stop-all` | `m` → Running tunnels | View tracked/running tunnels and stop them |
 
 ## Vault

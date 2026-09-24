@@ -42,12 +42,13 @@ var tunnelCmd = &cobra.Command{
 			return nil
 		}
 
-		if len(forwards) == 0 && forwardsOnly {
-			return fmt.Errorf("no forwards configured for %s", alias)
+		active := enabledForwardCount(forwards)
+		if active == 0 && forwardsOnly {
+			return fmt.Errorf("no enabled forwards configured for %s", alias)
 		}
 
-		if len(forwards) > 0 {
-			fmt.Printf("Starting tunnel to %s with %d forward(s)...\n", alias, len(forwards))
+		if active > 0 {
+			fmt.Printf("Starting tunnel to %s with %d enabled forward(s)...\n", alias, active)
 		} else {
 			fmt.Printf("Starting session to %s...\n", alias)
 		}
@@ -112,16 +113,24 @@ var tunnelStopAllCmd = &cobra.Command{
 	},
 }
 
+func enabledForwardCount(forwards []*model.Forward) int {
+	count := 0
+	for _, forward := range forwards {
+		if forward != nil && forward.Enabled {
+			count++
+		}
+	}
+	return count
+}
+
 func validateBackgroundTunnel(server *model.Server, forwards []*model.Forward) error {
 	if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
 		return fmt.Errorf("background tunnels support only key or agent auth; use foreground tunnel for %s auth", server.AuthMethod)
 	}
-	for _, f := range forwards {
-		if f.Enabled {
-			return nil
-		}
+	if enabledForwardCount(forwards) == 0 {
+		return fmt.Errorf("no enabled forwards configured for %s", server.Alias)
 	}
-	return fmt.Errorf("no enabled forwards configured for %s", server.Alias)
+	return nil
 }
 
 func init() {

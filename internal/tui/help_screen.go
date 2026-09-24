@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbletea"
+	"github.com/mirivlad/sshkeeper/internal/model"
 )
 
 // --- Help screen (?) ---
@@ -247,10 +248,16 @@ func (m *fullHelpModel) View() string {
 			{"", ""},
 			{"Ctrl+A", "Add forward"},
 			{"Enter/Ctrl+E", "Edit forward"},
+			{"Space", "Enable / disable forward"},
+			{"Ctrl+B", "Start background tunnel for this server"},
+			{"Ctrl+X", "Choose a foreground or background mode"},
 			{"Ctrl+D", "Delete forward (with confirmation)"},
 		}},
 		{"Tunnels", [][2]string{
 			{"", "A tunnel is a running SSH process that activates forwards."},
+			{"", "At least one enabled forward is required."},
+			{"", "Background mode needs key or agent auth."},
+			{"", "Foreground mode stops with Ctrl+C."},
 			{"", ""},
 			{"CLI:", "sshkeeper tunnel <alias>"},
 			{"CLI:", "sshkeeper tunnel <alias> --forward-only"},
@@ -304,10 +311,47 @@ func (i actionMenuItem) Description() string { return "" }
 func (i actionMenuItem) FilterValue() string { return i.label }
 
 type actionMenuModel struct {
-	list   list.Model
-	title  string
-	width  int
-	height int
+	list            list.Model
+	title           string
+	width           int
+	height          int
+	serverID        int64
+	serverAlias     string
+	authMethod      model.AuthMethod
+	enabledForwards int
+	loadingForwards bool
+	loadErr         error
+	errorText       string
+}
+
+func (m *actionMenuModel) setServer(server *model.Server, count int, loading bool) {
+	m.serverID = server.ID
+	m.serverAlias = server.Alias
+	m.authMethod = server.AuthMethod
+	m.enabledForwards = count
+	m.loadingForwards = loading
+}
+
+func (m *actionMenuModel) unavailableReason(action string) string {
+	if m.serverAlias == "" {
+		return ""
+	}
+	if action != "tunnel" && action != "tunnel_n" && action != "tunnel_bg" {
+		return ""
+	}
+	if m.loadingForwards {
+		return "Checking enabled port forwards..."
+	}
+	if m.loadErr != nil {
+		return fmt.Sprintf("Cannot load port forwards: %v", m.loadErr)
+	}
+	if m.enabledForwards == 0 {
+		return "No enabled port forwards. Add or enable a rule first."
+	}
+	if action == "tunnel_bg" && (m.authMethod == model.AuthPassword || m.authMethod == model.AuthKeyPassphrase) {
+		return "Background mode needs key or agent authentication; use a foreground mode."
+	}
+	return ""
 }
 
 func newActionMenuModel(w, h int, availability ...bool) *actionMenuModel {
@@ -364,11 +408,18 @@ func newMenuModel(title string, items []list.Item, w, h int) *actionMenuModel {
 func (m *actionMenuModel) Update(msg tea.Msg) (*actionMenuModel, *string) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if msg.Type != tea.KeyEnter {
+			m.errorText = ""
+		}
 		switch msg.Type {
 		case tea.KeyEsc:
 			return m, nil
 		case tea.KeyEnter:
 			if item, ok := m.list.SelectedItem().(actionMenuItem); ok {
+				if reason := m.unavailableReason(item.action); reason != "" {
+					m.errorText = reason
+					return m, nil
+				}
 				return m, &item.action
 			}
 		}
@@ -380,14 +431,30 @@ func (m *actionMenuModel) Update(msg tea.Msg) (*actionMenuModel, *string) {
 }
 
 func (m *actionMenuModel) View() string {
+	selected, _ := m.list.SelectedItem().(actionMenuItem)
+	breadcrumb := m.title
+	status := fmt.Sprintf("%d actions", len(m.list.Items()))
+	if m.serverAlias != "" {
+		breadcrumb += " / " + m.serverAlias
+		status = fmt.Sprintf("%d enabled forwards", m.enabledForwards)
+	}
+	notification := m.errorText
+	if notification == "" {
+		notification = m.unavailableReason(selected.action)
+	}
 	body := func(width, height int) string {
 		listLines := m.actionLines(max(1, height-2))
 		if classifyShellContent(width) == sizeWide {
 			leftWidth := width * 48 / 100
 			rightWidth := width - leftWidth - 1
-			selected, _ := m.list.SelectedItem().(actionMenuItem)
 			detail := []string{dashboardSection("Selected action"), "", selected.label, ""}
 			detail = append(detail, wrapCells(selected.description, max(1, rightWidth-4))...)
+			if m.serverAlias != "" {
+				detail = append(detail, "", "Server: "+m.serverAlias, fmt.Sprintf("Enabled forwards: %d", m.enabledForwards))
+			}
+			if reason := m.unavailableReason(selected.action); reason != "" {
+				detail = append(detail, wrapCells(reason, max(1, rightWidth-4))...)
+			}
 			return joinPanelColumns(
 				renderPaddedPanel(leftWidth, height, listLines), leftWidth,
 				renderPaddedPanel(rightWidth, height, detail), rightWidth,
@@ -401,11 +468,12 @@ func (m *actionMenuModel) View() string {
 		return renderPaddedPanel(width, height, listLines)
 	}
 	return renderScreenShell(screenShell{
-		breadcrumb: m.title,
-		status:     fmt.Sprintf("%d actions", len(m.list.Items())),
-		width:      m.width,
-		height:     m.height,
-		body:       body,
+		breadcrumb:   breadcrumb,
+		status:       status,
+		notification: notification,
+		width:        m.width,
+		height:       m.height,
+		body:         body,
 		footer: []helpItem{
 			{Key: "↑/↓", Action: "move"},
 			{Key: "Enter", Action: "select"},
@@ -427,7 +495,11 @@ func (m *actionMenuModel) actionLines(capacity int) []string {
 		if index == m.list.Index() {
 			marker = "> "
 		}
-		lines = append(lines, marker+item.label)
+		label := item.label
+		if !m.loadingForwards && m.unavailableReason(item.action) != "" {
+			label += " [unavailable]"
+		}
+		lines = append(lines, marker+label)
 	}
 	return lines
 }
