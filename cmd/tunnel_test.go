@@ -44,3 +44,10 @@ func TestValidateBackgroundTunnelRequiresEnabledForward(t *testing.T) {
 		t.Fatalf("expected enabled forward error, got %v", err)
 	}
 }
+
+func TestEnabledForwardCount(t *testing.T) {
+	forwards := []*model.Forward{nil, {Enabled: false}, {Enabled: true}, {Enabled: true}}
+	if got := enabledForwardCount(forwards); got != 2 {
+		t.Fatalf("enabled count = %d, want 2", got)
+	}
+}

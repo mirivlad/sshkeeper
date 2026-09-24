@@ -101,6 +101,19 @@ type forwardsLoadedMsg struct {
 	err      error
 }
 
+type actionForwardsLoadedMsg struct {
+	serverID int64
+	count    int
+	err      error
+}
+
+type backgroundTunnelStartedMsg struct {
+	alias  string
+	origin screen
+	state  *model.TunnelState
+	err    error
+}
+
 type forwardDeletedMsg struct {
 	id  int64
 	err error
@@ -216,6 +229,7 @@ var (
 	SaveForward                func(fwd *model.Forward) error
 	UpdateForward              func(fwd *model.Forward) error
 	DeleteForward              func(forwardID int64) error
+	StartBackgroundTunnel      func(alias string) (*model.TunnelState, error)
 	ImportServers              func() (int, error)
 	LockVault                  func() error
 	VaultUnlocked              func() bool
@@ -317,6 +331,8 @@ type tuiModel struct {
 	manageMenu        *actionMenuModel
 	forwardScreen     *forwardScreenModel
 	forwardForm       *forwardFormModel
+	actionMenuParent  screen
+	tunnelStarting    bool
 	confirm           *confirmState
 	fullHelp          *fullHelpModel
 	helpParent        screen
@@ -546,11 +562,45 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.err != nil {
 				m.forwardScreen.err = msg.err
 			} else {
+				m.forwardScreen.err = nil
 				m.forwardScreen.list = msg.forwards
 				if len(msg.forwards) > 0 && m.forwardScreen.selected < 0 {
 					m.forwardScreen.selected = 0
 				}
 			}
+		}
+		return m, nil
+
+	case actionForwardsLoadedMsg:
+		if m.actionMenu != nil && m.actionMenu.serverID == msg.serverID {
+			m.actionMenu.loadingForwards = false
+			m.actionMenu.enabledForwards = msg.count
+			m.actionMenu.loadErr = msg.err
+		}
+		return m, nil
+
+	case backgroundTunnelStartedMsg:
+		m.tunnelStarting = false
+		if msg.err == nil && msg.state == nil {
+			msg.err = fmt.Errorf("tunnel launcher returned no process")
+		}
+		if msg.err != nil {
+			if msg.origin == screenForwardList && m.forwardScreen != nil && m.forwardScreen.serverAlias == msg.alias {
+				m.forwardScreen.err = msg.err
+				m.forwardScreen.notice = ""
+			} else {
+				m.err = fmt.Errorf("Start tunnel for %s: %w", msg.alias, msg.err)
+				m.success = ""
+			}
+			return m, nil
+		}
+		notice := fmt.Sprintf("Tunnel process launched for %s (PID %d). Check Running tunnels for status.", msg.alias, msg.state.PID)
+		if msg.origin == screenForwardList && m.forwardScreen != nil && m.forwardScreen.serverAlias == msg.alias {
+			m.forwardScreen.err = nil
+			m.forwardScreen.notice = notice
+		} else {
+			m.err = nil
+			m.success = notice
 		}
 		return m, nil
 
@@ -562,6 +612,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.forwardScreen.err = nil
+			m.forwardScreen.notice = ""
 			forwards := make([]*model.Forward, 0, len(m.forwardScreen.list))
 			for _, forward := range m.forwardScreen.list {
 				if forward.ID != msg.id {
@@ -723,6 +774,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forwardForm = nil
 			m.screen = screenForwardList
 			if m.forwardScreen != nil {
+				m.forwardScreen.notice = "Rule saved. Ctrl+B starts a background tunnel; Ctrl+X shows all start modes."
 				return m, m.forwardScreen.loadForwards()
 			}
 			return m, nil
@@ -922,8 +974,10 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyCtrlX:
-		m.actionMenu = newActionMenuModel(m.width, m.height, m.sessionsAvailable)
-		m.screen = screenActionMenu
+		if item, ok := m.list.SelectedItem().(serverItem); ok {
+			return m.openServerActions(item.server, screenList, nil)
+		}
+		m.err = fmt.Errorf("select a server before opening server actions")
 		return m, nil
 
 	default:
@@ -1494,12 +1548,70 @@ func (m *tuiModel) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func enabledForwardCount(forwards []*model.Forward) int {
+	count := 0
+	for _, forward := range forwards {
+		if forward != nil && forward.Enabled {
+			count++
+		}
+	}
+	return count
+}
+
+func (m *tuiModel) serverByID(id int64) *model.Server {
+	for _, server := range m.servers {
+		if server.ID == id {
+			return server
+		}
+	}
+	return nil
+}
+
+func (m *tuiModel) openServerActions(server *model.Server, parent screen, forwards []*model.Forward) (tea.Model, tea.Cmd) {
+	m.actionMenu = newActionMenuModel(m.width, m.height, m.sessionsAvailable)
+	m.actionMenuParent = parent
+	m.screen = screenActionMenu
+	if parent == screenForwardList {
+		m.actionMenu.setServer(server, enabledForwardCount(forwards), false)
+		return m, nil
+	}
+	m.actionMenu.setServer(server, 0, true)
+	return m, func() tea.Msg {
+		if ListForwards == nil {
+			return actionForwardsLoadedMsg{serverID: server.ID, err: fmt.Errorf("forward storage is unavailable")}
+		}
+		items, err := ListForwards(server.ID)
+		return actionForwardsLoadedMsg{serverID: server.ID, count: enabledForwardCount(items), err: err}
+	}
+}
+
+func (m *tuiModel) beginBackgroundTunnel(server *model.Server, origin screen) (tea.Model, tea.Cmd) {
+	if m.tunnelStarting {
+		return m, nil
+	}
+	m.tunnelStarting = true
+	if origin == screenForwardList && m.forwardScreen != nil {
+		m.forwardScreen.err = nil
+		m.forwardScreen.notice = "Starting background tunnel for " + server.Alias + "..."
+	} else {
+		m.err = nil
+		m.success = "Starting background tunnel for " + server.Alias + "..."
+	}
+	return m, func() tea.Msg {
+		if StartBackgroundTunnel == nil {
+			return backgroundTunnelStartedMsg{alias: server.Alias, origin: origin, err: fmt.Errorf("background tunnel startup is unavailable")}
+		}
+		state, err := StartBackgroundTunnel(server.Alias)
+		return backgroundTunnelStartedMsg{alias: server.Alias, origin: origin, state: state, err: err}
+	}
+}
+
 func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	updated, action := m.actionMenu.Update(msg)
 	m.actionMenu = updated
 
 	if msg.Type == tea.KeyEsc {
-		m.screen = screenList
+		m.screen = m.actionMenuParent
 		m.actionMenu = nil
 		return m, nil
 	}
@@ -1542,16 +1654,18 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "tunnel_bg":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				origin := m.actionMenuParent
 				m.actionMenu = nil
-				m.result = &TUIResult{
-					Server:  item.server,
-					Action:  "tunnel_bg",
-					Servers: []*model.Server{item.server},
-				}
-				return m, tea.Quit
+				m.screen = origin
+				return m.beginBackgroundTunnel(item.server, origin)
 			}
 		case "forwards":
 			if item, ok := m.list.SelectedItem().(serverItem); ok {
+				if m.actionMenuParent == screenForwardList && m.forwardScreen != nil {
+					m.screen = screenForwardList
+					m.actionMenu = nil
+					return m, nil
+				}
 				m.forwardScreen = newForwardScreenModel(item.server.ID, item.server.Alias, m.width, m.height)
 				m.screen = screenForwardList
 				m.actionMenu = nil
@@ -1665,6 +1779,16 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenList
 		m.forwardScreen = nil
 		return m, nil
+	case tea.KeyCtrlX:
+		if m.forwardScreen != nil {
+			if server := m.serverByID(m.forwardScreen.serverID); server != nil {
+				return m.openServerActions(server, screenForwardList, m.forwardScreen.list)
+			}
+			m.forwardScreen.err = fmt.Errorf("server profile is no longer available")
+		}
+		return m, nil
+	case tea.KeyCtrlB:
+		return m.startForwardListTunnel()
 	case tea.KeyCtrlA:
 		// Add forward
 		if m.forwardScreen != nil {
@@ -1684,6 +1808,7 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeySpace:
 		if m.forwardScreen != nil && m.forwardScreen.selected >= 0 && m.forwardScreen.selected < len(m.forwardScreen.list) {
+			m.forwardScreen.notice = ""
 			selected := *m.forwardScreen.list[m.forwardScreen.selected]
 			selected.Enabled = !selected.Enabled
 			return m, func() tea.Msg {
@@ -1699,6 +1824,8 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyRunes:
 		switch msg.String() {
+		case "b", "B":
+			return m.startForwardListTunnel()
 		case "a", "A":
 			if m.forwardScreen != nil {
 				m.forwardForm = newForwardFormModel(m.forwardScreen.serverID, m.width, m.height)
@@ -1724,6 +1851,26 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *tuiModel) startForwardListTunnel() (tea.Model, tea.Cmd) {
+	if m.forwardScreen == nil || m.tunnelStarting {
+		return m, nil
+	}
+	server := m.serverByID(m.forwardScreen.serverID)
+	if server == nil {
+		m.forwardScreen.err = fmt.Errorf("server profile is no longer available")
+		return m, nil
+	}
+	if enabledForwardCount(m.forwardScreen.list) == 0 {
+		m.forwardScreen.err = fmt.Errorf("no enabled port forwards; add or enable a rule before starting a tunnel")
+		return m, nil
+	}
+	if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
+		m.forwardScreen.err = fmt.Errorf("background mode needs key or agent authentication; use Ctrl+X for a foreground mode")
+		return m, nil
+	}
+	return m.beginBackgroundTunnel(server, screenForwardList)
 }
 
 func (m *tuiModel) updateSessionManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

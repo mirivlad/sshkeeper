@@ -158,6 +158,20 @@ func runTUI() error {
 	tui.DeleteForward = func(forwardID int64) error {
 		return appDB.DeleteForward(forwardID)
 	}
+	tui.StartBackgroundTunnel = func(alias string) (*model.TunnelState, error) {
+		server, err := appDB.GetServer(alias)
+		if err != nil {
+			return nil, fmt.Errorf("server not found: %s", alias)
+		}
+		forwards, err := appDB.GetForwards(server.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load forwards: %w", err)
+		}
+		if err := validateBackgroundTunnel(server, forwards); err != nil {
+			return nil, err
+		}
+		return tunnelpkg.StartResolved(cfg, server, forwards, true, dbProfileResolver)
+	}
 	tui.ImportServers = func() (int, error) {
 		return importServersFromSSHConfig(nil)
 	}
@@ -299,11 +313,12 @@ func runTUI() error {
 			continue
 		}
 
-		if result != nil && (result.Action == "tunnel" || result.Action == "tunnel_n" || result.Action == "tunnel_bg") && result.Server != nil {
+		if result != nil && (result.Action == "tunnel" || result.Action == "tunnel_n") && result.Server != nil {
 			server := result.Server
 			fresh, err := appDB.GetServer(server.Alias)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Server not found: %s\n", server.Alias)
+				waitForTUIReturn()
 				servers, _ = appDB.ListServers()
 				continue
 			}
@@ -311,34 +326,23 @@ func runTUI() error {
 			forwards, err := appDB.GetForwards(fresh.ID)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Load forwards: %v\n", err)
+				waitForTUIReturn()
 				servers, _ = appDB.ListServers()
 				continue
 			}
 
-			forwardOnly := result.Action == "tunnel_n" || result.Action == "tunnel_bg"
-			background := result.Action == "tunnel_bg"
-
-			if background {
-				// Start detached tunnel process
-				if err := validateBackgroundTunnel(fresh, forwards); err != nil {
-					fmt.Fprintf(os.Stderr, "Start tunnel: %v\n", err)
-					servers, _ = appDB.ListServers()
-					continue
-				}
-				state, err := tunnelpkg.StartResolved(cfg, fresh, forwards, forwardOnly, dbProfileResolver)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Start tunnel: %v\n", err)
-				} else {
-					fmt.Printf("✓ Tunnel started [%d] PID %d → %s\n", state.ID, state.PID, fresh.Alias)
-				}
+			forwardOnly := result.Action == "tunnel_n"
+			active := enabledForwardCount(forwards)
+			if active == 0 {
+				fmt.Fprintf(os.Stderr, "No enabled port forwards for %s. Add or enable a rule before starting a tunnel.\n", fresh.Alias)
+				waitForTUIReturn()
 				servers, _ = appDB.ListServers()
 				continue
 			}
 
-			if len(forwards) > 0 {
-				fmt.Printf("Starting tunnel to %s with %d forward(s)...\n", fresh.Alias, len(forwards))
-			} else {
-				fmt.Printf("Starting session to %s...\n", fresh.Alias)
+			fmt.Printf("Starting tunnel to %s with %d enabled forward(s)...\n", fresh.Alias, active)
+			if forwardOnly {
+				fmt.Println("Tunnel mode (ssh -N). Press Ctrl+C to stop and return to sshkeeper.")
 			}
 
 			if err := ssh.ConnectWithForwardsResolved(cfg, fresh, forwards, forwardOnly, dbProfileResolver, serverVaultFunc(fresh)); err != nil {
@@ -348,9 +352,7 @@ func runTUI() error {
 			}
 			appDB.UpdateLastConnected(fresh.Alias)
 
-			fmt.Println("\n[Press Enter to return to sshkeeper]")
-			buf := make([]byte, 1)
-			os.Stdin.Read(buf)
+			waitForTUIReturn()
 
 			servers, _ = appDB.ListServers()
 			continue
@@ -359,4 +361,10 @@ func runTUI() error {
 		// Normal quit (q or Esc)
 		return nil
 	}
+}
+
+func waitForTUIReturn() {
+	fmt.Println("\n[Press Enter to return to sshkeeper]")
+	buf := make([]byte, 1)
+	_, _ = os.Stdin.Read(buf)
 }

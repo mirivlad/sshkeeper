@@ -27,6 +27,7 @@ type forwardScreenModel struct {
 	width       int
 	height      int
 	err         error
+	notice      string
 	selected    int
 }
 
@@ -82,6 +83,8 @@ func (m *forwardScreenModel) View() string {
 	notification := ""
 	if m.err != nil {
 		notification = errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
+	} else if m.notice != "" {
+		notification = successStyle.Render(m.notice)
 	}
 	body := func(width, height int) string {
 		switch classifyShellContent(width) {
@@ -110,6 +113,8 @@ func (m *forwardScreenModel) View() string {
 		height:       m.height,
 		body:         body,
 		footer: []helpItem{
+			{Key: "Ctrl+B (b)", Action: "start in background"},
+			{Key: "Ctrl+X", Action: "start modes"},
 			{Key: "Ctrl+A (a)", Action: "add"},
 			{Key: "Ctrl+E/Enter", Action: "edit"},
 			{Key: "Space", Action: "enable/disable"},
@@ -122,7 +127,7 @@ func (m *forwardScreenModel) View() string {
 
 func (m *forwardScreenModel) forwardListLines(width, capacity int, compact bool) []string {
 	if len(m.list) == 0 {
-		return []string{helpStyle.Copy().MarginLeft(0).Render("No port forwards configured. Ctrl+A adds one.")}
+		return []string{helpStyle.Copy().MarginLeft(0).Render("No port forwards configured. Ctrl+A adds one before starting a tunnel.")}
 	}
 	lines := []string{m.renderForwardRow(nil, false, width, compact)}
 	rowCapacity := max(1, capacity-1)

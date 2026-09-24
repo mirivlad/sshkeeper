@@ -110,7 +110,11 @@ func (m *tunnelScreenModel) View() string {
 	}
 	body := func(width, height int) string {
 		if len(m.tunnels) == 0 {
-			return renderPaddedPanel(width, height, []string{dashboardHelp("No tracked tunnels.")})
+			return renderPaddedPanel(width, height, []string{
+				dashboardHelp("No tracked tunnels."),
+				dashboardHelp("Select a server on the dashboard."),
+				dashboardHelp("Ctrl+W: Port forwards; Ctrl+B: start in background."),
+			})
 		}
 		capacity := max(1, height-2)
 		start, end := visibleServerRange(len(m.tunnels), m.list.Index(), max(1, capacity/3))
