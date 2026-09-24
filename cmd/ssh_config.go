@@ -10,36 +10,36 @@ import (
 
 var sshConfigCmd = &cobra.Command{
 	Use:   "ssh-config",
-	Short: "OpenSSH config management",
+	Short: tr("OpenSSH config management", "Управление конфигурацией OpenSSH"),
 }
 
 var sshConfigGenerateCmd = &cobra.Command{
 	Use:   "generate",
-	Short: "Generate OpenSSH config from server profiles",
+	Short: tr("Generate OpenSSH config from server profiles", "Создать конфигурацию OpenSSH из профилей серверов"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		servers, err := appDB.ListServers()
 		if err != nil {
-			return fmt.Errorf("list servers: %w", err)
+			return fmt.Errorf("%s: %w", tr("list servers", "получить список серверов"), err)
 		}
 
 		if err := ssh.WriteConfig(servers); err != nil {
-			return fmt.Errorf("write config: %w", err)
+			return fmt.Errorf("%s: %w", tr("write config", "записать конфигурацию"), err)
 		}
 
 		home, _ := os.UserHomeDir()
-		fmt.Printf("Config written to: %s/.ssh/config.d/sshkeeper.conf\n", home)
+		fmt.Printf(tr("Config written to: %s/.ssh/config.d/sshkeeper.conf\n", "Конфигурация записана в: %s/.ssh/config.d/sshkeeper.conf\n"), home)
 		return nil
 	},
 }
 
 var sshConfigInstallIncludeCmd = &cobra.Command{
 	Use:   "install-include",
-	Short: "Add Include directive to ~/.ssh/config",
+	Short: tr("Add Include directive to ~/.ssh/config", "Добавить директиву Include в ~/.ssh/config"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := ssh.InstallInclude(); err != nil {
-			return fmt.Errorf("install include: %w", err)
+			return fmt.Errorf("%s: %w", tr("install include", "добавить Include"), err)
 		}
-		fmt.Println("Include directive added to ~/.ssh/config")
+		fmt.Println(tr("Include directive added to ~/.ssh/config", "Директива Include добавлена в ~/.ssh/config"))
 		return nil
 	},
 }

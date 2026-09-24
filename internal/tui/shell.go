@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 )
 
 type screenShell struct {
@@ -122,9 +123,9 @@ func classifyShellContent(contentWidth int) terminalSizeClass {
 }
 
 func shellStatus(vaultUnlocked bool, detail string) string {
-	vault := "Vault locked"
+	vault := i18n.T("Vault locked", "Хранилище заблокировано")
 	if vaultUnlocked {
-		vault = "Vault unlocked"
+		vault = i18n.T("Vault unlocked", "Хранилище разблокировано")
 	}
 	if detail == "" {
 		return vault

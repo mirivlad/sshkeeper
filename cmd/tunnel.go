@@ -12,13 +12,13 @@ import (
 
 var tunnelCmd = &cobra.Command{
 	Use:   "tunnel <alias>",
-	Short: "Start SSH session with port forwards",
+	Short: tr("Start SSH session with port forwards", "Запустить SSH-сеанс с перенаправлением портов"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		alias := args[0]
 		server, err := appDB.GetServer(alias)
 		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
+			return fmt.Errorf("%s", trf("server not found: %s", "сервер не найден: %s", alias))
 		}
 
 		forwardsOnly, _ := cmd.Flags().GetBool("forward-only")
@@ -27,7 +27,7 @@ var tunnelCmd = &cobra.Command{
 		// Load forwards
 		forwards, err := appDB.GetForwards(server.ID)
 		if err != nil {
-			return fmt.Errorf("load forwards: %w", err)
+			return fmt.Errorf("%s: %w", tr("load forwards", "загрузить перенаправления"), err)
 		}
 
 		if background {
@@ -38,23 +38,23 @@ var tunnelCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			fmt.Printf("✓ Tunnel started [%d] PID %d → %s\n", state.ID, state.PID, server.Alias)
+			fmt.Printf(tr("✓ Tunnel started [%d] PID %d → %s\n", "✓ Туннель запущен [%d] PID %d → %s\n"), state.ID, state.PID, server.Alias)
 			return nil
 		}
 
 		active := enabledForwardCount(forwards)
 		if active == 0 && forwardsOnly {
-			return fmt.Errorf("no enabled forwards configured for %s", alias)
+			return fmt.Errorf("%s", trf("no enabled forwards configured for %s", "для %s нет включённых перенаправлений", alias))
 		}
 
 		if active > 0 {
-			fmt.Printf("Starting tunnel to %s with %d enabled forward(s)...\n", alias, active)
+			fmt.Printf(tr("Starting tunnel to %s with %d enabled forward(s)...\n", "Запуск туннеля к %s с %d включёнными перенаправлениями...\n"), alias, active)
 		} else {
-			fmt.Printf("Starting session to %s...\n", alias)
+			fmt.Printf(tr("Starting session to %s...\n", "Запуск сеанса с %s...\n"), alias)
 		}
 
 		if forwardsOnly {
-			fmt.Printf("Tunnel mode (ssh -N). Press Ctrl+C to exit.\n")
+			fmt.Print(tr("Tunnel mode (ssh -N). Press Ctrl+C to exit.\n", "Режим туннеля (ssh -N). Нажмите Ctrl+C для выхода.\n"))
 		}
 
 		return ssh.ConnectWithForwardsResolved(cfg, server, forwards, forwardsOnly, dbProfileResolver, serverVaultFunc(server))
@@ -63,15 +63,15 @@ var tunnelCmd = &cobra.Command{
 
 var tunnelListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List tracked background tunnels",
+	Short: tr("List tracked background tunnels", "Показать фоновые туннели"),
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		states := tunnelpkg.List()
 		if len(states) == 0 {
-			fmt.Println("No tracked tunnels.")
+			fmt.Println(tr("No tracked tunnels.", "Фоновых туннелей нет."))
 			return nil
 		}
-		fmt.Printf("%-22s %-8s %-10s %s\n", "ID", "PID", "STATUS", "SERVER")
+		fmt.Printf("%-22s %-8s %-10s %s\n", "ID", "PID", tr("STATUS", "СТАТУС"), tr("SERVER", "СЕРВЕР"))
 		for _, state := range states {
 			status := "stopped"
 			if tunnelpkg.IsRunning(state.ID) {
@@ -85,30 +85,30 @@ var tunnelListCmd = &cobra.Command{
 
 var tunnelStopCmd = &cobra.Command{
 	Use:   "stop <id>",
-	Short: "Stop a tracked background tunnel",
+	Short: tr("Stop a tracked background tunnel", "Остановить фоновый туннель"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {
-			return fmt.Errorf("invalid tunnel ID: %s", args[0])
+			return fmt.Errorf("%s", trf("invalid tunnel ID: %s", "недопустимый ID туннеля: %s", args[0]))
 		}
 		if err := tunnelpkg.Stop(id); err != nil {
 			return err
 		}
-		fmt.Printf("✓ Tunnel %d stopped\n", id)
+		fmt.Printf(tr("✓ Tunnel %d stopped\n", "✓ Туннель %d остановлен\n"), id)
 		return nil
 	},
 }
 
 var tunnelStopAllCmd = &cobra.Command{
 	Use:   "stop-all",
-	Short: "Stop all tracked background tunnels",
+	Short: tr("Stop all tracked background tunnels", "Остановить все фоновые туннели"),
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := tunnelpkg.StopAll(); err != nil {
 			return err
 		}
-		fmt.Println("✓ All tracked tunnels stopped")
+		fmt.Println(tr("✓ All tracked tunnels stopped", "✓ Все фоновые туннели остановлены"))
 		return nil
 	},
 }
@@ -125,17 +125,17 @@ func enabledForwardCount(forwards []*model.Forward) int {
 
 func validateBackgroundTunnel(server *model.Server, forwards []*model.Forward) error {
 	if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
-		return fmt.Errorf("background tunnels support only key or agent auth; use foreground tunnel for %s auth", server.AuthMethod)
+		return fmt.Errorf("%s", trf("background tunnels support only key or agent auth; use foreground tunnel for %s auth", "фоновые туннели поддерживают только вход по ключу или через агент; для %s используйте обычный туннель", server.AuthMethod))
 	}
 	if enabledForwardCount(forwards) == 0 {
-		return fmt.Errorf("no enabled forwards configured for %s", server.Alias)
+		return fmt.Errorf("%s", trf("no enabled forwards configured for %s", "для %s нет включённых перенаправлений", server.Alias))
 	}
 	return nil
 }
 
 func init() {
-	tunnelCmd.Flags().Bool("forward-only", false, "Start tunnel only (ssh -N)")
-	tunnelCmd.Flags().Bool("background", false, "Start tunnel in background (ssh -N)")
+	tunnelCmd.Flags().Bool("forward-only", false, tr("Start tunnel only (ssh -N)", "Запустить только туннель (ssh -N)"))
+	tunnelCmd.Flags().Bool("background", false, tr("Start tunnel in background (ssh -N)", "Запустить туннель в фоне (ssh -N)"))
 	tunnelCmd.AddCommand(tunnelListCmd)
 	tunnelCmd.AddCommand(tunnelStopCmd)
 	tunnelCmd.AddCommand(tunnelStopAllCmd)

@@ -23,17 +23,17 @@ func getOrCreateVault() *vault.Vault {
 
 var vaultCmd = &cobra.Command{
 	Use:   "vault",
-	Short: "Vault management commands",
+	Short: tr("Vault management commands", "Команды управления хранилищем"),
 }
 
 var vaultUnlockCmd = &cobra.Command{
 	Use:   "unlock",
-	Short: "Verify the vault master password",
+	Short: tr("Verify the vault master password", "Проверить мастер-пароль хранилища"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v := getOrCreateVault()
 
 		if v.IsUnlocked() {
-			fmt.Println("Vault is already unlocked.")
+			fmt.Println(tr("Vault is already unlocked.", "Хранилище уже разблокировано."))
 			return nil
 		}
 
@@ -43,70 +43,70 @@ var vaultUnlockCmd = &cobra.Command{
 		info, err := os.Stat(vaultPath)
 		if os.IsNotExist(err) || info.Size() == 0 {
 			// New vault - create with master password
-			fmt.Print("Create master password: ")
+			fmt.Print(tr("Create master password: ", "Создайте мастер-пароль: "))
 			pw1, err := term.ReadPassword(int(syscall.Stdin))
 			fmt.Println()
 			if err != nil {
-				return fmt.Errorf("read password: %w", err)
+				return fmt.Errorf(tr("read password: %w", "прочитать пароль: %w"), err)
 			}
 
 			if len(pw1) == 0 {
-				return fmt.Errorf("password cannot be empty")
+				return fmt.Errorf("%s", tr("password cannot be empty", "пароль не может быть пустым"))
 			}
 
-			fmt.Print("Repeat master password: ")
+			fmt.Print(tr("Repeat master password: ", "Повторите мастер-пароль: "))
 			pw2, err := term.ReadPassword(int(syscall.Stdin))
 			fmt.Println()
 			if err != nil {
-				return fmt.Errorf("read password: %w", err)
+				return fmt.Errorf(tr("read password: %w", "прочитать пароль: %w"), err)
 			}
 
 			if string(pw1) != string(pw2) {
-				return fmt.Errorf("passwords do not match")
+				return fmt.Errorf("%s", tr("passwords do not match", "пароли не совпадают"))
 			}
 
 			if err := vault.Create(vaultPath, string(pw1)); err != nil {
-				return fmt.Errorf("create vault: %w", err)
+				return fmt.Errorf(tr("create vault: %w", "создать хранилище: %w"), err)
 			}
 
 			if err := v.Unlock(string(pw1)); err != nil {
-				return fmt.Errorf("unlock vault: %w", err)
+				return fmt.Errorf(tr("unlock vault: %w", "разблокировать хранилище: %w"), err)
 			}
 
-			fmt.Println("Vault created. Commands will ask for the master password when they need secrets.")
+			fmt.Println(tr("Vault created. Commands will ask for the master password when they need secrets.", "Хранилище создано. Команды запросят мастер-пароль, когда им понадобятся секреты."))
 			return nil
 		}
 
-		fmt.Print("Master password: ")
+		fmt.Print(tr("Master password: ", "Мастер-пароль: "))
 		pw, err := term.ReadPassword(int(syscall.Stdin))
 		fmt.Println()
 		if err != nil {
-			return fmt.Errorf("read password: %w", err)
+			return fmt.Errorf(tr("read password: %w", "прочитать пароль: %w"), err)
 		}
 
 		if err := v.Unlock(string(pw)); err != nil {
-			return fmt.Errorf("unlock vault: %w", err)
+			return fmt.Errorf(tr("unlock vault: %w", "разблокировать хранилище: %w"), err)
 		}
 
-		fmt.Println("Master password accepted. Vault unlock is process-local; commands will ask again when they need secrets.")
+		fmt.Println(tr("Master password accepted. Vault unlock is process-local; commands will ask again when they need secrets.", "Мастер-пароль принят. Разблокировка действует только в текущем процессе; команды повторно запросят пароль, когда понадобятся секреты."))
 		return nil
 	},
 }
 
 var vaultLockCmd = &cobra.Command{
 	Use:   "lock",
-	Short: "Lock the vault",
+	Short: tr("Lock the vault", "Заблокировать хранилище"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v := getOrCreateVault()
 		v.Lock()
-		fmt.Println("Vault locked.")
+		fmt.Println(tr("Vault locked.", "Хранилище заблокировано."))
 		return nil
 	},
 }
 
 var vaultStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show vault status",
+	Short: tr("Show vault status", "Показать состояние хранилища"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v := getOrCreateVault()
 		fmt.Println(formatVaultStatus(v.IsUnlocked(), vault.Exists(config.VaultPath(cfg.DataDir))))
@@ -116,7 +116,7 @@ var vaultStatusCmd = &cobra.Command{
 
 var vaultChangePasswordCmd = &cobra.Command{
 	Use:   "change-password",
-	Short: "Change master password",
+	Short: tr("Change master password", "Сменить мастер-пароль"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return changeVaultPasswordInteractive()
 	},
@@ -124,7 +124,7 @@ var vaultChangePasswordCmd = &cobra.Command{
 
 var vaultListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List stored secret metadata",
+	Short: tr("List stored secret metadata", "Показать метаданные сохранённых секретов"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v := getOrCreateVault()
 		if err := unlockVaultForCommand(v); err != nil {
@@ -141,7 +141,7 @@ var vaultListCmd = &cobra.Command{
 
 var vaultDeleteCmd = &cobra.Command{
 	Use:   "delete <alias> [type]",
-	Short: "Delete stored secrets for a server",
+	Short: tr("Delete stored secrets for a server", "Удалить секреты сервера"),
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		alias := args[0]
@@ -158,12 +158,12 @@ var vaultDeleteCmd = &cobra.Command{
 			return err
 		}
 		if err := v.Save(); err != nil {
-			return fmt.Errorf("save vault: %w", err)
+			return fmt.Errorf(tr("save vault: %w", "сохранить хранилище: %w"), err)
 		}
 		if secretType == "" {
-			fmt.Printf("Deleted secrets for %s.\n", alias)
+			fmt.Printf(tr("Deleted secrets for %s.\n", "Секреты для %s удалены.\n"), alias)
 		} else {
-			fmt.Printf("Deleted %s for %s.\n", secretType, alias)
+			fmt.Printf(tr("Deleted %s for %s.\n", "Секрет %s для %s удалён.\n"), secretType, alias)
 		}
 		return nil
 	},
@@ -174,15 +174,15 @@ func unlockVaultForCommand(v *vault.Vault) error {
 		return nil
 	}
 
-	fmt.Print("Master password: ")
+	fmt.Print(tr("Master password: ", "Мастер-пароль: "))
 	pw, err := term.ReadPassword(int(syscall.Stdin))
 	fmt.Println()
 	if err != nil {
-		return fmt.Errorf("read password: %w", err)
+		return fmt.Errorf(tr("read password: %w", "прочитать пароль: %w"), err)
 	}
 
 	if err := v.Unlock(string(pw)); err != nil {
-		return fmt.Errorf("unlock vault: %w", err)
+		return fmt.Errorf(tr("unlock vault: %w", "разблокировать хранилище: %w"), err)
 	}
 	return nil
 }
@@ -194,48 +194,48 @@ func changeVaultPasswordInteractive() error {
 		return err
 	}
 
-	fmt.Print("New master password: ")
+	fmt.Print(tr("New master password: ", "Новый мастер-пароль: "))
 	pw1, err := term.ReadPassword(int(syscall.Stdin))
 	fmt.Println()
 	if err != nil {
-		return fmt.Errorf("read password: %w", err)
+		return fmt.Errorf(tr("read password: %w", "прочитать пароль: %w"), err)
 	}
 
 	if len(pw1) == 0 {
-		return fmt.Errorf("password cannot be empty")
+		return fmt.Errorf("%s", tr("password cannot be empty", "пароль не может быть пустым"))
 	}
 
-	fmt.Print("Repeat new master password: ")
+	fmt.Print(tr("Repeat new master password: ", "Повторите новый мастер-пароль: "))
 	pw2, err := term.ReadPassword(int(syscall.Stdin))
 	fmt.Println()
 	if err != nil {
-		return fmt.Errorf("read password: %w", err)
+		return fmt.Errorf(tr("read password: %w", "прочитать пароль: %w"), err)
 	}
 
 	if string(pw1) != string(pw2) {
-		return fmt.Errorf("passwords do not match")
+		return fmt.Errorf("%s", tr("passwords do not match", "пароли не совпадают"))
 	}
 
 	if err := v.ChangePassword(string(pw1)); err != nil {
-		return fmt.Errorf("change password: %w", err)
+		return fmt.Errorf(tr("change password: %w", "сменить пароль: %w"), err)
 	}
 
-	fmt.Println("Master password changed.")
+	fmt.Println(tr("Master password changed.", "Мастер-пароль изменён."))
 	return nil
 }
 
 func vaultLockedProcessMessage() string {
-	return "vault is locked in this process; enter the master password when this command prompts for it"
+	return tr("vault is locked in this process; enter the master password when this command prompts for it", "хранилище заблокировано в этом процессе; введите мастер-пароль по запросу команды")
 }
 
 func formatVaultStatus(unlocked bool, exists bool) string {
 	if !exists {
-		return "Vault: not found"
+		return tr("Vault: not found", "Хранилище: не найдено")
 	}
 	if unlocked {
-		return "Vault: unlocked in current process"
+		return tr("Vault: unlocked in current process", "Хранилище: разблокировано в текущем процессе")
 	}
-	return "Vault: locked (vault commands unlock per command)"
+	return tr("Vault: locked (vault commands unlock per command)", "Хранилище: заблокировано (разблокировка отдельно для каждой команды)")
 }
 
 func formatVaultSecretsList(v *vault.Vault) (string, error) {
@@ -244,11 +244,11 @@ func formatVaultSecretsList(v *vault.Vault) (string, error) {
 		return "", err
 	}
 	if len(metas) == 0 {
-		return "No secrets stored.\n", nil
+		return tr("No secrets stored.\n", "Секретов нет.\n"), nil
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-24s %-18s\n", "ALIAS", "TYPE")
+	fmt.Fprintf(&b, "%-24s %-18s\n", tr("ALIAS", "ПСЕВДОНИМ"), tr("TYPE", "ТИП"))
 	for _, meta := range metas {
 		alias := meta.Alias
 		if alias == "" && meta.ServerID > 0 {

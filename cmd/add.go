@@ -31,8 +31,8 @@ var addFlags struct {
 
 var addCmd = &cobra.Command{
 	Use:   "add [alias]",
-	Short: "Add a new server",
-	Long:  "Add a new server profile. If alias is provided with --host, non-interactive mode is used.",
+	Short: tr("Add a new server", "Добавить сервер"),
+	Long:  tr("Add a new server profile. If alias is provided with --host, non-interactive mode is used.", "Добавить профиль сервера. Если указаны псевдоним и --host, используется неинтерактивный режим."),
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 1 && addFlags.host != "" {
@@ -57,7 +57,7 @@ func addNonInteractive(alias string) error {
 	}
 	route, err := parseRouteSpec(routeSpec)
 	if err != nil {
-		return fmt.Errorf("route: %w", err)
+		return fmt.Errorf("%s: %w", tr("route", "маршрут"), err)
 	}
 	server := &model.Server{
 		Alias:          alias,
@@ -91,7 +91,7 @@ func saveServerWithOptionalSecret(server *model.Server) error {
 	if len(server.Route.Hops) == 0 && strings.TrimSpace(server.ProxyJump) != "" {
 		route, err := parseRouteSpec(server.ProxyJump)
 		if err != nil {
-			return fmt.Errorf("route: %w", err)
+			return fmt.Errorf("%s: %w", tr("route", "маршрут"), err)
 		}
 		server.Route = route
 	}
@@ -112,14 +112,14 @@ func saveServerWithOptionalSecret(server *model.Server) error {
 		if server.AuthMethod == model.AuthKeyPassphrase {
 			secretType = "passphrase"
 		}
-		fmt.Printf("Enter %s (will be stored in vault, input hidden): ", secretType)
+		fmt.Print(trf("Enter %s (will be stored in vault, input hidden): ", "Введите %s (сохранится в хранилище, ввод скрыт): ", secretType))
 		password, err := term.ReadPassword(int(syscall.Stdin))
 		fmt.Println()
 		if err != nil {
-			return fmt.Errorf("read %s: %w", secretType, err)
+			return fmt.Errorf("%s: %w", trf("read %s", "прочитать %s", secretType), err)
 		}
 		if len(password) == 0 {
-			return fmt.Errorf("%s cannot be empty", secretType)
+			return fmt.Errorf("%s", trf("%s cannot be empty", "%s не может быть пустым", secretType))
 		}
 		secret = password
 		defer func() {
@@ -133,89 +133,89 @@ func saveServerWithOptionalSecret(server *model.Server) error {
 	}
 
 	if err := appDB.CreateServer(server); err != nil {
-		return fmt.Errorf("create server: %w", err)
+		return fmt.Errorf("%s: %w", tr("create server", "создать сервер"), err)
 	}
 	rollbackDB := func() { _ = appDB.DeleteServer(server.Alias) }
 
 	if len(server.Tags) > 0 {
 		if err := appDB.SetServerTags(server.ID, server.Tags); err != nil {
 			rollbackDB()
-			return fmt.Errorf("set tags: %w", err)
+			return fmt.Errorf("%s: %w", tr("set tags", "назначить теги"), err)
 		}
 	}
 
 	if needsSecret {
 		if err := syncServerSecrets(v, "", server, string(secret)); err != nil {
 			rollbackDB()
-			return fmt.Errorf("store secret in vault: %w", err)
+			return fmt.Errorf("%s: %w", tr("store secret in vault", "сохранить секрет в хранилище"), err)
 		}
 		if err := v.Save(); err != nil {
 			cleanupServerSecretsForServer(v, server)
 			rollbackDB()
-			return fmt.Errorf("save vault: %w", err)
+			return fmt.Errorf("%s: %w", tr("save vault", "сохранить хранилище"), err)
 		}
 	}
 
-	fmt.Println("Saved.")
+	fmt.Println(tr("Saved.", "Сохранено."))
 	return nil
 }
 
 func promptServerForAdd(in io.Reader, out io.Writer) (*model.Server, error) {
 	reader := bufio.NewReader(in)
 
-	alias, err := promptRequired(reader, out, "Alias")
+	alias, err := promptRequired(reader, out, tr("Alias", "Псевдоним"))
 	if err != nil {
 		return nil, err
 	}
-	displayName, err := promptOptional(reader, out, "Display name", alias)
+	displayName, err := promptOptional(reader, out, tr("Display name", "Отображаемое имя"), alias)
 	if err != nil {
 		return nil, err
 	}
-	host, err := promptRequired(reader, out, "Host")
+	host, err := promptRequired(reader, out, tr("Host", "Хост"))
 	if err != nil {
 		return nil, err
 	}
-	portText, err := promptOptional(reader, out, "Port", "22")
+	portText, err := promptOptional(reader, out, tr("Port", "Порт"), "22")
 	if err != nil {
 		return nil, err
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port <= 0 {
-		return nil, fmt.Errorf("invalid port: %s", portText)
+		return nil, fmt.Errorf("%s", trf("invalid port: %s", "недопустимый порт: %s", portText))
 	}
-	user, err := promptOptional(reader, out, "User", "root")
+	user, err := promptOptional(reader, out, tr("User", "Пользователь"), "root")
 	if err != nil {
 		return nil, err
 	}
-	authText, err := promptOptional(reader, out, "Auth method (password/key/key_passphrase/agent)", string(model.AuthKey))
+	authText, err := promptOptional(reader, out, tr("Auth method (password/key/key_passphrase/agent)", "Способ входа (password/key/key_passphrase/agent)"), string(model.AuthKey))
 	if err != nil {
 		return nil, err
 	}
 	authMethod := model.AuthMethod(authText)
 	if !isSupportedAuthMethod(authMethod) {
-		return nil, fmt.Errorf("unsupported auth method: %s", authText)
+		return nil, fmt.Errorf("%s", trf("unsupported auth method: %s", "неподдерживаемый способ входа: %s", authText))
 	}
-	identityFile, err := promptOptional(reader, out, "Identity file", "")
+	identityFile, err := promptOptional(reader, out, tr("Identity file", "Файл ключа"), "")
 	if err != nil {
 		return nil, err
 	}
-	proxyJump, err := promptOptional(reader, out, "Route / ProxyJump (profile:<alias> or raw:<target>)", "")
+	proxyJump, err := promptOptional(reader, out, tr("Route / ProxyJump (profile:<alias> or raw:<target>)", "Маршрут / ProxyJump (profile:<alias> или raw:<target>)"), "")
 	if err != nil {
 		return nil, err
 	}
-	groupName, err := promptOptional(reader, out, "Group", "")
+	groupName, err := promptOptional(reader, out, tr("Group", "Группа"), "")
 	if err != nil {
 		return nil, err
 	}
-	notes, err := promptOptional(reader, out, "Notes", "")
+	notes, err := promptOptional(reader, out, tr("Notes", "Заметки"), "")
 	if err != nil {
 		return nil, err
 	}
-	startupCommand, err := promptOptional(reader, out, "Startup command", "")
+	startupCommand, err := promptOptional(reader, out, tr("Startup command", "Команда при подключении"), "")
 	if err != nil {
 		return nil, err
 	}
-	tagsText, err := promptOptional(reader, out, "Tags (comma-separated)", "")
+	tagsText, err := promptOptional(reader, out, tr("Tags (comma-separated)", "Теги (через запятую)"), "")
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +245,7 @@ func promptRequired(reader *bufio.Reader, out io.Writer, label string) (string, 
 		if value != "" {
 			return value, nil
 		}
-		fmt.Fprintf(out, "%s is required.\n", label)
+		fmt.Fprintln(out, trf("%s is required.", "%s — обязательное поле.", label))
 	}
 }
 
@@ -276,16 +276,16 @@ func isSupportedAuthMethod(method model.AuthMethod) bool {
 }
 
 func init() {
-	addCmd.Flags().StringVar(&addFlags.host, "host", "", "Server hostname or IP")
-	addCmd.Flags().IntVar(&addFlags.port, "port", 22, "SSH port")
-	addCmd.Flags().StringVar(&addFlags.user, "user", "", "SSH username")
-	addCmd.Flags().StringVar(&addFlags.authMethod, "auth", "key", "Auth method: password, key, key_passphrase, agent")
-	addCmd.Flags().StringVar(&addFlags.identityFile, "identity-file", "", "Path to SSH private key")
-	addCmd.Flags().StringVar(&addFlags.route, "route", "", "Route hops: profile:<alias>, raw:<target>, comma-separated")
-	addCmd.Flags().StringVar(&addFlags.proxyJump, "proxy-jump", "", "Compatibility alias for --route")
-	addCmd.Flags().StringVar(&addFlags.groupName, "group", "", "Server group")
-	addCmd.Flags().StringVar(&addFlags.displayName, "display-name", "", "Display name")
-	addCmd.Flags().StringVar(&addFlags.notes, "notes", "", "Notes")
-	addCmd.Flags().StringVar(&addFlags.startup, "startup-command", "", "Command to run after connecting")
-	addCmd.Flags().StringVar(&addFlags.tags, "tags", "", "Comma-separated tags")
+	addCmd.Flags().StringVar(&addFlags.host, "host", "", tr("Server hostname or IP", "Имя хоста или IP-адрес сервера"))
+	addCmd.Flags().IntVar(&addFlags.port, "port", 22, tr("SSH port", "Порт SSH"))
+	addCmd.Flags().StringVar(&addFlags.user, "user", "", tr("SSH username", "Имя пользователя SSH"))
+	addCmd.Flags().StringVar(&addFlags.authMethod, "auth", "key", tr("Auth method: password, key, key_passphrase, agent", "Способ входа: password, key, key_passphrase, agent"))
+	addCmd.Flags().StringVar(&addFlags.identityFile, "identity-file", "", tr("Path to SSH private key", "Путь к закрытому ключу SSH"))
+	addCmd.Flags().StringVar(&addFlags.route, "route", "", tr("Route hops: profile:<alias>, raw:<target>, comma-separated", "Узлы маршрута через запятую: profile:<alias>, raw:<target>"))
+	addCmd.Flags().StringVar(&addFlags.proxyJump, "proxy-jump", "", tr("Compatibility alias for --route", "Совместимый псевдоним для --route"))
+	addCmd.Flags().StringVar(&addFlags.groupName, "group", "", tr("Server group", "Группа сервера"))
+	addCmd.Flags().StringVar(&addFlags.displayName, "display-name", "", tr("Display name", "Отображаемое имя"))
+	addCmd.Flags().StringVar(&addFlags.notes, "notes", "", tr("Notes", "Заметки"))
+	addCmd.Flags().StringVar(&addFlags.startup, "startup-command", "", tr("Command to run after connecting", "Команда после подключения"))
+	addCmd.Flags().StringVar(&addFlags.tags, "tags", "", tr("Comma-separated tags", "Теги через запятую"))
 }

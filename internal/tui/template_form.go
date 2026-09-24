@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbletea"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 )
 
@@ -25,7 +26,7 @@ type templateFormModel struct {
 }
 
 func newTemplateFormModel(t *model.CommandTemplate, w, h int) *templateFormModel {
-	labels := []string{"Name", "Command", "Description"}
+	labels := []string{i18n.T("Name", "Имя"), i18n.T("Command", "Команда"), i18n.T("Description", "Описание")}
 	inputs := make([]textinput.Model, len(labels))
 	for i := range inputs {
 		inputs[i] = textinput.New()
@@ -33,7 +34,7 @@ func newTemplateFormModel(t *model.CommandTemplate, w, h int) *templateFormModel
 	}
 	inputs[0].Placeholder = "uptime"
 	inputs[1].Placeholder = "uptime"
-	inputs[2].Placeholder = "optional"
+	inputs[2].Placeholder = i18n.T("optional", "необязательно")
 	inputs[0].Focus()
 
 	tf := &templateFormModel{inputs: inputs, labels: labels, width: w, height: h}
@@ -130,7 +131,7 @@ func (tf *templateFormModel) labelAt(index int) string {
 func (tf *templateFormModel) save() tea.Cmd {
 	return func() tea.Msg {
 		if SaveCommandTemplate == nil {
-			return saveDoneMsg{err: fmt.Errorf("template storage is unavailable")}
+			return saveDoneMsg{err: fmt.Errorf("%s", i18n.T("template storage is unavailable", "Хранилище шаблонов недоступно"))}
 		}
 		t := &model.CommandTemplate{
 			Name:        strings.TrimSpace(tf.inputs[0].Value()),
@@ -138,10 +139,10 @@ func (tf *templateFormModel) save() tea.Cmd {
 			Description: strings.TrimSpace(tf.inputs[2].Value()),
 		}
 		if t.Name == "" {
-			return saveDoneMsg{err: fmt.Errorf("name is required")}
+			return saveDoneMsg{err: fmt.Errorf("%s", i18n.T("name is required", "укажите имя"))}
 		}
 		if t.Command == "" {
-			return saveDoneMsg{err: fmt.Errorf("command is required")}
+			return saveDoneMsg{err: fmt.Errorf("%s", i18n.T("command is required", "укажите команду"))}
 		}
 		if err := SaveCommandTemplate(tf.oldName, t); err != nil {
 			return saveDoneMsg{err: err}
@@ -151,19 +152,19 @@ func (tf *templateFormModel) save() tea.Cmd {
 }
 
 func (tf *templateFormModel) View() string {
-	title := "Add Template"
+	title := i18n.T("Add Template", "Добавить шаблон")
 	if tf.edit {
-		title = "Edit Template"
+		title = i18n.T("Edit Template", "Изменить шаблон")
 	}
 	notification := ""
 	if tf.err != nil {
 		notification = errorStyle.Render(tf.err.Error())
 	} else if tf.saved {
-		notification = successStyle.Render("✓ Saved.")
+		notification = successStyle.Render(i18n.T("✓ Saved.", "✓ Сохранено."))
 	}
 	return renderScreenShell(screenShell{
-		breadcrumb:   "Command Templates / " + title,
-		status:       "Template editor",
+		breadcrumb:   i18n.T("Command Templates / ", "Шаблоны команд / ") + title,
+		status:       i18n.T("Template editor", "Редактор шаблона"),
 		notification: notification,
 		width:        tf.width,
 		height:       tf.height,
@@ -172,19 +173,19 @@ func (tf *templateFormModel) View() string {
 			for i := range tf.inputs {
 				lines = append(lines, tf.inputs[i].View())
 			}
-			button := "  [ Save ]"
+			button := i18n.T("  [ Save ]", "  [ Сохранить ]")
 			if tf.focusIdx == len(tf.inputs) {
-				button = selectedStyle.Render("> [ Save ]")
+				button = selectedStyle.Render(i18n.T("> [ Save ]", "> [ Сохранить ]"))
 			}
 			lines = append(lines, "", button)
 			return renderPaddedPanel(width, height, lines)
 		},
 		footer: []helpItem{
-			{Key: "Tab/↓", Action: "next"},
-			{Key: "↑", Action: "prev"},
-			{Key: "Enter", Action: "select"},
-			{Key: "Ctrl+H", Action: "help"},
-			{Key: "Esc", Action: "back"},
+			{Key: "Tab/↓", Action: i18n.T("next", "далее")},
+			{Key: "↑", Action: i18n.T("prev", "назад")},
+			{Key: "Enter", Action: i18n.T("select", "выбрать")},
+			{Key: "Ctrl+H", Action: i18n.T("help", "справка")},
+			{Key: "Esc", Action: i18n.T("back", "назад")},
 		},
 	})
 }

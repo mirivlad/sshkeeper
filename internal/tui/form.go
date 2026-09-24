@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 )
 
@@ -67,7 +68,7 @@ func (fm *formModel) setRouteProfiles(servers []*model.Server) {
 		items = append(items, routeProfileItem{server: server})
 	}
 	l := list.New(items, list.NewDefaultDelegate(), 44, 14)
-	l.Title = "Available server profiles"
+	l.Title = i18n.T("Available server profiles", "Доступные профили серверов")
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(true)
@@ -128,18 +129,18 @@ type formSnapshot struct {
 func newFormModel(w, h int) *formModel {
 	inputs := make([]textinput.Model, 12)
 	labels := []string{
-		"Alias",
-		"Display Name",
-		"Host",
-		"Port",
-		"User",
-		"Auth Method (password/key/key_passphrase/agent)",
-		"Identity File",
-		"Route (direct / ordered bastions)",
-		"Group (type new or pick from list)",
-		"Notes",
-		"Startup Command",
-		"Tags (comma-separated)",
+		i18n.T("Alias", "Псевдоним"),
+		i18n.T("Display Name", "Отображаемое имя"),
+		i18n.T("Host", "Хост"),
+		i18n.T("Port", "Порт"),
+		i18n.T("User", "Пользователь"),
+		i18n.T("Auth Method (password/key/key_passphrase/agent)", "Метод аутентификации (password/key/key_passphrase/agent)"),
+		i18n.T("Identity File", "Файл ключа"),
+		i18n.T("Route (direct / ordered bastions)", "Маршрут (direct / упорядоченные бастионы)"),
+		i18n.T("Group (type new or pick from list)", "Группа (введите новую или выберите из списка)"),
+		i18n.T("Notes", "Заметки"),
+		i18n.T("Startup Command", "Команда при подключении"),
+		i18n.T("Tags (comma-separated)", "Теги (через запятую)"),
 	}
 	for i, label := range labels {
 		inputs[i] = textinput.New()
@@ -150,7 +151,7 @@ func newFormModel(w, h int) *formModel {
 	inputs[5].SetValue(string(model.AuthKey))
 
 	pw := textinput.New()
-	pw.Placeholder = "optional"
+	pw.Placeholder = i18n.T("optional", "необязательно")
 	pw.CharLimit = 256
 	pw.EchoMode = textinput.EchoPassword
 
@@ -164,7 +165,7 @@ func newFormModel(w, h int) *formModel {
 		inputs:        inputs,
 		labels:        labels,
 		password:      pw,
-		passwordLabel: "Password / Passphrase",
+		passwordLabel: i18n.T("Password / Passphrase", "Пароль / кодовая фраза"),
 		focusIdx:      0,
 		spinner:       s,
 		width:         w,
@@ -175,12 +176,12 @@ func newFormModel(w, h int) *formModel {
 		string(model.AuthKey),
 		string(model.AuthKeyPassphrase),
 		string(model.AuthAgent),
-	}, "Select auth method", 34, 16)
+	}, i18n.T("Select auth method", "Выберите метод аутентификации"), 34, 16)
 
 	if GetGroups != nil {
 		if groups, err := GetGroups(); err == nil && len(groups) > 0 {
 			fm.groups = groups
-			fm.groupList = newStringList(groups, "Select group", 30, 8)
+			fm.groupList = newStringList(groups, i18n.T("Select group", "Выберите группу"), 30, 8)
 		}
 	}
 	fm.updateFocus()
@@ -190,29 +191,29 @@ func newFormModel(w, h int) *formModel {
 
 func placeholderForLabel(label string) string {
 	switch label {
-	case "Alias":
+	case i18n.T("Alias", "Псевдоним"):
 		return "mail.kp"
-	case "Display Name":
-		return "Production mail"
-	case "Host":
+	case i18n.T("Display Name", "Отображаемое имя"):
+		return i18n.T("Production mail", "Рабочая почта")
+	case i18n.T("Host", "Хост"):
 		return "mail.example.org"
-	case "Port":
+	case i18n.T("Port", "Порт"):
 		return "22"
-	case "User":
+	case i18n.T("User", "Пользователь"):
 		return "root"
-	case "Auth Method (password/key/key_passphrase/agent)":
+	case i18n.T("Auth Method (password/key/key_passphrase/agent)", "Метод аутентификации (password/key/key_passphrase/agent)"):
 		return "key"
-	case "Identity File":
+	case i18n.T("Identity File", "Файл ключа"):
 		return "~/.ssh/id_ed25519"
-	case "Route (direct / ordered bastions)":
+	case i18n.T("Route (direct / ordered bastions)", "Маршрут (direct / упорядоченные бастионы)"):
 		return "profile:bastion, raw:user@gw.example"
-	case "Group (type new or pick from list)":
+	case i18n.T("Group (type new or pick from list)", "Группа (введите новую или выберите из списка)"):
 		return "KP"
-	case "Notes":
-		return "optional"
-	case "Startup Command":
-		return "optional"
-	case "Tags (comma-separated)":
+	case i18n.T("Notes", "Заметки"):
+		return i18n.T("optional", "необязательно")
+	case i18n.T("Startup Command", "Команда при подключении"):
+		return i18n.T("optional", "необязательно")
+	case i18n.T("Tags (comma-separated)", "Теги (через запятую)"):
 		return "prod, web"
 	default:
 		return label
@@ -302,14 +303,14 @@ func (fm *formModel) currentPasswordLabel() string {
 	switch fm.authMethodValue() {
 	case model.AuthPassword:
 		if fm.edit && fm.hasSavedPassword {
-			return "Password (secret saved; leave blank to keep)"
+			return i18n.T("Password (secret saved; leave blank to keep)", "Пароль сохранён; оставьте поле пустым, чтобы сохранить его")
 		}
-		return "Password"
+		return i18n.T("Password", "Пароль")
 	case model.AuthKeyPassphrase:
 		if fm.edit && fm.hasSavedPassphrase {
-			return "Key passphrase (secret saved; leave blank to keep)"
+			return i18n.T("Key passphrase (secret saved; leave blank to keep)", "Кодовая фраза ключа сохранена; оставьте поле пустым, чтобы сохранить её")
 		}
-		return "Key passphrase"
+		return i18n.T("Key passphrase", "Кодовая фраза ключа")
 	default:
 		return ""
 	}
@@ -343,7 +344,7 @@ func (fm *formModel) loadIdentityPicker() {
 			fm.identityFiles = files
 		}
 	}
-	fm.identityList = newStringList(fm.identityFiles, "Select SSH private key", 52, 14)
+	fm.identityList = newStringList(fm.identityFiles, i18n.T("Select SSH private key", "Выберите закрытый ключ SSH"), 52, 14)
 	fm.identityList.SetFilteringEnabled(true)
 	fm.showIdentityList = true
 }
@@ -355,7 +356,7 @@ func (fm *formModel) loadTagPicker() {
 			fm.tagValues = tags
 		}
 	}
-	fm.tagList = newStringList(fm.tagValues, "Select tags", 40, 14)
+	fm.tagList = newStringList(fm.tagValues, i18n.T("Select tags", "Выберите теги"), 40, 14)
 	fm.tagList.SetFilteringEnabled(true)
 	fm.showTagList = true
 }
@@ -374,7 +375,7 @@ func (fm *formModel) loadStartupPicker() {
 		}
 	}
 	l := list.New(items, list.NewDefaultDelegate(), 64, 14)
-	l.Title = "Insert command template"
+	l.Title = i18n.T("Insert command template", "Вставить шаблон команды")
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(true)
@@ -602,10 +603,10 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case testDoneMsg:
 		fm.testing = false
 		if msg.ok {
-			fm.testResult = "Connection OK."
+			fm.testResult = i18n.T("Connection OK.", "Соединение установлено.")
 			fm.testOK = true
 		} else {
-			fm.testResult = fmt.Sprintf("Connection failed:\n%s", msg.err)
+			fm.testResult = i18n.Tf("Connection failed:\n%s", "Ошибка соединения:\n%s", msg.err)
 			fm.testOK = false
 		}
 		fm.testResultTime = time.Now()
@@ -775,13 +776,13 @@ func (fm *formModel) applySaveError(err error) {
 	}
 	message := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(message, "alias is required"):
+	case strings.Contains(message, "alias is required"), strings.Contains(message, "укажите псевдоним"):
 		fm.focusIdx = 0
-	case strings.Contains(message, "host is required"):
+	case strings.Contains(message, "host is required"), strings.Contains(message, "укажите хост"):
 		fm.focusIdx = 2
-	case strings.Contains(message, "port"):
+	case strings.Contains(message, "port"), strings.Contains(message, "порт"):
 		fm.focusIdx = 3
-	case strings.Contains(message, "route"):
+	case strings.Contains(message, "route"), strings.Contains(message, "маршрут"):
 		fm.focusIdx = 7
 	default:
 		return
@@ -794,7 +795,7 @@ func (fm *formModel) updateCredentialPresentation() {
 	if !fm.usesSecretInput() {
 		return
 	}
-	fm.password.Placeholder = "optional"
+	fm.password.Placeholder = i18n.T("optional", "необязательно")
 	if (fm.authMethodValue() == model.AuthPassword && fm.hasSavedPassword) || (fm.authMethodValue() == model.AuthKeyPassphrase && fm.hasSavedPassphrase) {
 		fm.password.Placeholder = ""
 	}
@@ -827,32 +828,32 @@ func (fm *formModel) labelAt(index int) string {
 	if index >= 0 && index < len(fm.labels) {
 		switch index {
 		case 0:
-			return "Alias *"
+			return i18n.T("Alias *", "Псевдоним *")
 		case 2:
-			return "Host *"
+			return i18n.T("Host *", "Хост *")
 		case 3:
-			return "Port *"
+			return i18n.T("Port *", "Порт *")
 		}
 		if index == 5 {
-			return "Auth Method (/ pick)"
+			return i18n.T("Auth Method (/ pick)", "Метод аутентификации (/ выбор)")
 		}
 		if index == 6 {
-			return "Identity File (/ pick)"
+			return i18n.T("Identity File (/ pick)", "Файл ключа (/ выбор)")
 		}
 		if index == 7 {
-			return "Route (/ edit)"
+			return i18n.T("Route (/ edit)", "Маршрут (/ изменить)")
 		}
 		if index == 10 {
-			return "Startup Command (/ template)"
+			return i18n.T("Startup Command (/ template)", "Команда при подключении (/ шаблон)")
 		}
 		if index == 8 {
 			if len(fm.groups) > 0 {
-				return "Group (/ pick)"
+				return i18n.T("Group (/ pick)", "Группа (/ выбор)")
 			}
-			return "Group"
+			return i18n.T("Group", "Группа")
 		}
 		if index == 11 {
-			return "Tags (/ pick, type to create)"
+			return i18n.T("Tags (/ pick, type to create)", "Теги (/ выбор, введите для создания)")
 		}
 		return fm.labels[index]
 	}
@@ -884,7 +885,7 @@ func (fm *formModel) runTest() tea.Cmd {
 				return testDoneMsg{ok: ok, err: testErr}
 			}
 			if s.AuthMethod == model.AuthPassword && pw == "" {
-				return testDoneMsg{ok: false, err: "Password is required for password auth."}
+				return testDoneMsg{ok: false, err: i18n.T("Password is required for password auth.", "Для аутентификации по паролю нужен пароль.")}
 			}
 			ok, testErr := TestConnection(s)
 			return testDoneMsg{ok: ok, err: testErr}
@@ -911,10 +912,10 @@ func (fm *formModel) runSave() tea.Cmd {
 		fm.spinner.Tick,
 		func() tea.Msg {
 			if s.Alias == "" {
-				return saveDoneMsg{err: fmt.Errorf("alias is required")}
+				return saveDoneMsg{err: fmt.Errorf("%s", i18n.T("alias is required", "укажите псевдоним"))}
 			}
 			if s.Host == "" {
-				return saveDoneMsg{err: fmt.Errorf("host is required")}
+				return saveDoneMsg{err: fmt.Errorf("%s", i18n.T("host is required", "укажите хост"))}
 			}
 			oldAlias := ""
 			if fm.edit && fm.server != nil {
@@ -943,7 +944,7 @@ func (fm *formModel) buildServerValidated() (*model.Server, error) {
 	}
 	route, err := fm.parseRouteInput()
 	if err != nil {
-		return nil, fmt.Errorf("route: %w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.T("route", "маршрут"), err)
 	}
 	server := &model.Server{
 		Alias:          strings.TrimSpace(fm.inputs[0].Value()),
@@ -980,39 +981,39 @@ func parsePort(value string) (int, error) {
 	value = strings.TrimSpace(value)
 	port, err := strconv.Atoi(value)
 	if err != nil {
-		return 0, fmt.Errorf("Port must be a number from 1 to 65535")
+		return 0, fmt.Errorf("%s", i18n.T("Port must be a number from 1 to 65535", "Порт должен быть числом от 1 до 65535"))
 	}
 	if port < 1 || port > 65535 {
-		return 0, fmt.Errorf("Port must be between 1 and 65535")
+		return 0, fmt.Errorf("%s", i18n.T("Port must be between 1 and 65535", "Порт должен быть от 1 до 65535"))
 	}
 	return port, nil
 }
 
 func (fm *formModel) View() string {
 	fm.updateCredentialPresentation()
-	title := "Add Server"
+	title := i18n.T("Add Server", "Добавить сервер")
 	if fm.edit {
-		title = "Edit Server: " + fm.server.Alias
+		title = i18n.T("Edit Server: ", "Изменить сервер: ") + fm.server.Alias
 	}
 	if fm.showIdentityList {
 		return renderScreenShell(screenShell{
-			breadcrumb: title + " / Identity File", status: "Choose a private key", width: fm.width, height: fm.height,
+			breadcrumb: title + i18n.T(" / Identity File", " / Файл ключа"), status: i18n.T("Choose a private key", "Выберите закрытый ключ"), width: fm.width, height: fm.height,
 			body: func(width, height int) string {
 				return renderPaddedPanel(width, height, splitBlock(renderDropdown(fm.identityList)))
 			},
-			footer: []helpItem{{Key: "/", Action: "filter"}, {Key: "↑/↓", Action: "move"}, {Key: "Enter", Action: "select"}, {Key: "Esc", Action: "cancel"}},
+			footer: []helpItem{{Key: "/", Action: i18n.T("filter", "фильтр")}, {Key: "↑/↓", Action: i18n.T("move", "перемещение")}, {Key: "Enter", Action: i18n.T("select", "выбрать")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}},
 		})
 	}
 	if fm.showStartupList {
 		return renderScreenShell(screenShell{
-			breadcrumb: title + " / Startup Command",
-			status:     "Choose a command template",
+			breadcrumb: title + i18n.T(" / Startup Command", " / Команда при подключении"),
+			status:     i18n.T("Choose a command template", "Выберите шаблон команды"),
 			width:      fm.width,
 			height:     fm.height,
 			body: func(width, height int) string {
 				lines := []string{fm.inputs[10].View(), ""}
 				if len(fm.startupList.Items()) == 0 {
-					lines = append(lines, dashboardHelp("No command templates yet. Use Manage → Command templates to create one."))
+					lines = append(lines, dashboardHelp(i18n.T("No command templates yet. Use Manage → Command templates to create one.", "Шаблонов команд пока нет. Создайте шаблон в меню Управление → Шаблоны команд.")))
 				} else {
 					capacity := max(1, height-4)
 					start, end := visibleServerRange(len(fm.startupList.Items()), fm.startupList.Index(), capacity)
@@ -1030,7 +1031,7 @@ func (fm *formModel) View() string {
 				}
 				return renderPaddedPanel(width, height, lines)
 			},
-			footer: []helpItem{{Key: "↑/↓", Action: "move"}, {Key: "Enter", Action: "insert copy"}, {Key: "Esc", Action: "cancel"}},
+			footer: []helpItem{{Key: "↑/↓", Action: i18n.T("move", "перемещение")}, {Key: "Enter", Action: i18n.T("insert copy", "вставить копию")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}},
 		})
 	}
 	if fm.showTagList {
@@ -1049,8 +1050,8 @@ func (fm *formModel) View() string {
 			dropdown = fm.groupList
 		}
 		return renderScreenShell(screenShell{
-			breadcrumb: title + " / Picker",
-			status:     "Choose a value",
+			breadcrumb: title + i18n.T(" / Picker", " / Выбор"),
+			status:     i18n.T("Choose a value", "Выберите значение"),
 			width:      fm.width,
 			height:     fm.height,
 			body: func(width, height int) string {
@@ -1058,17 +1059,17 @@ func (fm *formModel) View() string {
 				lines = append(lines, splitBlock(renderDropdown(dropdown))...)
 				return renderPaddedPanel(width, height, lines)
 			},
-			footer: []helpItem{{Key: "↑/↓", Action: "move"}, {Key: "Enter", Action: "select"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "cancel"}},
+			footer: []helpItem{{Key: "↑/↓", Action: i18n.T("move", "перемещение")}, {Key: "Enter", Action: i18n.T("select", "выбрать")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}},
 		})
 	}
 
 	status := fm.formStatusLine()
-	testBtn, saveBtn := "  [ Test ]", "  [ Save ]"
+	testBtn, saveBtn := i18n.T("  [ Test ]", "  [ Проверить ]"), i18n.T("  [ Save ]", "  [ Сохранить ]")
 	if fm.focusIdx == len(fm.inputs)+1 {
-		testBtn = selectedStyle.Render("> [ Test ]")
+		testBtn = selectedStyle.Render(i18n.T("> [ Test ]", "> [ Проверить ]"))
 	}
 	if fm.focusIdx == len(fm.inputs)+2 {
-		saveBtn = selectedStyle.Render("> [ Save ]")
+		saveBtn = selectedStyle.Render(i18n.T("> [ Save ]", "> [ Сохранить ]"))
 	}
 	actions := testBtn + "  " + saveBtn
 
@@ -1110,31 +1111,31 @@ func (fm *formModel) View() string {
 		start, end := visibleServerRange(len(allFields), focusField, fieldRows)
 		visible := append([]string(nil), allFields[start:end]...)
 		if start > 0 && len(visible) > 0 {
-			visible[0] = "↑ more fields · " + visible[0]
+			visible[0] = i18n.T("↑ more fields · ", "↑ ещё поля · ") + visible[0]
 		}
 		if end < len(allFields) && len(visible) > 0 {
-			visible[len(visible)-1] += " · more ↓"
+			visible[len(visible)-1] += i18n.T(" · more ↓", " · ещё ↓")
 		}
 		if richLayout {
-			visible = append(visible, sectionStyle.Copy().MarginTop(0).Render("Actions"))
+			visible = append(visible, sectionStyle.Copy().MarginTop(0).Render(i18n.T("Actions", "Действия")))
 		}
 		visible = append(visible, actions)
 		return renderPaddedPanel(width, height, visible)
 	}
 	return renderScreenShell(screenShell{
 		breadcrumb:   title,
-		status:       "Server profile",
+		status:       i18n.T("Server profile", "Профиль сервера"),
 		notification: status,
 		width:        fm.width,
 		height:       fm.height,
 		body:         body,
 		footer: []helpItem{
-			{Key: "Tab/↓", Action: "next"},
-			{Key: "↑", Action: "prev"},
-			{Key: "/", Action: "pick list"},
-			{Key: "Enter", Action: "select"},
-			{Key: "Ctrl+H", Action: "help"},
-			{Key: "Esc", Action: "back"},
+			{Key: "Tab/↓", Action: i18n.T("next", "далее")},
+			{Key: "↑", Action: i18n.T("prev", "назад")},
+			{Key: "/", Action: i18n.T("pick list", "выбрать из списка")},
+			{Key: "Enter", Action: i18n.T("select", "выбрать")},
+			{Key: "Ctrl+H", Action: i18n.T("help", "справка")},
+			{Key: "Esc", Action: i18n.T("back", "назад")},
 		},
 	})
 }
@@ -1142,9 +1143,9 @@ func (fm *formModel) View() string {
 func (fm *formModel) tagPickerView(title string) string {
 	selected := splitCSV(fm.inputs[11].Value())
 	body := func(width, height int) string {
-		lines := []string{dashboardSection("Existing tags")}
+		lines := []string{dashboardSection(i18n.T("Existing tags", "Существующие теги"))}
 		if len(fm.tagList.Items()) == 0 {
-			lines = append(lines, dashboardHelp("No saved tags yet. Esc and type a new tag in the field."))
+			lines = append(lines, dashboardHelp(i18n.T("No saved tags yet. Esc and type a new tag in the field.", "Сохранённых тегов пока нет. Нажмите Esc и введите новый тег в поле.")))
 		} else {
 			capacity := max(1, height-4)
 			start, end := visibleServerRange(len(fm.tagList.Items()), fm.tagList.Index(), capacity)
@@ -1167,23 +1168,23 @@ func (fm *formModel) tagPickerView(title string) string {
 		return renderPaddedPanel(width, height, lines)
 	}
 	return renderScreenShell(screenShell{
-		breadcrumb: title + " / Tags",
-		status:     fmt.Sprintf("%d selected", len(selected)),
+		breadcrumb: title + i18n.T(" / Tags", " / Теги"),
+		status:     i18n.Tf("%d selected", "Выбрано: %d", len(selected)),
 		width:      fm.width,
 		height:     fm.height,
 		body:       body,
-		footer:     []helpItem{{Key: "/", Action: "filter"}, {Key: "↑/↓", Action: "move"}, {Key: "Space/Enter", Action: "toggle"}, {Key: "Esc", Action: "done"}},
+		footer:     []helpItem{{Key: "/", Action: i18n.T("filter", "фильтр")}, {Key: "↑/↓", Action: i18n.T("move", "перемещение")}, {Key: "Space/Enter", Action: i18n.T("toggle", "переключить")}, {Key: "Esc", Action: i18n.T("done", "готово")}},
 	})
 }
 
 func (fm *formModel) routeEditorView(title string) string {
 	route := fm.currentRoute()
 	body := func(width, height int) string {
-		lines := []string{dashboardSection("Current route")}
+		lines := []string{dashboardSection(i18n.T("Current route", "Текущий маршрут"))}
 		if len(route.Hops) == 0 {
-			line := "  Direct connection"
+			line := i18n.T("  Direct connection", "  Прямое соединение")
 			if fm.routePane == 0 {
-				line = selectedRowStyle.Render("> Direct connection")
+				line = selectedRowStyle.Render(i18n.T("> Direct connection", "> Прямое соединение"))
 			}
 			lines = append(lines, line)
 		} else {
@@ -1204,12 +1205,12 @@ func (fm *formModel) routeEditorView(title string) string {
 		}
 		target := strings.TrimSpace(fm.inputs[2].Value())
 		if target == "" {
-			target = "target"
+			target = i18n.T("target", "цель")
 		}
-		lines = append(lines, dashboardHelp("Preview: "+route.DisplaySummary(target)), "", dashboardSection("Available server profiles"))
+		lines = append(lines, dashboardHelp(i18n.T("Preview: ", "Предпросмотр: ")+route.DisplaySummary(target)), "", dashboardSection(i18n.T("Available server profiles", "Доступные профили серверов")))
 
 		if len(fm.routeList.Items()) == 0 {
-			lines = append(lines, dashboardHelp("No other server profiles are available."))
+			lines = append(lines, dashboardHelp(i18n.T("No other server profiles are available.", "Других профилей серверов нет.")))
 		} else {
 			capacity := max(1, height-len(lines)-4)
 			start, end := visibleServerRange(len(fm.routeList.Items()), fm.routeList.Index(), capacity)
@@ -1234,40 +1235,40 @@ func (fm *formModel) routeEditorView(title string) string {
 				lines = append(lines, fitLine(line, max(1, width-4)))
 			}
 		}
-		lines = append(lines, "", dashboardHelp("Need a host that is not a sshkeeper profile? Esc and type raw:<user@host:port> in the Route field."))
+		lines = append(lines, "", dashboardHelp(i18n.T("Need a host that is not a sshkeeper profile? Esc and type raw:<user@host:port> in the Route field.", "Нужен хост вне профилей sshkeeper? Нажмите Esc и введите raw:<user@host:port> в поле маршрута.")))
 		return renderPaddedPanel(width, height, lines)
 	}
-	pane := "profiles"
+	pane := i18n.T("profiles", "профили")
 	if fm.routePane == 0 {
-		pane = "current route"
+		pane = i18n.T("current route", "текущий маршрут")
 	}
 	return renderScreenShell(screenShell{
-		breadcrumb: title + " / Route Editor",
-		status:     "Editing " + pane,
+		breadcrumb: title + i18n.T(" / Route Editor", " / Редактор маршрута"),
+		status:     i18n.T("Editing ", "Редактирование: ") + pane,
 		width:      fm.width,
 		height:     fm.height,
 		body:       body,
 		footer: []helpItem{
-			{Key: "Tab", Action: "switch pane"},
-			{Key: "↑/↓", Action: "move"},
-			{Key: "Enter", Action: "add profile"},
-			{Key: "x/Del", Action: "remove hop"},
-			{Key: "[/]", Action: "reorder hop"},
-			{Key: "/", Action: "filter profiles"},
-			{Key: "Esc", Action: "done"},
+			{Key: "Tab", Action: i18n.T("switch pane", "сменить панель")},
+			{Key: "↑/↓", Action: i18n.T("move", "перемещение")},
+			{Key: "Enter", Action: i18n.T("add profile", "добавить профиль")},
+			{Key: "x/Del", Action: i18n.T("remove hop", "удалить узел")},
+			{Key: "[/]", Action: i18n.T("reorder hop", "передвинуть узел")},
+			{Key: "/", Action: i18n.T("filter profiles", "фильтр профилей")},
+			{Key: "Esc", Action: i18n.T("done", "готово")},
 		},
 	})
 }
 
 func (fm *formModel) formStatusLine() string {
 	if fm.err != nil {
-		return errorStyle.Render(fmt.Sprintf("✗ Error: %v", fm.err))
+		return errorStyle.Render(i18n.Tf("✗ Error: %v", "✗ Ошибка: %v", fm.err))
 	}
 	if fm.testing {
-		return fm.spinner.View() + " Testing connection..."
+		return fm.spinner.View() + i18n.T(" Testing connection...", " Проверка соединения...")
 	}
 	if fm.saving {
-		return fm.spinner.View() + " Saving..."
+		return fm.spinner.View() + i18n.T(" Saving...", " Сохранение...")
 	}
 	showResults := time.Since(fm.testResultTime) < 10*time.Second || time.Since(fm.savedTime) < 10*time.Second
 	if showResults && fm.testResult != "" {
@@ -1277,7 +1278,7 @@ func (fm *formModel) formStatusLine() string {
 		return testFailStyle.Render("✗ " + strings.ReplaceAll(fm.testResult, "\n", " "))
 	}
 	if showResults && fm.saved {
-		return successStyle.Render("✓ Saved.")
+		return successStyle.Render(i18n.T("✓ Saved.", "✓ Сохранено."))
 	}
 	return ""
 }
@@ -1306,13 +1307,13 @@ func renderDropdown(l list.Model) string {
 func formSectionTitle(index int) string {
 	switch index {
 	case 0:
-		return "Identity"
+		return i18n.T("Identity", "Идентификация")
 	case 2:
-		return "Connection"
+		return i18n.T("Connection", "Соединение")
 	case 5:
-		return "Authentication"
+		return i18n.T("Authentication", "Аутентификация")
 	case 8:
-		return "Metadata"
+		return i18n.T("Metadata", "Дополнительно")
 	default:
 		return ""
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbletea"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 	"github.com/mirivlad/sshkeeper/internal/tunnel"
 )
@@ -26,9 +27,9 @@ type tunnelItem struct {
 }
 
 func (i tunnelItem) Title() string {
-	status := "stopped"
+	status := i18n.T("stopped", "остановлен")
 	if tunnel.IsRunning(i.state.ID) {
-		status = "running"
+		status = i18n.T("running", "работает")
 	}
 	duration := time.Since(i.state.StartedAt).Round(time.Second)
 	return fmt.Sprintf("%-30s  PID %-8d  %-8s  %s",
@@ -53,7 +54,7 @@ func (i tunnelItem) FilterValue() string {
 
 func newTunnelScreenModel(w, h int) *tunnelScreenModel {
 	l := list.New([]list.Item{}, list.NewDefaultDelegate(), w, h-6)
-	l.Title = "Tunnel Manager"
+	l.Title = i18n.T("Tunnel Manager", "Управление туннелями")
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.Styles.Title = titleStyle
@@ -106,14 +107,14 @@ func (m *tunnelScreenModel) runningCount() int {
 func (m *tunnelScreenModel) View() string {
 	notification := ""
 	if m.err != nil {
-		notification = errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
+		notification = errorStyle.Render(i18n.Tf("Error: %v", "Ошибка: %v", m.err))
 	}
 	body := func(width, height int) string {
 		if len(m.tunnels) == 0 {
 			return renderPaddedPanel(width, height, []string{
-				dashboardHelp("No tracked tunnels."),
-				dashboardHelp("Select a server on the dashboard."),
-				dashboardHelp("Ctrl+W: Port forwards; Ctrl+B: start in background."),
+				dashboardHelp(i18n.T("No tracked tunnels.", "Нет отслеживаемых туннелей.")),
+				dashboardHelp(i18n.T("Select a server on the dashboard.", "Выберите сервер на главном экране.")),
+				dashboardHelp(i18n.T("Ctrl+W: Port-forward rules; Ctrl+B: start in background.", "Ctrl+W: правила проброса; Ctrl+B: запуск в фоне.")),
 			})
 		}
 		capacity := max(1, height-2)
@@ -133,17 +134,17 @@ func (m *tunnelScreenModel) View() string {
 		return renderPaddedPanel(width, height, lines)
 	}
 	return renderScreenShell(screenShell{
-		breadcrumb:   "Tunnel Manager",
-		status:       fmt.Sprintf("%d running · %d tracked", m.runningCount(), len(m.tunnels)),
+		breadcrumb:   i18n.T("Tunnel Manager", "Управление туннелями"),
+		status:       i18n.Tf("%d running · %d tracked", "Работают: %d · отслеживаются: %d", m.runningCount(), len(m.tunnels)),
 		notification: notification,
 		width:        m.width,
 		height:       m.height,
 		body:         body,
 		footer: []helpItem{
-			{Key: "Ctrl+D (s)", Action: "stop tunnel"},
-			{Key: "Ctrl+R (r)", Action: "refresh"},
-			{Key: "Ctrl+H", Action: "help"},
-			{Key: "Esc", Action: "back"},
+			{Key: "Ctrl+D (s)", Action: i18n.T("stop tunnel", "остановить туннель")},
+			{Key: "Ctrl+R (r)", Action: i18n.T("refresh", "обновить")},
+			{Key: "Ctrl+H", Action: i18n.T("help", "справка")},
+			{Key: "Esc", Action: i18n.T("back", "назад")},
 		},
 	})
 }

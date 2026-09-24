@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
 )
@@ -173,7 +174,7 @@ type groupManagerItem struct {
 
 func (i groupManagerItem) Title() string { return i.group.Name }
 func (i groupManagerItem) Description() string {
-	return fmt.Sprintf("%d servers", i.group.ServerCount)
+	return i18n.Tf("%d servers", "%d серверов", i.group.ServerCount)
 }
 func (i groupManagerItem) FilterValue() string { return i.group.Name }
 
@@ -233,6 +234,8 @@ var (
 	ImportServers              func() (int, error)
 	LockVault                  func() error
 	VaultUnlocked              func() bool
+	GetLanguagePreference      func() string
+	SetLanguagePreference      func(string) error
 )
 
 // --- Screen type ---
@@ -261,6 +264,7 @@ const (
 	screenTunnelManager
 	screenConfirm
 	screenFullHelp
+	screenSettings
 )
 
 type confirmChoice int
@@ -335,6 +339,7 @@ type tuiModel struct {
 	tunnelStarting    bool
 	confirm           *confirmState
 	fullHelp          *fullHelpModel
+	settingsScreen    *settingsModel
 	helpParent        screen
 	vaultUnlocked     bool
 }
@@ -352,7 +357,7 @@ func New(servers []*model.Server) *tuiModel {
 	l.Styles.Title = titleStyle
 
 	search := textinput.New()
-	search.Placeholder = "Search..."
+	search.Placeholder = i18n.T("Search...", "Поиск...")
 	search.CharLimit = 64
 
 	tagInput := textinput.New()
@@ -366,7 +371,7 @@ func New(servers []*model.Server) *tuiModel {
 	templateList.SetShowStatusBar(false)
 	templateList.SetFilteringEnabled(false)
 	templateList.SetShowHelp(false)
-	tagList := newStringList(nil, "Tags", 0, 0)
+	tagList := newStringList(nil, i18n.T("Tags", "Теги"), 0, 0)
 	groupList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	groupList.SetShowStatusBar(false)
 	groupList.SetFilteringEnabled(false)
@@ -444,6 +449,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.fullHelp.width = msg.Width
 			m.fullHelp.height = msg.Height
 		}
+		if m.settingsScreen != nil {
+			m.settingsScreen.width = msg.Width
+			m.settingsScreen.height = msg.Height
+		}
 		if m.actionMenu != nil {
 			m.actionMenu.width = msg.Width
 			m.actionMenu.height = msg.Height
@@ -475,7 +484,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.deleted {
 				m.removeTemplate(msg.deletedName)
 				m.err = nil
-				m.success = fmt.Sprintf("Deleted %q; refresh failed: %v", msg.deletedName, msg.err)
+				m.success = i18n.Tf("Deleted %q; refresh failed: %v", "Удалено %q; обновить список не удалось: %v", msg.deletedName, msg.err)
 			} else {
 				m.err = msg.err
 			}
@@ -492,7 +501,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.deleted {
 				m.removeTag(msg.deletedName)
 				m.err = nil
-				m.success = fmt.Sprintf("Deleted %q; refresh failed: %v", msg.deletedName, msg.err)
+				m.success = i18n.Tf("Deleted %q; refresh failed: %v", "Удалено %q; обновить список не удалось: %v", msg.deletedName, msg.err)
 			} else {
 				m.err = msg.err
 			}
@@ -509,7 +518,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.deleted {
 				m.removeGroup(msg.deletedName)
 				m.err = nil
-				m.success = fmt.Sprintf("Deleted %q; refresh failed: %v", msg.deletedName, msg.err)
+				m.success = i18n.Tf("Deleted %q; refresh failed: %v", "Удалено %q; обновить список не удалось: %v", msg.deletedName, msg.err)
 			} else {
 				m.err = msg.err
 			}
@@ -554,7 +563,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items[i] = serverItem{server: s}
 		}
 		m.list.SetItems(items)
-		m.success = fmt.Sprintf("Imported %d server(s).", msg.count)
+		m.success = i18n.Tf("Imported %d server(s).", "Импортировано серверов: %d.", msg.count)
 		return m, nil
 
 	case forwardsLoadedMsg:
@@ -582,19 +591,19 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case backgroundTunnelStartedMsg:
 		m.tunnelStarting = false
 		if msg.err == nil && msg.state == nil {
-			msg.err = fmt.Errorf("tunnel launcher returned no process")
+			msg.err = fmt.Errorf("%s", i18n.T("tunnel launcher returned no process", "запуск туннеля не вернул процесс"))
 		}
 		if msg.err != nil {
 			if msg.origin == screenForwardList && m.forwardScreen != nil && m.forwardScreen.serverAlias == msg.alias {
 				m.forwardScreen.err = msg.err
 				m.forwardScreen.notice = ""
 			} else {
-				m.err = fmt.Errorf("Start tunnel for %s: %w", msg.alias, msg.err)
+				m.err = fmt.Errorf("%s: %w", i18n.Tf("Start tunnel for %s", "Запуск туннеля для %s", msg.alias), msg.err)
 				m.success = ""
 			}
 			return m, nil
 		}
-		notice := fmt.Sprintf("Tunnel process launched for %s (PID %d). Check Running tunnels for status.", msg.alias, msg.state.PID)
+		notice := i18n.Tf("Tunnel process launched for %s (PID %d). Check Running tunnels for status.", "Процесс туннеля запущен для %s (PID %d). Проверьте состояние в разделе работающих туннелей.", msg.alias, msg.state.PID)
 		if msg.origin == screenForwardList && m.forwardScreen != nil && m.forwardScreen.serverAlias == msg.alias {
 			m.forwardScreen.err = nil
 			m.forwardScreen.notice = notice
@@ -635,7 +644,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			if msg.deleted {
 				m.err = nil
-				m.success = fmt.Sprintf("Deleted %q; refresh failed: %v", msg.alias, msg.err)
+				m.success = i18n.Tf("Deleted %q; refresh failed: %v", "Удалено %q; обновить список не удалось: %v", msg.alias, msg.err)
 			} else {
 				m.err = msg.err
 			}
@@ -671,15 +680,15 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case forwardDeleteConfirmMsg:
 		m.beginConfirm(confirmState{
-			title:       "Delete port forward?",
+			title:       i18n.T("Delete port forward?", "Удалить правило проброса порта?"),
 			target:      msg.name,
-			consequence: "This removes the saved forwarding rule.",
-			verb:        "Delete",
+			consequence: i18n.T("This removes the saved forwarding rule.", "Сохранённое правило проброса будет удалено."),
+			verb:        i18n.T("Delete", "Удалить"),
 			parent:      screenForwardList,
 			action: func() tea.Cmd {
 				return func() tea.Msg {
 					if DeleteForward == nil {
-						return forwardDeletedMsg{id: msg.id, err: fmt.Errorf("forward deletion is unavailable")}
+						return forwardDeletedMsg{id: msg.id, err: fmt.Errorf("%s", i18n.T("forward deletion is unavailable", "удаление правила проброса недоступно"))}
 					}
 					return forwardDeletedMsg{id: msg.id, err: DeleteForward(msg.id)}
 				}
@@ -737,10 +746,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.form != nil {
 			m.form.testing = false
 			if msg.ok {
-				m.form.testResult = "Connection OK."
+				m.form.testResult = i18n.T("Connection OK.", "Соединение установлено.")
 				m.form.testOK = true
 			} else {
-				m.form.testResult = fmt.Sprintf("Connection failed:\n%s", msg.err)
+				m.form.testResult = i18n.Tf("Connection failed:\n%s", "Ошибка соединения:\n%s", msg.err)
 				m.form.testOK = false
 			}
 			m.form.testResultTime = time.Now()
@@ -774,7 +783,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forwardForm = nil
 			m.screen = screenForwardList
 			if m.forwardScreen != nil {
-				m.forwardScreen.notice = "Rule saved. Ctrl+B starts a background tunnel; Ctrl+X shows all start modes."
+				m.forwardScreen.notice = i18n.T("Rule saved. Ctrl+B starts a background tunnel; Ctrl+X shows all start modes.", "Правило сохранено. Ctrl+B запускает фоновый туннель; Ctrl+X показывает все режимы запуска.")
 				return m, m.forwardScreen.loadForwards()
 			}
 			return m, nil
@@ -871,6 +880,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirm(msg)
 		case screenFullHelp:
 			return m.updateFullHelp(msg)
+		case screenSettings:
+			return m.updateSettings(msg)
 		}
 	}
 
@@ -977,7 +988,7 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if item, ok := m.list.SelectedItem().(serverItem); ok {
 			return m.openServerActions(item.server, screenList, nil)
 		}
-		m.err = fmt.Errorf("select a server before opening server actions")
+		m.err = fmt.Errorf("%s", i18n.T("select a server before opening server actions", "выберите сервер перед открытием действий"))
 		return m, nil
 
 	default:
@@ -1004,10 +1015,10 @@ func (m *tuiModel) requestQuit() (tea.Model, tea.Cmd) {
 	}
 	origin := m.screen
 	m.beginConfirm(confirmState{
-		title:       "Discard changes and quit?",
-		target:      "Unsaved form changes",
-		consequence: "Your edits will be lost before sshkeeper exits.",
-		verb:        "Quit",
+		title:       i18n.T("Discard changes and quit?", "Отменить изменения и выйти?"),
+		target:      i18n.T("Unsaved form changes", "Несохранённые изменения формы"),
+		consequence: i18n.T("Your edits will be lost before sshkeeper exits.", "Изменения будут потеряны при выходе из sshkeeper."),
+		verb:        i18n.T("Quit", "Выйти"),
 		parent:      origin,
 		action: func() tea.Cmd {
 			return func() tea.Msg { return quitAfterDiscardMsg{} }
@@ -1071,21 +1082,21 @@ func (m *tuiModel) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if item, ok := m.tagList.SelectedItem().(groupItem); ok {
 			name := item.name
 			m.beginConfirm(confirmState{
-				title:       "Delete tag?",
+				title:       i18n.T("Delete tag?", "Удалить тег?"),
 				target:      fmt.Sprintf("%q", name),
-				consequence: "This removes the tag from every server profile.",
-				verb:        "Delete",
+				consequence: i18n.T("This removes the tag from every server profile.", "Тег будет удалён из всех профилей серверов."),
+				verb:        i18n.T("Delete", "Удалить"),
 				parent:      screenTags,
 				action: func() tea.Cmd {
 					return func() tea.Msg {
 						if DeleteTag == nil {
-							return tagsLoadedMsg{err: fmt.Errorf("tag deletion is unavailable")}
+							return tagsLoadedMsg{err: fmt.Errorf("%s", i18n.T("tag deletion is unavailable", "удаление тегов недоступно"))}
 						}
 						if err := DeleteTag(name); err != nil {
 							return tagsLoadedMsg{err: err}
 						}
 						if ListTags == nil {
-							return tagsLoadedMsg{deleted: true, deletedName: name, err: fmt.Errorf("tag reload is unavailable")}
+							return tagsLoadedMsg{deleted: true, deletedName: name, err: fmt.Errorf("%s", i18n.T("tag reload is unavailable", "обновление тегов недоступно"))}
 						}
 						tags, err := ListTags()
 						return tagsLoadedMsg{tags: tags, deleted: true, deletedName: name, err: err}
@@ -1187,21 +1198,21 @@ func (m *tuiModel) updateGroups(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			name := item.group.Name
 			count := item.group.ServerCount
 			m.beginConfirm(confirmState{
-				title:       "Delete group?",
+				title:       i18n.T("Delete group?", "Удалить группу?"),
 				target:      fmt.Sprintf("%q", name),
-				consequence: fmt.Sprintf("The group is removed; %d server profile(s) become ungrouped.", count),
-				verb:        "Delete",
+				consequence: i18n.Tf("The group is removed; %d server profile(s) become ungrouped.", "Группа будет удалена; профилей без группы станет больше на %d.", count),
+				verb:        i18n.T("Delete", "Удалить"),
 				parent:      screenGroups,
 				action: func() tea.Cmd {
 					return func() tea.Msg {
 						if DeleteGroup == nil {
-							return groupsLoadedMsg{err: fmt.Errorf("group deletion is unavailable")}
+							return groupsLoadedMsg{err: fmt.Errorf("%s", i18n.T("group deletion is unavailable", "удаление групп недоступно"))}
 						}
 						if err := DeleteGroup(name); err != nil {
 							return groupsLoadedMsg{err: err}
 						}
 						if ListGroups == nil {
-							return groupsLoadedMsg{deleted: true, deletedName: name, err: fmt.Errorf("group reload is unavailable")}
+							return groupsLoadedMsg{deleted: true, deletedName: name, err: fmt.Errorf("%s", i18n.T("group reload is unavailable", "обновление групп недоступно"))}
 						}
 						groups, err := ListGroups()
 						return groupsLoadedMsg{groups: groups, deleted: true, deletedName: name, err: err}
@@ -1234,14 +1245,14 @@ func (m *tuiModel) updateGroupInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			switch mode {
 			case "rename":
 				if RenameGroup == nil {
-					return groupsLoadedMsg{err: fmt.Errorf("group rename is unavailable")}
+					return groupsLoadedMsg{err: fmt.Errorf("%s", i18n.T("group rename is unavailable", "переименование группы недоступно"))}
 				}
 				if err := RenameGroup(oldName, value); err != nil {
 					return groupsLoadedMsg{err: err}
 				}
 			default:
 				if CreateGroup == nil {
-					return groupsLoadedMsg{err: fmt.Errorf("group creation is unavailable")}
+					return groupsLoadedMsg{err: fmt.Errorf("%s", i18n.T("group creation is unavailable", "создание группы недоступно"))}
 				}
 				if err := CreateGroup(value); err != nil {
 					return groupsLoadedMsg{err: err}
@@ -1275,21 +1286,21 @@ func (m *tuiModel) updateTemplates(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if item, ok := m.templateList.SelectedItem().(templateItem); ok {
 			name := item.template.Name
 			m.beginConfirm(confirmState{
-				title:       "Delete command template?",
+				title:       i18n.T("Delete command template?", "Удалить шаблон команды?"),
 				target:      fmt.Sprintf("%q", name),
-				consequence: "This removes the saved command template.",
-				verb:        "Delete",
+				consequence: i18n.T("This removes the saved command template.", "Сохранённый шаблон команды будет удалён."),
+				verb:        i18n.T("Delete", "Удалить"),
 				parent:      screenTemplates,
 				action: func() tea.Cmd {
 					return func() tea.Msg {
 						if DeleteCommandTemplate == nil {
-							return templatesLoadedMsg{err: fmt.Errorf("template deletion is unavailable")}
+							return templatesLoadedMsg{err: fmt.Errorf("%s", i18n.T("template deletion is unavailable", "удаление шаблонов недоступно"))}
 						}
 						if err := DeleteCommandTemplate(name); err != nil {
 							return templatesLoadedMsg{err: err}
 						}
 						if ListCommandTemplates == nil {
-							return templatesLoadedMsg{deleted: true, deletedName: name, err: fmt.Errorf("template reload is unavailable")}
+							return templatesLoadedMsg{deleted: true, deletedName: name, err: fmt.Errorf("%s", i18n.T("template reload is unavailable", "обновление шаблонов недоступно"))}
 						}
 						templates, err := ListCommandTemplates()
 						return templatesLoadedMsg{templates: templates, deleted: true, deletedName: name, err: err}
@@ -1307,7 +1318,7 @@ func (m *tuiModel) updateTemplates(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) updateTemplateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
 		if m.templateForm != nil && m.templateForm.Dirty() {
-			m.confirmDiscard("Command template", screenTemplateForm, screenTemplates)
+			m.confirmDiscard(i18n.T("Command template", "Шаблон команды"), screenTemplateForm, screenTemplates)
 			return m, nil
 		}
 		m.screen = screenTemplates
@@ -1426,7 +1437,7 @@ func (m *tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		if m.form != nil && m.form.Dirty() {
-			m.confirmDiscard("Server profile", screenForm, screenList)
+			m.confirmDiscard(i18n.T("Server profile", "Профиль сервера"), screenForm, screenList)
 			return m, nil
 		}
 
@@ -1529,6 +1540,10 @@ func (m *tuiModel) View() string {
 
 	case screenConfirm:
 		b.WriteString(m.viewConfirm())
+	case screenSettings:
+		if m.settingsScreen != nil {
+			b.WriteString(m.settingsScreen.View())
+		}
 	}
 
 	return b.String()
@@ -1578,7 +1593,7 @@ func (m *tuiModel) openServerActions(server *model.Server, parent screen, forwar
 	m.actionMenu.setServer(server, 0, true)
 	return m, func() tea.Msg {
 		if ListForwards == nil {
-			return actionForwardsLoadedMsg{serverID: server.ID, err: fmt.Errorf("forward storage is unavailable")}
+			return actionForwardsLoadedMsg{serverID: server.ID, err: fmt.Errorf("%s", i18n.T("forward storage is unavailable", "хранилище правил проброса недоступно"))}
 		}
 		items, err := ListForwards(server.ID)
 		return actionForwardsLoadedMsg{serverID: server.ID, count: enabledForwardCount(items), err: err}
@@ -1592,14 +1607,14 @@ func (m *tuiModel) beginBackgroundTunnel(server *model.Server, origin screen) (t
 	m.tunnelStarting = true
 	if origin == screenForwardList && m.forwardScreen != nil {
 		m.forwardScreen.err = nil
-		m.forwardScreen.notice = "Starting background tunnel for " + server.Alias + "..."
+		m.forwardScreen.notice = i18n.Tf("Starting background tunnel for %s...", "Запуск фонового туннеля для %s...", server.Alias)
 	} else {
 		m.err = nil
-		m.success = "Starting background tunnel for " + server.Alias + "..."
+		m.success = i18n.Tf("Starting background tunnel for %s...", "Запуск фонового туннеля для %s...", server.Alias)
 	}
 	return m, func() tea.Msg {
 		if StartBackgroundTunnel == nil {
-			return backgroundTunnelStartedMsg{alias: server.Alias, origin: origin, err: fmt.Errorf("background tunnel startup is unavailable")}
+			return backgroundTunnelStartedMsg{alias: server.Alias, origin: origin, err: fmt.Errorf("%s", i18n.T("background tunnel startup is unavailable", "запуск фонового туннеля недоступен"))}
 		}
 		state, err := StartBackgroundTunnel(server.Alias)
 		return backgroundTunnelStartedMsg{alias: server.Alias, origin: origin, state: state, err: err}
@@ -1732,6 +1747,14 @@ func (m *tuiModel) updateManageMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "templates":
 		m.screen = screenTemplates
 		return m, m.loadTemplatesCmd()
+	case "settings":
+		preference := "auto"
+		if GetLanguagePreference != nil {
+			preference = GetLanguagePreference()
+		}
+		m.settingsScreen = newSettingsModel(m.width, m.height, preference)
+		m.screen = screenSettings
+		return m, nil
 	case "sessions":
 		m.sessionScreen = newSessionScreenModel(m.width, m.height)
 		m.screen = screenSessionManager
@@ -1744,7 +1767,7 @@ func (m *tuiModel) updateManageMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenList
 		return m, func() tea.Msg {
 			if ImportServers == nil {
-				return importDoneMsg{err: fmt.Errorf("import is unavailable")}
+				return importDoneMsg{err: fmt.Errorf("%s", i18n.T("import is unavailable", "импорт недоступен"))}
 			}
 			count, err := ImportServers()
 			if err != nil {
@@ -1759,16 +1782,51 @@ func (m *tuiModel) updateManageMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "vault_lock":
 		m.screen = screenList
 		if LockVault == nil {
-			m.err = fmt.Errorf("vault lock is unavailable")
+			m.err = fmt.Errorf("%s", i18n.T("vault lock is unavailable", "блокировка хранилища недоступна"))
 		} else if err := LockVault(); err != nil {
 			m.err = err
 		} else {
 			m.vaultUnlocked = false
-			m.success = "Vault locked."
+			m.success = i18n.T("Vault locked.", "Хранилище заблокировано.")
 		}
 	case "vault_change_pw":
 		m.result = &TUIResult{Action: "vault_change_pw"}
 		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m *tuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.settingsScreen == nil {
+		m.screen = screenManageMenu
+		m.manageMenu = newManageMenuModel(m.width, m.height, m.sessionsAvailable)
+		return m, nil
+	}
+	selected, changed, back := m.settingsScreen.Update(msg)
+	if changed {
+		if SetLanguagePreference == nil {
+			m.settingsScreen.err = fmt.Errorf("%s", i18n.T("Language settings are unavailable", "Настройки языка недоступны"))
+			return m, nil
+		}
+		if err := SetLanguagePreference(selected); err != nil {
+			m.settingsScreen.err = err
+			return m, nil
+		}
+		if err := i18n.SetPreference(selected); err != nil {
+			m.settingsScreen.err = err
+			return m, nil
+		}
+		m.settingsScreen.applyPreference(selected)
+		m.searchInput.Placeholder = i18n.T("Search...", "Поиск...")
+		m.tagList = newStringList(m.tags, i18n.T("Tags", "Теги"), m.width, managerListHeight(m.height))
+		m.groupList.Title = i18n.T("Groups", "Группы")
+		m.templateList.Title = i18n.T("Command Templates", "Шаблоны команд")
+		m.settingsScreen.err = nil
+	}
+	if back {
+		m.settingsScreen = nil
+		m.manageMenu = newManageMenuModel(m.width, m.height, m.sessionsAvailable)
+		m.screen = screenManageMenu
 	}
 	return m, nil
 }
@@ -1784,7 +1842,7 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if server := m.serverByID(m.forwardScreen.serverID); server != nil {
 				return m.openServerActions(server, screenForwardList, m.forwardScreen.list)
 			}
-			m.forwardScreen.err = fmt.Errorf("server profile is no longer available")
+			m.forwardScreen.err = fmt.Errorf("%s", i18n.T("server profile is no longer available", "профиль сервера больше недоступен"))
 		}
 		return m, nil
 	case tea.KeyCtrlB:
@@ -1813,7 +1871,7 @@ func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			selected.Enabled = !selected.Enabled
 			return m, func() tea.Msg {
 				if UpdateForward == nil {
-					return forwardsLoadedMsg{err: fmt.Errorf("forward update is unavailable")}
+					return forwardsLoadedMsg{err: fmt.Errorf("%s", i18n.T("forward update is unavailable", "изменение правила проброса недоступно"))}
 				}
 				if err := UpdateForward(&selected); err != nil {
 					return forwardsLoadedMsg{err: err}
@@ -1859,15 +1917,15 @@ func (m *tuiModel) startForwardListTunnel() (tea.Model, tea.Cmd) {
 	}
 	server := m.serverByID(m.forwardScreen.serverID)
 	if server == nil {
-		m.forwardScreen.err = fmt.Errorf("server profile is no longer available")
+		m.forwardScreen.err = fmt.Errorf("%s", i18n.T("server profile is no longer available", "профиль сервера больше недоступен"))
 		return m, nil
 	}
 	if enabledForwardCount(m.forwardScreen.list) == 0 {
-		m.forwardScreen.err = fmt.Errorf("no enabled port forwards; add or enable a rule before starting a tunnel")
+		m.forwardScreen.err = fmt.Errorf("%s", i18n.T("no enabled port forwards; add or enable a rule before starting a tunnel", "нет включённых правил проброса; добавьте или включите правило перед запуском туннеля"))
 		return m, nil
 	}
 	if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
-		m.forwardScreen.err = fmt.Errorf("background mode needs key or agent authentication; use Ctrl+X for a foreground mode")
+		m.forwardScreen.err = fmt.Errorf("%s", i18n.T("background mode needs key or agent authentication; use Ctrl+X for a foreground mode", "для фонового режима нужен ключ или SSH-агент; Ctrl+X открывает активный режим"))
 		return m, nil
 	}
 	return m.beginBackgroundTunnel(server, screenForwardList)
@@ -1987,7 +2045,7 @@ func (m *tuiModel) viewConfirm() string {
 			message = append(message, "")
 			message = append(message, wrapCells(m.confirm.consequence, innerWidth)...)
 		}
-		cancel := "[ Cancel ]"
+		cancel := i18n.T("[ Cancel ]", "[ Отмена ]")
 		accept := "[ " + m.confirm.verb + " ]"
 		if m.confirm.focus == confirmCancel {
 			cancel = selectedStyle.Render("> " + cancel)
@@ -1996,7 +2054,7 @@ func (m *tuiModel) viewConfirm() string {
 		}
 		action := cancel + "  " + accept
 		if m.confirm.pending {
-			action = m.confirm.verb + " in progress…"
+			action = i18n.Tf("%s in progress…", "%s: выполняется…", m.confirm.verb)
 		}
 		messageRows := max(0, innerHeight-2)
 		if len(message) > messageRows {
@@ -2014,15 +2072,15 @@ func (m *tuiModel) viewConfirm() string {
 		return renderPaddedPanel(width, height, lines)
 	}
 	return renderScreenShell(screenShell{
-		breadcrumb: "Confirm",
-		status:     shellStatus(m.vaultUnlocked, "Action required"),
+		breadcrumb: i18n.T("Confirm", "Подтверждение"),
+		status:     shellStatus(m.vaultUnlocked, i18n.T("Action required", "Требуется действие")),
 		width:      m.width,
 		height:     m.height,
 		body:       body,
 		footer: []helpItem{
-			{Key: "Tab", Action: "choose"},
-			{Key: "Enter", Action: "activate"},
-			{Key: "Esc", Action: "cancel"},
+			{Key: "Tab", Action: i18n.T("choose", "выбрать")},
+			{Key: "Enter", Action: i18n.T("activate", "подтвердить")},
+			{Key: "Esc", Action: i18n.T("cancel", "отмена")},
 		},
 	})
 }
@@ -2062,10 +2120,10 @@ func (m *tuiModel) finishConfirm() {
 
 func (m *tuiModel) confirmDiscard(title string, origin, destination screen) {
 	m.beginConfirm(confirmState{
-		title:       "Discard unsaved changes?",
+		title:       i18n.T("Discard unsaved changes?", "Отменить несохранённые изменения?"),
 		target:      title,
-		consequence: "Your edits on this form will be lost.",
-		verb:        "Discard",
+		consequence: i18n.T("Your edits on this form will be lost.", "Изменения в форме будут потеряны."),
+		verb:        i18n.T("Discard", "Отменить изменения"),
 		parent:      origin,
 		complete:    destination,
 		completeSet: true,
@@ -2078,21 +2136,21 @@ func (m *tuiModel) confirmDiscard(title string, origin, destination screen) {
 func (m *tuiModel) confirmServerDelete(server *model.Server) {
 	alias := server.Alias
 	m.beginConfirm(confirmState{
-		title:       "Delete server profile?",
+		title:       i18n.T("Delete server profile?", "Удалить профиль сервера?"),
 		target:      fmt.Sprintf("%q", alias),
-		consequence: "This also removes its saved port forwards and vault secrets.",
-		verb:        "Delete",
+		consequence: i18n.T("This also removes its saved port forwards and vault secrets.", "Также удалятся сохранённые правила проброса и секреты хранилища."),
+		verb:        i18n.T("Delete", "Удалить"),
 		parent:      screenList,
 		action: func() tea.Cmd {
 			return func() tea.Msg {
 				if DeleteServer == nil {
-					return serverDeletedMsg{alias: alias, err: fmt.Errorf("server deletion is unavailable")}
+					return serverDeletedMsg{alias: alias, err: fmt.Errorf("%s", i18n.T("server deletion is unavailable", "удаление сервера недоступно"))}
 				}
 				if err := DeleteServer(alias); err != nil {
 					return serverDeletedMsg{alias: alias, err: err}
 				}
 				if ListServers == nil {
-					return serverDeletedMsg{alias: alias, deleted: true, err: fmt.Errorf("server reload is unavailable")}
+					return serverDeletedMsg{alias: alias, deleted: true, err: fmt.Errorf("%s", i18n.T("server reload is unavailable", "обновление серверов недоступно"))}
 				}
 				servers, err := ListServers()
 				return serverDeletedMsg{alias: alias, servers: servers, deleted: true, err: err}
@@ -2124,15 +2182,15 @@ func (m *tuiModel) confirmForwardDelete(fwd *model.Forward) {
 	}
 	id := fwd.ID
 	m.beginConfirm(confirmState{
-		title:       "Delete port forward?",
+		title:       i18n.T("Delete port forward?", "Удалить правило проброса порта?"),
 		target:      fmt.Sprintf("%q · %s → %s", name, fwd.ForwardListen(), fwd.ForwardTarget()),
-		consequence: "This removes the saved forwarding rule. Active tunnels are not stopped.",
-		verb:        "Delete",
+		consequence: i18n.T("This removes the saved forwarding rule. Active tunnels are not stopped.", "Сохранённое правило будет удалено. Работающие туннели не остановятся."),
+		verb:        i18n.T("Delete", "Удалить"),
 		parent:      screenForwardList,
 		action: func() tea.Cmd {
 			return func() tea.Msg {
 				if DeleteForward == nil {
-					return forwardDeletedMsg{id: id, err: fmt.Errorf("forward deletion is unavailable")}
+					return forwardDeletedMsg{id: id, err: fmt.Errorf("%s", i18n.T("forward deletion is unavailable", "удаление правила проброса недоступно"))}
 				}
 				return forwardDeletedMsg{id: id, err: DeleteForward(id)}
 			}
@@ -2149,10 +2207,10 @@ func (m *tuiModel) confirmSessionClose() {
 		return
 	}
 	m.beginConfirm(confirmState{
-		title:       "Close SSH session?",
+		title:       i18n.T("Close SSH session?", "Закрыть SSH-сессию?"),
 		target:      fmt.Sprintf("%q · tmux %s", selected.ServerAlias, selected.ID),
-		consequence: "The interactive SSH process in this tmux window will be terminated.",
-		verb:        "Close",
+		consequence: i18n.T("The interactive SSH process in this tmux window will be terminated.", "Интерактивный процесс SSH в этом окне tmux будет завершён."),
+		verb:        i18n.T("Close", "Закрыть"),
 		parent:      screenSessionManager,
 		action: func() tea.Cmd {
 			return m.sessionScreen.closeSelected()
@@ -2170,10 +2228,10 @@ func (m *tuiModel) confirmTunnelStop() {
 	}
 	state := item.state
 	m.beginConfirm(confirmState{
-		title:       "Stop running tunnel?",
+		title:       i18n.T("Stop running tunnel?", "Остановить работающий туннель?"),
 		target:      fmt.Sprintf("%q · PID %d · %s", state.Name, state.PID, state.ServerAlias),
-		consequence: "Active forwarded connections through this process will close.",
-		verb:        "Stop",
+		consequence: i18n.T("Active forwarded connections through this process will close.", "Активные соединения через этот процесс закроются."),
+		verb:        i18n.T("Stop", "Остановить"),
 		parent:      screenTunnelManager,
 		action: func() tea.Cmd {
 			return m.tunnelScreen.stopSelected()
@@ -2206,7 +2264,7 @@ func (m *tuiModel) screenOwnsPrintableInput() bool {
 func (m *tuiModel) updateForwardForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
 		if m.forwardForm != nil && m.forwardForm.Dirty() {
-			m.confirmDiscard("Port forward", screenForwardForm, screenForwardList)
+			m.confirmDiscard(i18n.T("Port forward", "Правило проброса"), screenForwardForm, screenForwardList)
 			return m, nil
 		}
 		m.screen = screenForwardList
@@ -2234,7 +2292,7 @@ func (m *tuiModel) viewServerList() string {
 
 func (m *tuiModel) rootNotification() string {
 	if m.err != nil {
-		return errorStyle.Render("Error: " + m.err.Error())
+		return errorStyle.Render(i18n.T("Error: ", "Ошибка: ") + m.err.Error())
 	}
 	if m.success != "" {
 		return successStyle.Render(m.success)
@@ -2244,27 +2302,27 @@ func (m *tuiModel) rootNotification() string {
 
 func (m *tuiModel) viewSearch() string {
 	return renderScreenShell(screenShell{
-		breadcrumb:   "Search",
-		status:       shellStatus(m.vaultUnlocked, fmt.Sprintf("%d profiles", len(m.servers))),
+		breadcrumb:   i18n.T("Search", "Поиск"),
+		status:       shellStatus(m.vaultUnlocked, i18n.Tf("%d profiles", "Профилей: %d", len(m.servers))),
 		notification: m.rootNotification(),
 		width:        m.width,
 		height:       m.height,
 		body: func(width, height int) string {
 			return renderPaddedPanel(width, height, []string{
-				dashboardSection("Find server"),
+				dashboardSection(i18n.T("Find server", "Найти сервер")),
 				"",
 				m.searchInput.View(),
 				"",
-				dashboardHelp("Search alias, host, display name, group, tags, notes, and route."),
+				dashboardHelp(i18n.T("Search alias, host, display name, group, tags, notes, and route.", "Поиск по псевдониму, хосту, имени, группе, тегам, заметкам и маршруту.")),
 			})
 		},
-		footer: []helpItem{{Key: "Type", Action: "search"}, {Key: "Enter", Action: "confirm"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "cancel"}},
+		footer: []helpItem{{Key: i18n.T("Type", "Ввод"), Action: i18n.T("search", "поиск")}, {Key: "Enter", Action: i18n.T("confirm", "подтвердить")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}},
 	})
 }
 
 func (m *tuiModel) viewInlineBackgroundResults() string {
 	var b strings.Builder
-	b.WriteString(sectionStyle.Render("Last Background Run"))
+	b.WriteString(sectionStyle.Render(i18n.T("Last Background Run", "Последний фоновый запуск")))
 	b.WriteString("\n")
 	for _, result := range m.bgResults {
 		status := "OK"
@@ -2292,7 +2350,7 @@ func (m *tuiModel) viewInlineBackgroundResults() string {
 			output = result.Err
 		}
 		if output != "" {
-			b.WriteString(helpStyle.Render("  Output: " + result.Alias))
+			b.WriteString(helpStyle.Render(i18n.T("  Output: ", "  Вывод: ") + result.Alias))
 			b.WriteString("\n")
 			for _, line := range strings.Split(output, "\n") {
 				b.WriteString(m.renderBackgroundOutputLine(line))
@@ -2355,42 +2413,42 @@ func (m *tuiModel) viewSelectedServer(server *model.Server) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(sectionStyle.Render("Selected"))
+	b.WriteString(sectionStyle.Render(i18n.T("Selected", "Выбрано")))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("  Alias: %s\n", server.Alias))
-	b.WriteString(fmt.Sprintf("  Display Name: %s\n", displayName))
-	b.WriteString(fmt.Sprintf("  Host: %s\n", server.Host))
-	b.WriteString(fmt.Sprintf("  Port: %d\n", server.Port))
-	b.WriteString(fmt.Sprintf("  User: %s\n", server.User))
+	b.WriteString(i18n.Tf("  Alias: %s\n", "  Псевдоним: %s\n", server.Alias))
+	b.WriteString(i18n.Tf("  Display Name: %s\n", "  Имя: %s\n", displayName))
+	b.WriteString(i18n.Tf("  Host: %s\n", "  Хост: %s\n", server.Host))
+	b.WriteString(i18n.Tf("  Port: %d\n", "  Порт: %d\n", server.Port))
+	b.WriteString(i18n.Tf("  User: %s\n", "  Пользователь: %s\n", server.User))
 	target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
-	b.WriteString(fmt.Sprintf("  Target: %s\n", target))
-	b.WriteString(fmt.Sprintf("  Auth: %s\n", authLabel(server.AuthMethod)))
+	b.WriteString(i18n.Tf("  Target: %s\n", "  Цель: %s\n", target))
+	b.WriteString(i18n.Tf("  Auth: %s\n", "  Авторизация: %s\n", authLabel(server.AuthMethod)))
 	if len(server.Route.Hops) > 0 {
-		b.WriteString(fmt.Sprintf("  Route: %s\n", server.Route.DisplaySummary(target)))
+		b.WriteString(i18n.Tf("  Route: %s\n", "  Маршрут: %s\n", server.Route.DisplaySummary(target)))
 	} else if server.ProxyJump != "" {
 		b.WriteString(fmt.Sprintf("  ProxyJump: %s\n", server.ProxyJump))
 	}
-	b.WriteString(fmt.Sprintf("  Group: %s\n", group))
+	b.WriteString(i18n.Tf("  Group: %s\n", "  Группа: %s\n", group))
 	if len(server.Tags) > 0 {
-		b.WriteString(fmt.Sprintf("  Tags: %s\n", strings.Join(server.Tags, ", ")))
+		b.WriteString(i18n.Tf("  Tags: %s\n", "  Теги: %s\n", strings.Join(server.Tags, ", ")))
 	}
 	if server.StartupCommand != "" {
-		b.WriteString(fmt.Sprintf("  Startup: %s\n", server.StartupCommand))
+		b.WriteString(i18n.Tf("  Startup: %s\n", "  Команда запуска: %s\n", server.StartupCommand))
 	}
-	b.WriteString(fmt.Sprintf("  Status: %s\n", testStatusLabel(server)))
+	b.WriteString(i18n.Tf("  Status: %s\n", "  Статус: %s\n", testStatusLabel(server)))
 	return b.String()
 }
 
 func (m *tuiModel) viewTags() string {
 	return renderScreenShell(screenShell{
-		breadcrumb:   "Tags",
-		status:       shellStatus(m.vaultUnlocked, fmt.Sprintf("%d tags", len(m.tags))),
+		breadcrumb:   i18n.T("Tags", "Теги"),
+		status:       shellStatus(m.vaultUnlocked, i18n.Tf("%d tags", "Тегов: %d", len(m.tags))),
 		notification: m.rootNotification(),
 		width:        m.width,
 		height:       m.height,
 		body: func(width, height int) string {
 			if len(m.tags) == 0 {
-				return renderPaddedPanel(width, height, []string{dashboardHelp("No tags yet. Ctrl+A adds one to the selected servers.")})
+				return renderPaddedPanel(width, height, []string{dashboardHelp(i18n.T("No tags yet. Ctrl+A adds one to the selected servers.", "Тегов пока нет. Ctrl+A добавит тег выбранным серверам."))})
 			}
 			capacity := max(1, height-2)
 			start, end := visibleServerRange(len(m.tagList.Items()), m.tagList.Index(), capacity)
@@ -2408,37 +2466,37 @@ func (m *tuiModel) viewTags() string {
 			}
 			return renderPaddedPanel(width, height, lines)
 		},
-		footer: []helpItem{{Key: "Enter", Action: "toggle"}, {Key: "Ctrl+A", Action: "add"}, {Key: "Ctrl+E", Action: "rename"}, {Key: "Ctrl+D", Action: "delete"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+		footer: []helpItem{{Key: "Enter", Action: i18n.T("toggle", "вкл/выкл")}, {Key: "Ctrl+A", Action: i18n.T("add", "добавить")}, {Key: "Ctrl+E", Action: i18n.T("rename", "переименовать")}, {Key: "Ctrl+D", Action: i18n.T("delete", "удалить")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("back", "назад")}},
 	})
 }
 
 func (m *tuiModel) viewTagInput() string {
-	title := "Add Tag"
+	title := i18n.T("Add Tag", "Добавить тег")
 	if m.tagMode == "rename" {
-		title = "Rename Tag"
+		title = i18n.T("Rename Tag", "Переименовать тег")
 	}
 	return renderScreenShell(screenShell{
 		breadcrumb: title,
-		status:     shellStatus(m.vaultUnlocked, "Tag editor"),
+		status:     shellStatus(m.vaultUnlocked, i18n.T("Tag editor", "Редактор тегов")),
 		width:      m.width,
 		height:     m.height,
 		body: func(width, height int) string {
 			return renderPaddedPanel(width, height, []string{dashboardSection(title), "", m.tagInput.View()})
 		},
-		footer: []helpItem{{Key: "Enter", Action: "save"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "cancel"}},
+		footer: []helpItem{{Key: "Enter", Action: i18n.T("save", "сохранить")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}},
 	})
 }
 
 func (m *tuiModel) viewGroups() string {
 	return renderScreenShell(screenShell{
-		breadcrumb:   "Groups",
-		status:       shellStatus(m.vaultUnlocked, fmt.Sprintf("%d groups", len(m.groups))),
+		breadcrumb:   i18n.T("Groups", "Группы"),
+		status:       shellStatus(m.vaultUnlocked, i18n.Tf("%d groups", "Групп: %d", len(m.groups))),
 		notification: m.rootNotification(),
 		width:        m.width,
 		height:       m.height,
 		body: func(width, height int) string {
 			if len(m.groups) == 0 {
-				return renderPaddedPanel(width, height, []string{dashboardHelp("No groups yet. Ctrl+A creates one.")})
+				return renderPaddedPanel(width, height, []string{dashboardHelp(i18n.T("No groups yet. Ctrl+A creates one.", "Групп пока нет. Ctrl+A создаст группу."))})
 			}
 			capacity := max(1, height-2)
 			start, end := visibleServerRange(len(m.groupList.Items()), m.groupList.Index(), capacity)
@@ -2452,41 +2510,41 @@ func (m *tuiModel) viewGroups() string {
 				if index == m.groupList.Index() {
 					marker = "> "
 				}
-				lines = append(lines, fmt.Sprintf("%s%-28s %d server(s)", marker, item.group.Name, item.group.ServerCount))
+				lines = append(lines, i18n.Tf("%s%-28s %d server(s)", "%s%-28s серверов: %d", marker, item.group.Name, item.group.ServerCount))
 			}
 			return renderPaddedPanel(width, height, lines)
 		},
-		footer: []helpItem{{Key: "Ctrl+A", Action: "add"}, {Key: "Ctrl+E", Action: "rename"}, {Key: "Ctrl+D", Action: "delete"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+		footer: []helpItem{{Key: "Ctrl+A", Action: i18n.T("add", "добавить")}, {Key: "Ctrl+E", Action: i18n.T("rename", "переименовать")}, {Key: "Ctrl+D", Action: i18n.T("delete", "удалить")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("back", "назад")}},
 	})
 }
 
 func (m *tuiModel) viewGroupInput() string {
-	title := "Add Group"
+	title := i18n.T("Add Group", "Добавить группу")
 	if m.groupMode == "rename" {
-		title = "Rename Group"
+		title = i18n.T("Rename Group", "Переименовать группу")
 	}
 	return renderScreenShell(screenShell{
 		breadcrumb: title,
-		status:     shellStatus(m.vaultUnlocked, "Group editor"),
+		status:     shellStatus(m.vaultUnlocked, i18n.T("Group editor", "Редактор группы")),
 		width:      m.width,
 		height:     m.height,
 		body: func(width, height int) string {
 			return renderPaddedPanel(width, height, []string{dashboardSection(title), "", m.groupInput.View()})
 		},
-		footer: []helpItem{{Key: "Enter", Action: "save"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "cancel"}},
+		footer: []helpItem{{Key: "Enter", Action: i18n.T("save", "сохранить")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}},
 	})
 }
 
 func (m *tuiModel) viewTemplates() string {
 	return renderScreenShell(screenShell{
-		breadcrumb:   "Command Templates",
-		status:       shellStatus(m.vaultUnlocked, fmt.Sprintf("%d templates", len(m.templates))),
+		breadcrumb:   i18n.T("Command Templates", "Шаблоны команд"),
+		status:       shellStatus(m.vaultUnlocked, i18n.Tf("%d templates", "Шаблонов: %d", len(m.templates))),
 		notification: m.rootNotification(),
 		width:        m.width,
 		height:       m.height,
 		body: func(width, height int) string {
 			if len(m.templates) == 0 {
-				return renderPaddedPanel(width, height, []string{dashboardHelp("No command templates yet. Ctrl+A adds one.")})
+				return renderPaddedPanel(width, height, []string{dashboardHelp(i18n.T("No command templates yet. Ctrl+A adds one.", "Шаблонов команд пока нет. Ctrl+A добавит шаблон."))})
 			}
 			capacity := max(1, height-2)
 			start, end := visibleServerRange(len(m.templateList.Items()), m.templateList.Index(), capacity)
@@ -2508,21 +2566,21 @@ func (m *tuiModel) viewTemplates() string {
 			}
 			return renderPaddedPanel(width, height, lines)
 		},
-		footer: []helpItem{{Key: "Ctrl+A", Action: "add"}, {Key: "Ctrl+E", Action: "edit"}, {Key: "Ctrl+D", Action: "delete"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+		footer: []helpItem{{Key: "Ctrl+A", Action: i18n.T("add", "добавить")}, {Key: "Ctrl+E", Action: i18n.T("edit", "изменить")}, {Key: "Ctrl+D", Action: i18n.T("delete", "удалить")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("back", "назад")}},
 	})
 }
 
 func (m *tuiModel) viewTemplatePicker() string {
 	targets := strings.Join(serverAliases(m.targetServers()), ", ")
 	return renderScreenShell(screenShell{
-		breadcrumb: "Run Template",
-		status:     "Targets: " + targets,
+		breadcrumb: i18n.T("Run Template", "Запуск шаблона"),
+		status:     i18n.T("Targets: ", "Серверы: ") + targets,
 		width:      m.width,
 		height:     m.height,
 		body: func(width, height int) string {
-			lines := []string{dashboardSection("Choose template"), dashboardHelp("Targets: " + targets), ""}
+			lines := []string{dashboardSection(i18n.T("Choose template", "Выберите шаблон")), dashboardHelp(i18n.T("Targets: ", "Серверы: ") + targets), ""}
 			if len(m.templates) == 0 {
-				lines = append(lines, dashboardHelp("No command templates. Press Esc, then Ctrl+P to add one."))
+				lines = append(lines, dashboardHelp(i18n.T("No command templates. Press Esc, then Ctrl+P to add one.", "Шаблонов нет. Нажмите Esc, затем Ctrl+P для добавления.")))
 			} else {
 				capacity := max(1, height-len(lines)-2)
 				start, end := visibleServerRange(len(m.templateList.Items()), m.templateList.Index(), capacity)
@@ -2540,7 +2598,7 @@ func (m *tuiModel) viewTemplatePicker() string {
 			}
 			return renderPaddedPanel(width, height, lines)
 		},
-		footer: []helpItem{{Key: "Enter", Action: "choose"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+		footer: []helpItem{{Key: "Enter", Action: i18n.T("choose", "выбрать")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("back", "назад")}},
 	})
 }
 
@@ -2553,21 +2611,21 @@ func (m *tuiModel) viewTemplateMode() string {
 	}
 	targets := strings.Join(serverAliases(m.targetServers()), ", ")
 	return renderScreenShell(screenShell{
-		breadcrumb: "Run Template / Mode",
-		status:     "Targets: " + targets,
+		breadcrumb: i18n.T("Run Template / Mode", "Запуск шаблона / Режим"),
+		status:     i18n.T("Targets: ", "Серверы: ") + targets,
 		width:      m.width,
 		height:     m.height,
 		body: func(width, height int) string {
-			return renderPaddedPanel(width, height, []string{dashboardSection("Execution"), "", "Template: " + name, "Command: " + command, "Targets: " + targets, "", "Choose foreground for an interactive run or background to keep using sshkeeper."})
+			return renderPaddedPanel(width, height, []string{dashboardSection(i18n.T("Execution", "Выполнение")), "", i18n.T("Template: ", "Шаблон: ") + name, i18n.T("Command: ", "Команда: ") + command, i18n.T("Targets: ", "Серверы: ") + targets, "", i18n.T("Choose foreground for an interactive run or background to keep using sshkeeper.", "Выберите активный запуск для интерактивной работы или фоновый, чтобы продолжить использовать sshkeeper.")})
 		},
-		footer: []helpItem{{Key: "Ctrl+F (Enter)", Action: "Foreground"}, {Key: "Ctrl+B", Action: "Background"}, {Key: "Ctrl+H", Action: "help"}, {Key: "Esc", Action: "back"}},
+		footer: []helpItem{{Key: "Ctrl+F (Enter)", Action: i18n.T("Foreground", "Активный")}, {Key: "Ctrl+B", Action: i18n.T("Background", "Фоновый")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("back", "назад")}},
 	})
 }
 
 func (m *tuiModel) viewBackgroundResults() string {
 	return renderScreenShell(screenShell{
-		breadcrumb: "Background Results",
-		status:     fmt.Sprintf("%d results", len(m.bgResults)),
+		breadcrumb: i18n.T("Background Results", "Результаты фонового запуска"),
+		status:     i18n.Tf("%d results", "Результатов: %d", len(m.bgResults)),
 		width:      m.width,
 		height:     m.height,
 		body: func(width, height int) string {
@@ -2575,7 +2633,7 @@ func (m *tuiModel) viewBackgroundResults() string {
 			for _, result := range m.bgResults {
 				status := "OK"
 				if result.Err != "" {
-					status = "FAIL: " + result.Err
+					status = i18n.T("FAIL: ", "ОШИБКА: ") + result.Err
 				}
 				lines = append(lines, dashboardSection(result.Alias+"  "+status))
 				if result.Output != "" {
@@ -2587,7 +2645,7 @@ func (m *tuiModel) viewBackgroundResults() string {
 			}
 			return renderPaddedPanel(width, height, lines)
 		},
-		footer: []helpItem{{Key: "Enter/Esc", Action: "back"}, {Key: "Ctrl+H", Action: "help"}},
+		footer: []helpItem{{Key: "Enter/Esc", Action: i18n.T("back", "назад")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}},
 	})
 }
 
@@ -2633,7 +2691,7 @@ func (m *tuiModel) reloadServersCmd() tea.Cmd {
 func (m *tuiModel) loadGroupsCmd() tea.Cmd {
 	return func() tea.Msg {
 		if ListGroups == nil {
-			return groupsLoadedMsg{err: fmt.Errorf("group storage is unavailable")}
+			return groupsLoadedMsg{err: fmt.Errorf("%s", i18n.T("group storage is unavailable", "хранилище групп недоступно"))}
 		}
 		groups, err := ListGroups()
 		return groupsLoadedMsg{groups: groups, err: err}
@@ -2650,7 +2708,7 @@ func (m *tuiModel) setGroups(groups []*model.Group) {
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
-	l.Title = "Groups"
+	l.Title = i18n.T("Groups", "Группы")
 	l.Styles.Title = titleStyle
 	m.groupList = l
 }
@@ -2668,7 +2726,7 @@ func (m *tuiModel) removeGroup(name string) {
 func (m *tuiModel) loadTemplatesCmd() tea.Cmd {
 	return func() tea.Msg {
 		if ListCommandTemplates == nil {
-			return templatesLoadedMsg{err: fmt.Errorf("template storage is unavailable")}
+			return templatesLoadedMsg{err: fmt.Errorf("%s", i18n.T("template storage is unavailable", "хранилище шаблонов недоступно"))}
 		}
 		templates, err := ListCommandTemplates()
 		return templatesLoadedMsg{templates: templates, err: err}
@@ -2678,7 +2736,7 @@ func (m *tuiModel) loadTemplatesCmd() tea.Cmd {
 func (m *tuiModel) loadTagsCmd() tea.Cmd {
 	return func() tea.Msg {
 		if ListTags == nil {
-			return tagsLoadedMsg{err: fmt.Errorf("tag storage is unavailable")}
+			return tagsLoadedMsg{err: fmt.Errorf("%s", i18n.T("tag storage is unavailable", "хранилище тегов недоступно"))}
 		}
 		tags, err := ListTags()
 		return tagsLoadedMsg{tags: tags, err: err}
@@ -2695,14 +2753,14 @@ func (m *tuiModel) setTemplates(templates []*model.CommandTemplate) {
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
-	l.Title = "Command Templates"
+	l.Title = i18n.T("Command Templates", "Шаблоны команд")
 	l.Styles.Title = titleStyle
 	m.templateList = l
 }
 
 func (m *tuiModel) setTags(tags []string) {
 	m.tags = tags
-	m.tagList = newStringList(tags, "Tags", m.width, managerListHeight(m.height))
+	m.tagList = newStringList(tags, i18n.T("Tags", "Теги"), m.width, managerListHeight(m.height))
 }
 
 func (m *tuiModel) removeTemplate(name string) {
@@ -2741,25 +2799,26 @@ func (m *tuiModel) renderListHelp(selectedCount int, hasBackgroundResult bool) s
 }
 
 func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []helpItem {
-	insAction := "select"
+	insAction := i18n.T("select", "выбрать")
 	if selectedCount > 0 {
-		insAction = fmt.Sprintf("select (%d selected)", selectedCount)
+		insAction = i18n.Tf("select (%d selected)", "выбрать (отмечено: %d)", selectedCount)
 	}
 	var items []helpItem
 	if hasBackgroundResult {
-		items = append(items, helpItem{Key: "Esc", Action: "clear result"})
+		items = append(items, helpItem{Key: "Esc", Action: i18n.T("clear result", "убрать результат")})
 	}
 	items = append(items,
-		helpItem{Key: "Enter", Action: "connect"},
-		helpItem{Key: "Ctrl+X", Action: "server actions"},
-		helpItem{Key: "m", Action: "manage"},
-		helpItem{Key: "Ctrl+A", Action: "add"},
-		helpItem{Key: "Ctrl+E", Action: "edit"},
-		helpItem{Key: "Ctrl+F", Action: "search"},
+		helpItem{Key: "Enter", Action: i18n.T("connect", "подключиться")},
+		helpItem{Key: "Ctrl+X", Action: i18n.T("server actions", "действия с сервером")},
+		helpItem{Key: "Ctrl+W", Action: i18n.T("forward rules", "правила проброса")},
+		helpItem{Key: "m", Action: i18n.T("manage", "управление")},
+		helpItem{Key: "Ctrl+A", Action: i18n.T("add", "добавить")},
+		helpItem{Key: "Ctrl+E", Action: i18n.T("edit", "изменить")},
+		helpItem{Key: "Ctrl+F", Action: i18n.T("search", "поиск")},
 		helpItem{Key: "Ins", Action: insAction},
-		helpItem{Key: "?", Action: "hotkeys"},
-		helpItem{Key: "Ctrl+H", Action: "help"},
-		helpItem{Key: "Ctrl+Q", Action: "quit"},
+		helpItem{Key: "?", Action: i18n.T("hotkeys", "клавиши")},
+		helpItem{Key: "Ctrl+H", Action: i18n.T("help", "справка")},
+		helpItem{Key: "Ctrl+Q", Action: i18n.T("quit", "выход")},
 	)
 	return items
 }

@@ -12,28 +12,28 @@ import (
 
 var forwardCmd = &cobra.Command{
 	Use:   "forward",
-	Short: "Manage port forwards",
+	Short: tr("Manage port forwards", "Управление перенаправлением портов"),
 }
 
 var forwardListCmd = &cobra.Command{
 	Use:   "list <alias>",
-	Short: "List port forwards for a server",
+	Short: tr("List port forwards for a server", "Показать перенаправления портов сервера"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		alias := args[0]
 		server, err := appDB.GetServer(alias)
 		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
+			return fmt.Errorf("%s", trf("server not found: %s", "сервер не найден: %s", alias))
 		}
 		forwards, err := appDB.GetForwards(server.ID)
 		if err != nil {
-			return fmt.Errorf("list forwards: %w", err)
+			return fmt.Errorf("%s: %w", tr("list forwards", "получить список перенаправлений"), err)
 		}
 		if len(forwards) == 0 {
-			fmt.Println("No port forwards configured.")
+			fmt.Println(tr("No port forwards configured.", "Перенаправления портов не настроены."))
 			return nil
 		}
-		fmt.Printf("Port forwards for %s:\n", alias)
+		fmt.Printf(tr("Port forwards for %s:\n", "Перенаправления портов для %s:\n"), alias)
 		for _, f := range forwards {
 			switch f.Type {
 			case model.ForwardLocal:
@@ -50,13 +50,13 @@ var forwardListCmd = &cobra.Command{
 
 var forwardAddCmd = &cobra.Command{
 	Use:   "add <alias>",
-	Short: "Add a port forward",
+	Short: tr("Add a port forward", "Добавить перенаправление порта"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		alias := args[0]
 		server, err := appDB.GetServer(alias)
 		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
+			return fmt.Errorf("%s", trf("server not found: %s", "сервер не найден: %s", alias))
 		}
 
 		fwdType, _ := cmd.Flags().GetString("type")
@@ -69,12 +69,12 @@ var forwardAddCmd = &cobra.Command{
 
 		// Validate type
 		if fwdType != "local" && fwdType != "remote" && fwdType != "dynamic" {
-			return fmt.Errorf("invalid forward type %q: must be local, remote, or dynamic", fwdType)
+			return fmt.Errorf("%s", trf("invalid forward type %q: must be local, remote, or dynamic", "недопустимый тип перенаправления %q: используйте local, remote или dynamic", fwdType))
 		}
 
 		// Validate ports
 		if localPort < 1 || localPort > 65535 {
-			return fmt.Errorf("invalid local port %d: must be 1-65535", localPort)
+			return fmt.Errorf("%s", trf("invalid local port %d: must be 1-65535", "недопустимый локальный порт %d: требуется 1–65535", localPort))
 		}
 
 		// Validate fields based on type
@@ -84,17 +84,17 @@ var forwardAddCmd = &cobra.Command{
 				localAddr = "0.0.0.0"
 			}
 			if remoteAddr == "" {
-				return fmt.Errorf("remote-addr is required for local forward")
+				return fmt.Errorf("%s", tr("remote-addr is required for local forward", "для локального перенаправления требуется remote-addr"))
 			}
 			if remotePort < 1 || remotePort > 65535 {
-				return fmt.Errorf("invalid remote port %d: must be 1-65535", remotePort)
+				return fmt.Errorf("%s", trf("invalid remote port %d: must be 1-65535", "недопустимый удалённый порт %d: требуется 1–65535", remotePort))
 			}
 		case "remote":
 			if remoteAddr == "" {
-				return fmt.Errorf("remote-addr is required for remote forward")
+				return fmt.Errorf("%s", tr("remote-addr is required for remote forward", "для удалённого перенаправления требуется remote-addr"))
 			}
 			if remotePort < 1 || remotePort > 65535 {
-				return fmt.Errorf("invalid remote port %d: must be 1-65535", remotePort)
+				return fmt.Errorf("%s", trf("invalid remote port %d: must be 1-65535", "недопустимый удалённый порт %d: требуется 1–65535", remotePort))
 			}
 			if localAddr == "" {
 				localAddr = "0.0.0.0"
@@ -122,26 +122,26 @@ var forwardAddCmd = &cobra.Command{
 		fwd.Enabled = true
 		fwdID, err := appDB.AddForward(fwd)
 		if err != nil {
-			return fmt.Errorf("add forward: %w", err)
+			return fmt.Errorf("%s: %w", tr("add forward", "добавить перенаправление"), err)
 		}
-		fmt.Printf("✓ Forward added [%d]\n", fwdID)
+		fmt.Printf(tr("✓ Forward added [%d]\n", "✓ Перенаправление добавлено [%d]\n"), fwdID)
 		return nil
 	},
 }
 
 var forwardEditCmd = &cobra.Command{
 	Use:   "edit <id>",
-	Short: "Edit a port forward",
+	Short: tr("Edit a port forward", "Изменить перенаправление порта"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {
-			return fmt.Errorf("invalid forward ID: %s", args[0])
+			return fmt.Errorf("%s", trf("invalid forward ID: %s", "недопустимый ID перенаправления: %s", args[0]))
 		}
 
 		fwd, err := appDB.GetForward(id)
 		if err != nil {
-			return fmt.Errorf("forward not found: %d", id)
+			return fmt.Errorf("%s", trf("forward not found: %d", "перенаправление не найдено: %d", id))
 		}
 
 		enabled, _ := cmd.Flags().GetBool("enabled")
@@ -149,32 +149,32 @@ var forwardEditCmd = &cobra.Command{
 			fwd.Enabled = enabled
 		}
 		if err := appDB.UpdateForward(fwd); err != nil {
-			return fmt.Errorf("update forward: %w", err)
+			return fmt.Errorf("%s: %w", tr("update forward", "обновить перенаправление"), err)
 		}
 
-		fmt.Printf("✓ Forward %d updated\n", id)
+		fmt.Printf(tr("✓ Forward %d updated\n", "✓ Перенаправление %d обновлено\n"), id)
 		return nil
 	},
 }
 
 var forwardDeleteCmd = &cobra.Command{
 	Use:   "delete <alias> <id>",
-	Short: "Delete a port forward",
+	Short: tr("Delete a port forward", "Удалить перенаправление порта"),
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		alias := args[0]
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil {
-			return fmt.Errorf("invalid forward ID: %s", args[1])
+			return fmt.Errorf("%s", trf("invalid forward ID: %s", "недопустимый ID перенаправления: %s", args[1]))
 		}
 		server, err := appDB.GetServer(alias)
 		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
+			return fmt.Errorf("%s", trf("server not found: %s", "сервер не найден: %s", alias))
 		}
 		// Verify forward belongs to this server
 		forwards, err := appDB.GetForwards(server.ID)
 		if err != nil {
-			return fmt.Errorf("load forwards: %w", err)
+			return fmt.Errorf("%s: %w", tr("load forwards", "загрузить перенаправления"), err)
 		}
 		found := false
 		for _, f := range forwards {
@@ -184,26 +184,26 @@ var forwardDeleteCmd = &cobra.Command{
 			}
 		}
 		if !found {
-			return fmt.Errorf("forward %d does not belong to server %s", id, alias)
+			return fmt.Errorf("%s", trf("forward %d does not belong to server %s", "перенаправление %d не принадлежит серверу %s", id, alias))
 		}
 		if err := appDB.DeleteForward(id); err != nil {
-			return fmt.Errorf("delete forward: %w", err)
+			return fmt.Errorf("%s: %w", tr("delete forward", "удалить перенаправление"), err)
 		}
-		fmt.Println("✓ Forward deleted")
+		fmt.Println(tr("✓ Forward deleted", "✓ Перенаправление удалено"))
 		return nil
 	},
 }
 
 func init() {
-	forwardAddCmd.Flags().String("type", "local", "Forward type: local, remote, dynamic")
-	forwardAddCmd.Flags().String("name", "", "Forward name")
-	forwardAddCmd.Flags().String("description", "", "Forward description")
-	forwardAddCmd.Flags().String("local-addr", "127.0.0.1", "Listen address")
-	forwardAddCmd.Flags().Int("local-port", 0, "Listen port")
+	forwardAddCmd.Flags().String("type", "local", tr("Forward type: local, remote, dynamic", "Тип перенаправления: local, remote, dynamic"))
+	forwardAddCmd.Flags().String("name", "", tr("Forward name", "Имя перенаправления"))
+	forwardAddCmd.Flags().String("description", "", tr("Forward description", "Описание перенаправления"))
+	forwardAddCmd.Flags().String("local-addr", "127.0.0.1", tr("Listen address", "Адрес прослушивания"))
+	forwardAddCmd.Flags().Int("local-port", 0, tr("Listen port", "Порт прослушивания"))
 	forwardAddCmd.MarkFlagRequired("local-port")
-	forwardAddCmd.Flags().String("remote-addr", "", "Target address")
-	forwardAddCmd.Flags().Int("remote-port", 0, "Target port")
-	forwardEditCmd.Flags().Bool("enabled", true, "Enable/disable forward")
+	forwardAddCmd.Flags().String("remote-addr", "", tr("Target address", "Адрес назначения"))
+	forwardAddCmd.Flags().Int("remote-port", 0, tr("Target port", "Порт назначения"))
+	forwardEditCmd.Flags().Bool("enabled", true, tr("Enable/disable forward", "Включить или выключить перенаправление"))
 
 	forwardCmd.AddCommand(forwardListCmd)
 	forwardCmd.AddCommand(forwardAddCmd)

@@ -18,7 +18,7 @@ var sessionConnectCmd = &cobra.Command{
 		alias := args[0]
 		server, err := appDB.GetServer(alias)
 		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
+			return fmt.Errorf("%s", trf("server not found: %s", "сервер не найден: %s", alias))
 		}
 		if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
 			if err := unlockVaultForSession(); err != nil {
@@ -39,19 +39,19 @@ func unlockVaultForSession() error {
 		return nil
 	}
 	for attempts := 0; attempts < 3; attempts++ {
-		fmt.Print("Master password: ")
+		fmt.Print(tr("Master password: ", "Мастер-пароль: "))
 		password, err := term.ReadPassword(int(syscall.Stdin))
 		fmt.Println()
 		if err != nil {
-			return fmt.Errorf("read vault password: %w", err)
+			return fmt.Errorf("%s: %w", tr("read vault password", "прочитать пароль хранилища"), err)
 		}
 		if err := v.Unlock(string(password)); err == nil {
 			return nil
 		}
 		remaining := 2 - attempts
 		if remaining > 0 {
-			fmt.Printf("Invalid password. %d attempts remaining.\n", remaining)
+			fmt.Println(trf("Invalid password. %d attempts remaining.", "Неверный пароль. Осталось попыток: %d.", remaining))
 		}
 	}
-	return fmt.Errorf("too many failed vault unlock attempts")
+	return fmt.Errorf("%s", tr("too many failed vault unlock attempts", "слишком много неудачных попыток разблокировать хранилище"))
 }

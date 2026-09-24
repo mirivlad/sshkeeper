@@ -9,17 +9,17 @@ import (
 
 var searchCmd = &cobra.Command{
 	Use:   "search <query>",
-	Short: "Search servers by alias, host, name, group, notes, tags, route",
+	Short: tr("Search servers by alias, host, name, group, notes, tags, route", "Поиск серверов по псевдониму, хосту, имени, группе, заметкам, тегам и маршруту"),
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query := args[0]
 		servers, err := appDB.SearchServers(query)
 		if err != nil {
-			return fmt.Errorf("search: %w", err)
+			return fmt.Errorf("%s: %w", tr("search", "поиск"), err)
 		}
 
 		if len(servers) == 0 {
-			fmt.Println("No servers found.")
+			fmt.Println(tr("No servers found.", "Серверы не найдены."))
 			return nil
 		}
 
@@ -40,13 +40,13 @@ var searchCmd = &cobra.Command{
 				routeStr = "via " + s.ProxyJump
 			}
 
-			fmt.Printf("[%s] %-20s %-30s  route: %s", statusChar, s.Alias, target, routeStr)
+			fmt.Printf(tr("[%s] %-20s %-30s  route: %s", "[%s] %-20s %-30s  маршрут: %s"), statusChar, s.Alias, target, routeStr)
 
 			if len(s.Tags) > 0 {
-				fmt.Printf("  tags: %s", strings.Join(s.Tags, ", "))
+				fmt.Printf(tr("  tags: %s", "  теги: %s"), strings.Join(s.Tags, ", "))
 			}
 			if s.Notes != "" {
-				fmt.Printf("  notes: %s", s.Notes)
+				fmt.Printf(tr("  notes: %s", "  заметки: %s"), s.Notes)
 			}
 			fmt.Println()
 		}

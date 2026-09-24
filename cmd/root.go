@@ -7,6 +7,7 @@ import (
 
 	"github.com/mirivlad/sshkeeper/internal/config"
 	"github.com/mirivlad/sshkeeper/internal/db"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 	tunnelpkg "github.com/mirivlad/sshkeeper/internal/tunnel"
 	"github.com/mirivlad/sshkeeper/internal/vault"
 	"github.com/spf13/cobra"
@@ -21,17 +22,27 @@ var (
 var rootCmd = &cobra.Command{
 	Use:     "sshkeeper",
 	Version: Version,
-	Short:   "sshkeeper — SSH connection manager",
-	Long: `sshkeeper is a console SSH connection manager.
+	Short:   tr("sshkeeper — SSH connection manager", "sshkeeper — менеджер SSH-подключений"),
+	Long: tr(`sshkeeper is a console SSH connection manager.
 Linux and macOS are primary release targets; Windows is experimental.
 It manages server profiles, secrets, and provides a convenient way
-to launch SSH sessions using the system OpenSSH client.`,
+to launch SSH sessions using the system OpenSSH client.`, `sshkeeper — консольный менеджер SSH-подключений.
+Основные целевые платформы — Linux и macOS; поддержка Windows экспериментальная.
+Он управляет профилями серверов и секретами и запускает SSH-сеансы
+через системный клиент OpenSSH.`),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runTUI()
 	},
 }
 
 func Execute() {
+	if language, err := config.ReadLanguage(); err == nil {
+		_ = i18n.SetPreference(language)
+	} else {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	localizeCLIHelp()
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -75,19 +86,24 @@ func initApp() {
 
 	cfg, err = config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		fmt.Fprintln(os.Stderr, trf("Error loading config: %v", "Ошибка загрузки конфигурации: %v", err))
 		os.Exit(1)
 	}
+	if err := i18n.SetPreference(cfg.UI.Language); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	localizeCLIHelp()
 
 	appDB, err = db.Open(cfg.DataDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
+		fmt.Fprintln(os.Stderr, trf("Error opening database: %v", "Ошибка открытия базы данных: %v", err))
 		os.Exit(1)
 	}
 
 	// Initialize tunnel state manager
 	if err := tunnelpkg.Init(cfg.DataDir); err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing tunnel manager: %v\n", err)
+		fmt.Fprintln(os.Stderr, trf("Error initializing tunnel manager: %v", "Ошибка инициализации менеджера туннелей: %v", err))
 		os.Exit(1)
 	}
 
@@ -97,51 +113,51 @@ func initApp() {
 
 	if !vault.Exists(vaultPath) {
 		// First run — create vault
-		fmt.Println("Welcome to sshkeeper!")
-		fmt.Println("No vault found. Let's create one.")
+		fmt.Println(tr("Welcome to sshkeeper!", "Добро пожаловать в sshkeeper!"))
+		fmt.Println(tr("No vault found. Let's create one.", "Хранилище не найдено. Создадим его."))
 		fmt.Println()
 
 		for {
-			fmt.Print("Create master password: ")
+			fmt.Print(tr("Create master password: ", "Создайте мастер-пароль: "))
 			pw1, err := term.ReadPassword(int(syscall.Stdin))
 			fmt.Println()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Error reading password: %v", "Ошибка чтения пароля: %v", err))
 				os.Exit(1)
 			}
 
 			if len(pw1) == 0 {
-				fmt.Println("Password cannot be empty. Try again.")
+				fmt.Println(tr("Password cannot be empty. Try again.", "Пароль не может быть пустым. Повторите попытку."))
 				continue
 			}
 
-			fmt.Print("Repeat master password: ")
+			fmt.Print(tr("Repeat master password: ", "Повторите мастер-пароль: "))
 			pw2, err := term.ReadPassword(int(syscall.Stdin))
 			fmt.Println()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Error reading password: %v", "Ошибка чтения пароля: %v", err))
 				os.Exit(1)
 			}
 
 			if string(pw1) != string(pw2) {
-				fmt.Println("Passwords do not match. Try again.")
+				fmt.Println(tr("Passwords do not match. Try again.", "Пароли не совпадают. Повторите попытку."))
 				continue
 			}
 
 			if err := vault.Create(vaultPath, string(pw1)); err != nil {
-				fmt.Fprintf(os.Stderr, "Error creating vault: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Error creating vault: %v", "Ошибка создания хранилища: %v", err))
 				os.Exit(1)
 			}
 
 			// Unlock immediately after creation
 			if err := v.Unlock(string(pw1)); err != nil {
-				fmt.Fprintf(os.Stderr, "Error unlocking vault: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Error unlocking vault: %v", "Ошибка разблокировки хранилища: %v", err))
 				os.Exit(1)
 			}
 
 			vaultInstance = v
 			fmt.Println()
-			fmt.Println("Vault created and unlocked for this command. You're ready to go!")
+			fmt.Println(tr("Vault created and unlocked for this command. You're ready to go!", "Хранилище создано и разблокировано для этой команды. Всё готово!"))
 			fmt.Println()
 			break
 		}
@@ -153,26 +169,26 @@ func initApp() {
 		}
 
 		for attempts := 0; attempts < 3; attempts++ {
-			fmt.Print("Master password: ")
+			fmt.Print(tr("Master password: ", "Мастер-пароль: "))
 			pw, err := term.ReadPassword(int(syscall.Stdin))
 			fmt.Println()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Error reading password: %v", "Ошибка чтения пароля: %v", err))
 				os.Exit(1)
 			}
 
 			if err := v.Unlock(string(pw)); err != nil {
 				remaining := 2 - attempts
 				if remaining > 0 {
-					fmt.Printf("Invalid password. %d attempts remaining.\n", remaining)
+					fmt.Println(trf("Invalid password. %d attempts remaining.", "Неверный пароль. Осталось попыток: %d.", remaining))
 					continue
 				}
-				fmt.Fprintf(os.Stderr, "Too many failed attempts. Start the command again to retry.\n")
+				fmt.Fprintln(os.Stderr, tr("Too many failed attempts. Start the command again to retry.", "Слишком много неудачных попыток. Запустите команду снова."))
 				os.Exit(1)
 			}
 
 			vaultInstance = v
-			fmt.Println("Vault unlocked.")
+			fmt.Println(tr("Vault unlocked.", "Хранилище разблокировано."))
 			fmt.Println()
 			return
 		}

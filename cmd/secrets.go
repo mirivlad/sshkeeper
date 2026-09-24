@@ -31,7 +31,7 @@ func stableServerSecretID(serverID int64, secretType string) string {
 
 func getServerSecret(v *vault.Vault, server *model.Server, secretType string) ([]byte, error) {
 	if server == nil {
-		return nil, fmt.Errorf("server is required")
+		return nil, fmt.Errorf("%s", tr("server is required", "требуется сервер"))
 	}
 	if server.ID > 0 {
 		stableID := stableServerSecretID(server.ID, secretType)
@@ -50,7 +50,7 @@ func getServerSecret(v *vault.Vault, server *model.Server, secretType string) ([
 		}
 		v.Delete(legacyID)
 		if err := v.Save(); err != nil {
-			return nil, fmt.Errorf("save migrated vault secret: %w", err)
+			return nil, fmt.Errorf("%s: %w", tr("save migrated vault secret", "сохранить перенесённый секрет хранилища"), err)
 		}
 	}
 	return data, nil
@@ -104,7 +104,7 @@ func cleanupServerSecrets(v *vault.Vault, alias string) {
 
 func syncServerSecrets(v *vault.Vault, oldAlias string, server *model.Server, secret string) error {
 	if server == nil {
-		return fmt.Errorf("server is required")
+		return fmt.Errorf("%s", tr("server is required", "требуется сервер"))
 	}
 	if server.ID <= 0 {
 		// Compatibility path for pre-persistence callers/tests. Real saves assign

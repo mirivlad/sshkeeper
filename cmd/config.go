@@ -8,16 +8,16 @@ import (
 
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Configuration management",
+	Short: tr("Configuration management", "Управление конфигурацией"),
 }
 
 var configPathCmd = &cobra.Command{
 	Use:   "path",
-	Short: "Show config file paths",
+	Short: tr("Show config file paths", "Показать пути файлов конфигурации"),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Printf("Config:  %s/config.toml\n", cfg.ConfigDir)
-		fmt.Printf("DB:      %s/sshkeeper.db\n", cfg.DataDir)
-		fmt.Printf("Vault:   %s/vault.bin\n", cfg.DataDir)
+		fmt.Printf(tr("Config:  %s/config.toml\n", "Конфиг: %s/config.toml\n"), cfg.ConfigDir)
+		fmt.Printf(tr("DB:      %s/sshkeeper.db\n", "БД:      %s/sshkeeper.db\n"), cfg.DataDir)
+		fmt.Printf(tr("Vault:   %s/vault.bin\n", "Хранилище: %s/vault.bin\n"), cfg.DataDir)
 		return nil
 	},
 }
