@@ -12,7 +12,7 @@ var Version = "dev"
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print sshkeeper version",
+		Short: tr("Print sshkeeper version", "Показать версию sshkeeper"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "sshkeeper %s\n", Version)

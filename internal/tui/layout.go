@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 )
 
 const (
@@ -67,7 +68,7 @@ func wrapCells(value string, width int) []string {
 }
 
 func minimumSizeView(width int) string {
-	message := "sshkeeper needs at least 60x16"
+	message := i18n.T("sshkeeper needs at least 60x16", "Для sshkeeper нужен терминал не меньше 60x16")
 	if width <= 0 {
 		return message
 	}

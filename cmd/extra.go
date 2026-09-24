@@ -11,7 +11,7 @@ import (
 
 var importCmd = &cobra.Command{
 	Use:   "import",
-	Short: "Import servers from ~/.ssh/config",
+	Short: tr("Import servers from ~/.ssh/config", "Импортировать серверы из ~/.ssh/config"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		imported, err := importServersFromSSHConfig(func(format string, args ...interface{}) {
 			fmt.Printf(format+"\n", args...)
@@ -19,18 +19,18 @@ var importCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		fmt.Printf("\nImported %d servers.\n", imported)
+		fmt.Printf(tr("\nImported %d servers.\n", "\nИмпортировано серверов: %d.\n"), imported)
 		return nil
 	},
 }
 
 var exportCmd = &cobra.Command{
 	Use:   "export",
-	Short: "Export servers to stdout",
+	Short: tr("Export servers to stdout", "Вывести серверы в stdout"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		servers, err := appDB.ListServers()
 		if err != nil {
-			return fmt.Errorf("list servers: %w", err)
+			return fmt.Errorf("%s: %w", tr("list servers", "получить список серверов"), err)
 		}
 
 		fmt.Print(formatServersExport(servers))
@@ -41,11 +41,11 @@ var exportCmd = &cobra.Command{
 func importServersFromSSHConfig(report func(format string, args ...interface{})) (int, error) {
 	servers, err := ssh.ImportFromSSHConfig()
 	if err != nil {
-		return 0, fmt.Errorf("import: %w", err)
+		return 0, fmt.Errorf("%s: %w", tr("import", "импорт"), err)
 	}
 	if len(servers) == 0 {
 		if report != nil {
-			report("No servers found in ~/.ssh/config")
+			report(tr("No servers found in ~/.ssh/config", "В ~/.ssh/config серверы не найдены"))
 		}
 		return 0, nil
 	}
@@ -62,7 +62,7 @@ func importServersFromSSHConfig(report func(format string, args ...interface{}))
 	for _, server := range servers {
 		if existing, _ := appDB.GetServer(server.Alias); existing != nil {
 			if report != nil {
-				report("  skip (exists): %s", server.Alias)
+				report(tr("  skip (exists): %s", "  пропуск (существует): %s"), server.Alias)
 			}
 			continue
 		}
@@ -71,7 +71,7 @@ func importServersFromSSHConfig(report func(format string, args ...interface{}))
 		server.Route = model.Route{}
 		if err := appDB.CreateServer(server); err != nil {
 			if report != nil {
-				report("  error: %s: %v", server.Alias, err)
+				report(tr("  error: %s: %v", "  ошибка: %s: %v"), server.Alias, err)
 			}
 			continue
 		}
@@ -84,7 +84,7 @@ func importServersFromSSHConfig(report func(format string, args ...interface{}))
 			route, err := parseRouteSpec(item.spec)
 			if err != nil {
 				if report != nil {
-					report("  warning: %s imported direct; route %q could not be parsed: %v", item.server.Alias, item.spec, err)
+					report(tr("  warning: %s imported direct; route %q could not be parsed: %v", "  предупреждение: %s импортирован без маршрута; не удалось разобрать маршрут %q: %v"), item.server.Alias, item.spec, err)
 				}
 				continue
 			}
@@ -94,7 +94,7 @@ func importServersFromSSHConfig(report func(format string, args ...interface{}))
 				item.server.Route = model.Route{}
 				item.server.ProxyJump = ""
 				if report != nil {
-					report("  warning: %s imported direct; route could not be saved: %v", item.server.Alias, err)
+					report(tr("  warning: %s imported direct; route could not be saved: %v", "  предупреждение: %s импортирован без маршрута; не удалось сохранить маршрут: %v"), item.server.Alias, err)
 				}
 				continue
 			}
@@ -102,9 +102,9 @@ func importServersFromSSHConfig(report func(format string, args ...interface{}))
 		if report != nil {
 			routeSuffix := ""
 			if len(item.server.Route.Hops) > 0 {
-				routeSuffix = " via " + model.FormatRouteSpec(item.server.Route)
+				routeSuffix = tr(" via ", " через ") + model.FormatRouteSpec(item.server.Route)
 			}
-			report("  imported: %s (%s@%s:%d)%s", item.server.Alias, item.server.User, item.server.Host, item.server.Port, routeSuffix)
+			report(tr("  imported: %s (%s@%s:%d)%s", "  импортировано: %s (%s@%s:%d)%s"), item.server.Alias, item.server.User, item.server.Host, item.server.Port, routeSuffix)
 		}
 	}
 	return imported, nil
@@ -120,7 +120,7 @@ func formatServersExport(servers []*model.Server) string {
 
 var runCmd = &cobra.Command{
 	Use:   "run <alias> <command>",
-	Short: "Run a command on a server",
+	Short: tr("Run a command on a server", "Выполнить команду на сервере"),
 	Args:  cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		alias := args[0]
@@ -128,7 +128,7 @@ var runCmd = &cobra.Command{
 
 		server, err := appDB.GetServer(alias)
 		if err != nil {
-			return fmt.Errorf("server not found: %s", alias)
+			return fmt.Errorf("%s", trf("server not found: %s", "сервер не найден: %s", alias))
 		}
 
 		return runCommandOnServer(server, command)

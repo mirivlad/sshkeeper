@@ -140,7 +140,7 @@ func TestActionMenuFitsSupportedTerminalSizes(t *testing.T) {
 		view := menu.View()
 		assertViewFits(t, view, size.width, size.height)
 		assertUnifiedScreen(t, view, size.width, size.height)
-		for _, want := range []string{"Server Actions", "Connect", "Port forwards", "Esc"} {
+		for _, want := range []string{"Server Actions", "Connect", "Port-forward rules", "Esc"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("action menu at %dx%d missing %q:\n%s", size.width, size.height, want, view)
 			}
@@ -154,9 +154,18 @@ func TestManageMenuFitsSupportedTerminalSizes(t *testing.T) {
 		view := menu.View()
 		assertViewFits(t, view, size.width, size.height)
 		assertUnifiedScreen(t, view, size.width, size.height)
-		for _, want := range []string{"Manage", "Groups", "Command templates", "Vault", "Esc"} {
+		for _, want := range []string{"Manage", "Groups", "Command templates", "Settings", "Esc"} {
 			if !strings.Contains(view, want) {
 				t.Fatalf("manage menu at %dx%d missing %q:\n%s", size.width, size.height, want, view)
+			}
+		}
+		for index, raw := range menu.list.Items() {
+			if raw.(actionMenuItem).action == "vault_lock" {
+				menu.list.Select(index)
+				if !strings.Contains(menu.View(), "Vault") {
+					t.Fatalf("selected Vault action is hidden at %dx%d", size.width, size.height)
+				}
+				break
 			}
 		}
 	}

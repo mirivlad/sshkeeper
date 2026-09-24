@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
 )
 
@@ -24,15 +25,15 @@ type sessionItem struct {
 func (i sessionItem) Title() string {
 	active := ""
 	if i.window.Active {
-		active = " active"
+		active = i18n.T(" active", " активна")
 	}
 	return fmt.Sprintf("%-28s  #%d%s", truncate(i.window.ServerAlias, 28), i.window.Index, active)
 }
 func (i sessionItem) Description() string {
 	if i.window.StartedAt.IsZero() {
-		return "tmux window " + i.window.ID
+		return i18n.T("tmux window ", "окно tmux ") + i.window.ID
 	}
-	return fmt.Sprintf("running %s · tmux %s", time.Since(i.window.StartedAt).Round(time.Second), i.window.ID)
+	return i18n.Tf("running %s · tmux %s", "работает %s · tmux %s", time.Since(i.window.StartedAt).Round(time.Second), i.window.ID)
 }
 
 func (i sessionItem) FilterValue() string {
@@ -41,7 +42,7 @@ func (i sessionItem) FilterValue() string {
 
 func newSessionScreenModel(w, h int) *sessionScreenModel {
 	l := list.New([]list.Item{}, list.NewDefaultDelegate(), w, managerListHeight(h))
-	l.Title = "Sessions"
+	l.Title = i18n.T("Sessions", "Сессии")
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowHelp(false)
@@ -91,11 +92,11 @@ func (m *sessionScreenModel) closeSelected() tea.Cmd {
 func (m *sessionScreenModel) View() string {
 	notification := ""
 	if m.err != nil {
-		notification = errorStyle.Render(fmt.Sprintf("Error: %v", m.err))
+		notification = errorStyle.Render(i18n.Tf("Error: %v", "Ошибка: %v", m.err))
 	}
 	body := func(width, height int) string {
 		if len(m.sessions) == 0 {
-			return renderPaddedPanel(width, height, []string{dashboardHelp("No active SSH sessions.")})
+			return renderPaddedPanel(width, height, []string{dashboardHelp(i18n.T("No active SSH sessions.", "Нет активных SSH-сессий."))})
 		}
 		capacity := max(1, height-2)
 		start, end := visibleServerRange(len(m.sessions), m.list.Index(), max(1, capacity/2))
@@ -111,18 +112,18 @@ func (m *sessionScreenModel) View() string {
 		return renderPaddedPanel(width, height, lines)
 	}
 	return renderScreenShell(screenShell{
-		breadcrumb:   "Sessions",
-		status:       fmt.Sprintf("%d active · tmux", len(m.sessions)),
+		breadcrumb:   i18n.T("Sessions", "Сессии"),
+		status:       i18n.Tf("%d active · tmux", "Активных: %d · tmux", len(m.sessions)),
 		notification: notification,
 		width:        m.width,
 		height:       m.height,
 		body:         body,
 		footer: []helpItem{
-			{Key: "Enter", Action: "attach"},
-			{Key: "Ctrl+D (d)", Action: "close"},
-			{Key: "Ctrl+R (r)", Action: "refresh"},
-			{Key: "Ctrl+H", Action: "help"},
-			{Key: "Esc", Action: "back"},
+			{Key: "Enter", Action: i18n.T("attach", "подключиться")},
+			{Key: "Ctrl+D (d)", Action: i18n.T("close", "закрыть")},
+			{Key: "Ctrl+R (r)", Action: i18n.T("refresh", "обновить")},
+			{Key: "Ctrl+H", Action: i18n.T("help", "справка")},
+			{Key: "Esc", Action: i18n.T("back", "назад")},
 		},
 	})
 }

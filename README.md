@@ -69,6 +69,9 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 
 ### Install from release
 
+The packages below are v0.5.2. The language setting and revised tunnel menu
+described later in this README are currently on `main`, not yet in that release.
+
 Debian/Ubuntu (amd64):
 
 ```bash
@@ -170,7 +173,7 @@ it to DEL (in xterm, `backarrowKey: false`).
 | Ctrl+F | Search |
 | Ctrl+W | Manage port forwards for selected server |
 | Ctrl+X | Server actions (connect, tunnels, forwards, route, test, edit, delete) |
-| m | Manage groups, tags, command templates, running tunnels, import/export, and vault |
+| m | Manage groups, tags, command templates, running tunnels, settings, import/export, and vault |
 | Ins | Select / deselect a server |
 | ? | Quick help (hotkeys) |
 | Ctrl+H | Full documentation |
@@ -244,10 +247,11 @@ sshkeeper route show prod
 A **port forward** is a saved rule that describes how to tunnel traffic through SSH.
 It does not start any process — it is just configuration.
 
-In the TUI, select a server and press `Ctrl+W` to manage its rules. After saving
-and enabling at least one rule, press `Ctrl+B` on that screen to start a background
-tunnel, or `Ctrl+X` to choose a foreground or background mode. The result stays
-visible in the TUI; use `m` → **Running tunnels** to check or stop the process.
+In the TUI, select a server, press `Ctrl+X`, then choose **Port-forward rules**
+to create a saved rule. `Ctrl+W` is a shortcut to the same screen. After saving
+and enabling a rule, press `Ctrl+B` there to start a background tunnel, or
+`Ctrl+X` to choose a foreground or background mode. The result stays visible in
+the TUI; use `m` → **Running tunnels** to check or stop the process.
 
 ```bash
 # Local forward: access a remote service from your machine
@@ -311,11 +315,24 @@ Stop the foreground no-shell mode with `Ctrl+C` to return to sshkeeper.
 | Action | Command | TUI | Description |
 |--------|---------|-----|-------------|
 | Connect | `sshkeeper connect <alias>` | `Enter` | Standard SSH session, no port forwards |
-| Connect with tunnels | `sshkeeper tunnel <alias>` | Server Actions → Connect with tunnels | SSH session with all enabled forwards active |
-| Start tunnels only | `sshkeeper tunnel <alias> --forward-only` | Server Actions → Start tunnels only | Foreground tunnel, no shell |
-| Start tunnels in background | `sshkeeper tunnel <alias> --background` | `Ctrl+W` → `Ctrl+B`, or Server Actions → Start tunnels in background | Detached tunnel process with PID tracking |
-| Port forwards | `sshkeeper forward` | Server Actions → Port forwards (or `Ctrl+W`) | Add/edit/enable/delete forward rules; `Ctrl+X` chooses start mode |
+| Connect with forwards | `sshkeeper tunnel <alias>` | Server Actions → Connect with forwards | SSH session with all enabled forwards active |
+| Start tunnel process (no shell) | `sshkeeper tunnel <alias> --forward-only` | Server Actions → Start tunnel process (no shell) | Foreground tunnel, no shell |
+| Start background tunnel process | `sshkeeper tunnel <alias> --background` | Port-forward rules → `Ctrl+B`, or Server Actions → Start background tunnel process | Detached tunnel process with PID tracking |
+| Port-forward rules | `sshkeeper forward` | Server Actions → Port-forward rules (or `Ctrl+W`) | Add/edit/enable/delete saved rules; `Ctrl+X` chooses start mode |
 | Running tunnels | `sshkeeper tunnel list/stop/stop-all` | `m` → Running tunnels | View tracked/running tunnels and stop them |
+
+**Route** controls how SSH reaches the selected server through bastions; it
+does not specify a port-forward target. A forward is saved configuration; a
+tunnel is the running process that activates it.
+
+### Interface language
+
+The TUI and CLI messages support Russian and English. By default, language is
+**System**: `LC_ALL`, then `LC_MESSAGES`, then `LANG` on Unix, with English as
+the fallback for other locales. In the TUI, open `m` → **Settings** to choose
+System, Русский, or English. The change applies immediately and is saved as
+`ui.language` in `~/.config/sshkeeper/config.toml`. Command and flag names,
+server aliases, and SSH parameters remain unchanged.
 
 ## Vault
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 )
 
@@ -62,7 +63,7 @@ func (m *tuiModel) renderServerDashboard() string {
 
 func (m *tuiModel) renderDashboardNotification(width int) string {
 	if m.err != nil {
-		return fitLine(errorStyle.Render("Error: "+m.err.Error()), width) + "\n"
+		return fitLine(errorStyle.Render(i18n.T("Error: ", "Ошибка: ")+m.err.Error()), width) + "\n"
 	}
 	if m.success != "" {
 		return fitLine(successStyle.Render(m.success), width) + "\n"
@@ -71,14 +72,14 @@ func (m *tuiModel) renderDashboardNotification(width int) string {
 }
 
 func (m *tuiModel) renderDashboardHeader(width int) string {
-	left := "sshkeeper / Servers"
-	vault := "Vault locked"
+	left := i18n.T("sshkeeper / Servers", "sshkeeper / Серверы")
+	vault := i18n.T("Vault locked", "Хранилище заблокировано")
 	if m.vaultUnlocked {
-		vault = "Vault unlocked"
+		vault = i18n.T("Vault unlocked", "Хранилище открыто")
 	}
-	right := fmt.Sprintf("%s · %d profiles", vault, len(m.servers))
+	right := i18n.Tf("%s · %d profiles", "%s · профилей: %d", vault, len(m.servers))
 	if selected := len(m.selectedServers()); selected > 0 {
-		right += fmt.Sprintf(" · %d selected", selected)
+		right += i18n.Tf(" · %d selected", " · выбрано: %d", selected)
 	}
 	line := left + " " + right
 	if lipgloss.Width(left)+lipgloss.Width(right)+1 <= width {
@@ -93,7 +94,7 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 	innerWidth := max(1, width-2)
 	innerHeight := max(1, height-2)
 	lines := make([]string, 0, innerHeight)
-	lines = append(lines, listHeaderStyle.Render(fitLine(fmt.Sprintf("%d servers", len(m.servers)), innerWidth)))
+	lines = append(lines, listHeaderStyle.Render(fitLine(i18n.Tf("%d servers", "Серверов: %d", len(m.servers)), innerWidth)))
 	lines = append(lines, m.renderServerColumns(innerWidth, showTarget, nil, true))
 
 	rowCapacity := max(0, innerHeight-len(lines))
@@ -102,7 +103,7 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 		rowCapacity = max(1, rowCapacity-1)
 	}
 	if len(m.servers) == 0 {
-		lines = append(lines, helpStyle.Render(fitLine("No servers yet. Ctrl+A adds the first profile.", innerWidth)))
+		lines = append(lines, helpStyle.Render(fitLine(i18n.T("No servers yet. Ctrl+A adds the first profile.", "Серверов пока нет. Ctrl+A добавит первый профиль."), innerWidth)))
 	} else if rowCapacity > 0 {
 		start, end := visibleServerRange(len(m.servers), m.list.Index(), rowCapacity)
 		selected := m.selectedServer()
@@ -110,7 +111,7 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 			lines = append(lines, m.renderServerColumns(innerWidth, showTarget, server, selected != nil && server.Alias == selected.Alias))
 		}
 		if showRange {
-			lines = append(lines, dashboardHelp(fmt.Sprintf("Showing %d-%d of %d", start+1, end, len(m.servers))))
+			lines = append(lines, dashboardHelp(i18n.Tf("Showing %d-%d of %d", "Показаны %d–%d из %d", start+1, end, len(m.servers))))
 		}
 	}
 	for len(lines) < innerHeight {
@@ -123,7 +124,7 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 }
 
 func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model.Server, selected bool) string {
-	marker, name, target, auth, group, status := "", "NAME", "TARGET / ROUTE", "AUTH", "GROUP", "STATUS"
+	marker, name, target, auth, group, status := "", i18n.T("NAME", "ИМЯ"), i18n.T("TARGET / ROUTE", "ЦЕЛЬ / МАРШРУТ"), i18n.T("AUTH", "АВТОР."), i18n.T("GROUP", "ГРУППА"), i18n.T("STATUS", "СТАТУС")
 	style := normalStyle
 	if server != nil {
 		marker = " "
@@ -177,10 +178,10 @@ func (m *tuiModel) renderSelectedPanel(width, height int) string {
 	lines := make([]string, 0, innerHeight)
 	selected := m.selectedServer()
 	if selected == nil {
-		lines = append(lines, dashboardSection("Selected profile"), dashboardHelp("No profile selected."))
+		lines = append(lines, dashboardSection(i18n.T("Selected profile", "Выбранный профиль")), dashboardHelp(i18n.T("No profile selected.", "Профиль не выбран.")))
 	} else {
 		target := fmt.Sprintf("%s@%s:%d", selected.User, selected.Host, selected.Port)
-		route := "direct"
+		route := i18n.T("direct", "напрямую")
 		if len(selected.Route.Hops) > 0 {
 			route = selected.Route.DisplaySummary(target)
 		}
@@ -189,20 +190,20 @@ func (m *tuiModel) renderSelectedPanel(width, height int) string {
 			group = "-"
 		}
 		lines = append(lines,
-			dashboardSection("Selected profile"),
-			fitLine("Alias: "+selected.Alias, innerWidth),
-			fitLine("Display Name: "+selected.DisplayName, innerWidth),
-			fitLine("Host: "+selected.Host, innerWidth),
-			fitLine(fmt.Sprintf("Port: %d  User: %s", selected.Port, selected.User), innerWidth),
+			dashboardSection(i18n.T("Selected profile", "Выбранный профиль")),
+			fitLine(i18n.T("Alias: ", "Псевдоним: ")+selected.Alias, innerWidth),
+			fitLine(i18n.T("Display Name: ", "Имя: ")+selected.DisplayName, innerWidth),
+			fitLine(i18n.T("Host: ", "Хост: ")+selected.Host, innerWidth),
+			fitLine(i18n.Tf("Port: %d  User: %s", "Порт: %d  Пользователь: %s", selected.Port, selected.User), innerWidth),
 			fitLine(target, innerWidth),
-			fitLine("Route      "+route, innerWidth),
-			fitLine("Group      "+group, innerWidth),
-			fitLine("Tags       "+strings.Join(selected.Tags, ", "), innerWidth),
-			fitLine("Last test  "+testStatusLabel(selected), innerWidth),
+			fitLine(i18n.T("Route      ", "Маршрут   ")+route, innerWidth),
+			fitLine(i18n.T("Group      ", "Группа    ")+group, innerWidth),
+			fitLine(i18n.T("Tags       ", "Теги      ")+strings.Join(selected.Tags, ", "), innerWidth),
+			fitLine(i18n.T("Last test  ", "Проверка  ")+testStatusLabel(selected), innerWidth),
 			"",
-			dashboardSection("Primary actions"),
-			"Enter      Connect",
-			"Ctrl+X     More actions…",
+			dashboardSection(i18n.T("Primary actions", "Основные действия")),
+			i18n.T("Enter      Connect", "Enter      Подключиться"),
+			i18n.T("Ctrl+X     More actions…", "Ctrl+X     Другие действия…"),
 		)
 		lines = append(lines, m.backgroundPanelLines(selected.Alias, innerWidth)...)
 	}
@@ -219,7 +220,7 @@ func (m *tuiModel) backgroundPanelLines(alias string, width int) []string {
 	if len(m.bgResults) == 0 {
 		return nil
 	}
-	lines := []string{"", dashboardSection("Last Background Run")}
+	lines := []string{"", dashboardSection(i18n.T("Last Background Run", "Последний фоновый запуск"))}
 	for _, result := range m.bgResults {
 		status := "OK"
 		if result.Err != "" {
@@ -237,7 +238,7 @@ func (m *tuiModel) backgroundPanelLines(alias string, width int) []string {
 			output = result.Err
 		}
 		if output != "" {
-			lines = append(lines, dashboardHelp("Output: "+result.Alias))
+			lines = append(lines, dashboardHelp(i18n.T("Output: ", "Вывод: ")+result.Alias))
 			for _, line := range strings.Split(output, "\n") {
 				lines = append(lines, fitLine(strings.ReplaceAll(line, "\t", "    "), width))
 			}
@@ -253,10 +254,10 @@ func (m *tuiModel) renderCompactSelected(server *model.Server, width, height int
 		group = "-"
 	}
 	lines := []string{
-		dashboardSection("Selected profile"),
-		fitLine("Alias: "+server.Alias+"  Target: "+target, width),
-		fitLine("Auth: "+authLabel(server.AuthMethod)+"  Group: "+group+"  Status: "+testStatusLabel(server), width),
-		fitLine("Enter: Connect  Ctrl+X: More actions…", width),
+		dashboardSection(i18n.T("Selected profile", "Выбранный профиль")),
+		fitLine(i18n.T("Alias: ", "Псевдоним: ")+server.Alias+i18n.T("  Target: ", "  Цель: ")+target, width),
+		fitLine(i18n.T("Auth: ", "Автор.: ")+authLabel(server.AuthMethod)+i18n.T("  Group: ", "  Группа: ")+group+i18n.T("  Status: ", "  Статус: ")+testStatusLabel(server), width),
+		fitLine(i18n.T("Enter: Connect  Ctrl+X: More actions…", "Enter: Подключиться  Ctrl+X: Действия…"), width),
 	}
 	if len(lines) > height {
 		lines = lines[:height]

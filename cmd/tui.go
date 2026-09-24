@@ -5,6 +5,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
 	"github.com/mirivlad/sshkeeper/internal/ssh"
@@ -13,9 +14,16 @@ import (
 )
 
 func runTUI() error {
+	tui.GetLanguagePreference = func() string { return cfg.UI.Language }
+	tui.SetLanguagePreference = func(value string) error {
+		if err := cfg.SetLanguage(value); err != nil {
+			return err
+		}
+		return i18n.SetPreference(value)
+	}
 	servers, err := appDB.ListServers()
 	if err != nil {
-		return fmt.Errorf("load servers: %w", err)
+		return fmt.Errorf("%s: %w", tr("load servers", "загрузить серверы"), err)
 	}
 
 	tui.ListServers = func() ([]*model.Server, error) {
@@ -39,7 +47,7 @@ func runTUI() error {
 				// The vault file is unchanged on save failure; restore the DB profile.
 				_ = appDB.CreateServer(server)
 				_ = appDB.SetServerTags(server.ID, server.Tags)
-				return fmt.Errorf("save vault after cleanup: %w", err)
+				return fmt.Errorf("%s: %w", tr("save vault after cleanup", "сохранить хранилище после очистки"), err)
 			}
 		}
 		return nil
@@ -85,11 +93,11 @@ func runTUI() error {
 		}
 		if err := syncServerSecrets(v, oldAlias, server, password); err != nil {
 			rollbackSavedServer(server, original)
-			return fmt.Errorf("sync vault secrets: %w", err)
+			return fmt.Errorf("%s: %w", tr("sync vault secrets", "синхронизировать секреты хранилища"), err)
 		}
 		if err := v.Save(); err != nil {
 			rollbackSavedServer(server, original)
-			return fmt.Errorf("save vault: %w", err)
+			return fmt.Errorf("%s: %w", tr("save vault", "сохранить хранилище"), err)
 		}
 		return nil
 	}
@@ -161,11 +169,11 @@ func runTUI() error {
 	tui.StartBackgroundTunnel = func(alias string) (*model.TunnelState, error) {
 		server, err := appDB.GetServer(alias)
 		if err != nil {
-			return nil, fmt.Errorf("server not found: %s", alias)
+			return nil, fmt.Errorf("%s", trf("server not found: %s", "сервер не найден: %s", alias))
 		}
 		forwards, err := appDB.GetForwards(server.ID)
 		if err != nil {
-			return nil, fmt.Errorf("load forwards: %w", err)
+			return nil, fmt.Errorf("%s: %w", tr("load forwards", "загрузить перенаправления"), err)
 		}
 		if err := validateBackgroundTunnel(server, forwards); err != nil {
 			return nil, err
@@ -203,7 +211,7 @@ func runTUI() error {
 		m := tui.New(servers)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
-			return fmt.Errorf("TUI error: %w", err)
+			return fmt.Errorf("%s: %w", tr("TUI error", "ошибка интерфейса"), err)
 		}
 
 		// Check if TUI requested a connect action
@@ -211,13 +219,13 @@ func runTUI() error {
 		if result != nil && result.Action == "session_open" && result.Server != nil {
 			fresh, err := appDB.GetServer(result.Server.Alias)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Server not found: %s\n", result.Server.Alias)
+				fmt.Fprintln(os.Stderr, trf("Server not found: %s", "Сервер не найден: %s", result.Server.Alias))
 			} else {
 				windowID, _, openErr := sessionpkg.Open(fresh.Alias)
 				if openErr != nil {
-					fmt.Fprintf(os.Stderr, "Open session: %v\n", openErr)
+					fmt.Fprintln(os.Stderr, trf("Open session: %v", "Открыть сеанс: %v", openErr))
 				} else if attachErr := sessionpkg.Attach(windowID); attachErr != nil {
-					fmt.Fprintf(os.Stderr, "Attach session: %v\n", attachErr)
+					fmt.Fprintln(os.Stderr, trf("Attach session: %v", "Подключиться к сеансу: %v", attachErr))
 				}
 			}
 			servers, _ = appDB.ListServers()
@@ -225,7 +233,7 @@ func runTUI() error {
 		}
 		if result != nil && result.Action == "session_attach" && result.SessionID != "" {
 			if err := sessionpkg.Attach(result.SessionID); err != nil {
-				fmt.Fprintf(os.Stderr, "Attach session: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Attach session: %v", "Подключиться к сеансу: %v", err))
 			}
 			servers, _ = appDB.ListServers()
 			continue
@@ -238,23 +246,23 @@ func runTUI() error {
 			// Re-fetch fresh server data from DB
 			fresh, err := appDB.GetServer(server.Alias)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Server not found: %s\n", server.Alias)
+				fmt.Fprintln(os.Stderr, trf("Server not found: %s", "Сервер не найден: %s", server.Alias))
 				servers, _ = appDB.ListServers()
 				continue
 			}
 
-			fmt.Printf("Connecting to %s@%s:%d...\n", fresh.User, fresh.Host, fresh.Port)
+			fmt.Printf(tr("Connecting to %s@%s:%d...\n", "Подключение к %s@%s:%d...\n"), fresh.User, fresh.Host, fresh.Port)
 
 			if err := ssh.ConnectResolved(cfg, fresh, dbProfileResolver, serverVaultFunc(fresh)); err != nil {
-				fmt.Fprintf(os.Stderr, "Connection error: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Connection error: %v", "Ошибка подключения: %v", err))
 			} else {
-				fmt.Println("Connection closed.")
+				fmt.Println(tr("Connection closed.", "Подключение закрыто."))
 			}
 
 			appDB.UpdateLastConnected(server.Alias)
 
 			// Wait for user to press Enter before returning to TUI
-			fmt.Println("\n[Press Enter to return to sshkeeper]")
+			fmt.Println(tr("\n[Press Enter to return to sshkeeper]", "\n[Нажмите Enter, чтобы вернуться в sshkeeper]"))
 			buf := make([]byte, 1)
 			os.Stdin.Read(buf)
 
@@ -266,17 +274,17 @@ func runTUI() error {
 			for _, server := range result.Servers {
 				fresh, err := appDB.GetServer(server.Alias)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Server not found: %s\n", server.Alias)
+					fmt.Fprintln(os.Stderr, trf("Server not found: %s", "Сервер не найден: %s", server.Alias))
 					continue
 				}
-				fmt.Printf("Running template %q on %s...\n", result.TemplateName, fresh.Alias)
+				fmt.Printf(tr("Running template %q on %s...\n", "Выполнение шаблона %q на %s...\n"), result.TemplateName, fresh.Alias)
 				if err := ssh.RunCommandResolved(cfg, fresh, dbProfileResolver, serverVaultFunc(fresh), result.Command); err != nil {
-					fmt.Fprintf(os.Stderr, "Command error on %s: %v\n", fresh.Alias, err)
+					fmt.Fprintln(os.Stderr, trf("Command error on %s: %v", "Ошибка команды на %s: %v", fresh.Alias, err))
 				}
 				appDB.UpdateLastConnected(fresh.Alias)
 			}
 
-			fmt.Println("\n[Press Enter to return to sshkeeper]")
+			fmt.Println(tr("\n[Press Enter to return to sshkeeper]", "\n[Нажмите Enter, чтобы вернуться в sshkeeper]"))
 			buf := make([]byte, 1)
 			os.Stdin.Read(buf)
 
@@ -287,12 +295,12 @@ func runTUI() error {
 		if result != nil && result.Action == "export" {
 			servers, err := appDB.ListServers()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Export error: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Export error: %v", "Ошибка экспорта: %v", err))
 			} else {
 				fmt.Print(formatServersExport(servers))
 			}
 
-			fmt.Println("\n[Press Enter to return to sshkeeper]")
+			fmt.Println(tr("\n[Press Enter to return to sshkeeper]", "\n[Нажмите Enter, чтобы вернуться в sshkeeper]"))
 			buf := make([]byte, 1)
 			os.Stdin.Read(buf)
 
@@ -302,10 +310,10 @@ func runTUI() error {
 
 		if result != nil && result.Action == "vault_change_pw" {
 			if err := changeVaultPasswordInteractive(); err != nil {
-				fmt.Fprintf(os.Stderr, "Vault password change error: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Vault password change error: %v", "Ошибка смены пароля хранилища: %v", err))
 			}
 
-			fmt.Println("\n[Press Enter to return to sshkeeper]")
+			fmt.Println(tr("\n[Press Enter to return to sshkeeper]", "\n[Нажмите Enter, чтобы вернуться в sshkeeper]"))
 			buf := make([]byte, 1)
 			os.Stdin.Read(buf)
 
@@ -317,7 +325,7 @@ func runTUI() error {
 			server := result.Server
 			fresh, err := appDB.GetServer(server.Alias)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Server not found: %s\n", server.Alias)
+				fmt.Fprintln(os.Stderr, trf("Server not found: %s", "Сервер не найден: %s", server.Alias))
 				waitForTUIReturn()
 				servers, _ = appDB.ListServers()
 				continue
@@ -325,7 +333,7 @@ func runTUI() error {
 
 			forwards, err := appDB.GetForwards(fresh.ID)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Load forwards: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Load forwards: %v", "Загрузить перенаправления: %v", err))
 				waitForTUIReturn()
 				servers, _ = appDB.ListServers()
 				continue
@@ -334,21 +342,21 @@ func runTUI() error {
 			forwardOnly := result.Action == "tunnel_n"
 			active := enabledForwardCount(forwards)
 			if active == 0 {
-				fmt.Fprintf(os.Stderr, "No enabled port forwards for %s. Add or enable a rule before starting a tunnel.\n", fresh.Alias)
+				fmt.Fprintln(os.Stderr, trf("No enabled port forwards for %s. Add or enable a rule before starting a tunnel.", "Для %s нет включённых перенаправлений. Добавьте или включите правило перед запуском туннеля.", fresh.Alias))
 				waitForTUIReturn()
 				servers, _ = appDB.ListServers()
 				continue
 			}
 
-			fmt.Printf("Starting tunnel to %s with %d enabled forward(s)...\n", fresh.Alias, active)
+			fmt.Printf(tr("Starting tunnel to %s with %d enabled forward(s)...\n", "Запуск туннеля к %s с %d включёнными перенаправлениями...\n"), fresh.Alias, active)
 			if forwardOnly {
-				fmt.Println("Tunnel mode (ssh -N). Press Ctrl+C to stop and return to sshkeeper.")
+				fmt.Println(tr("Tunnel mode (ssh -N). Press Ctrl+C to stop and return to sshkeeper.", "Режим туннеля (ssh -N). Нажмите Ctrl+C, чтобы остановить его и вернуться в sshkeeper."))
 			}
 
 			if err := ssh.ConnectWithForwardsResolved(cfg, fresh, forwards, forwardOnly, dbProfileResolver, serverVaultFunc(fresh)); err != nil {
-				fmt.Fprintf(os.Stderr, "Tunnel error: %v\n", err)
+				fmt.Fprintln(os.Stderr, trf("Tunnel error: %v", "Ошибка туннеля: %v", err))
 			} else {
-				fmt.Println("Tunnel closed.")
+				fmt.Println(tr("Tunnel closed.", "Туннель закрыт."))
 			}
 			appDB.UpdateLastConnected(fresh.Alias)
 
@@ -364,7 +372,7 @@ func runTUI() error {
 }
 
 func waitForTUIReturn() {
-	fmt.Println("\n[Press Enter to return to sshkeeper]")
+	fmt.Println(tr("\n[Press Enter to return to sshkeeper]", "\n[Нажмите Enter, чтобы вернуться в sshkeeper]"))
 	buf := make([]byte, 1)
 	_, _ = os.Stdin.Read(buf)
 }

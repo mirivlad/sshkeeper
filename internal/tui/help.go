@@ -2,6 +2,8 @@ package tui
 
 import (
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // --- Help rendering utilities ---
@@ -34,13 +36,13 @@ func wrapHelpItems(items []helpItem, width int) [][]helpItem {
 	var current []helpItem
 	currentWidth := 0
 	for _, item := range items {
-		itemWidth := len(plainHelpItem(item))
+		itemWidth := ansi.StringWidth(plainHelpItem(item))
 		if len(current) == 0 {
 			current = []helpItem{item}
 			currentWidth = itemWidth
 			continue
 		}
-		nextWidth := currentWidth + len(" | ") + itemWidth
+		nextWidth := currentWidth + ansi.StringWidth(" | ") + itemWidth
 		if nextWidth > width {
 			lines = append(lines, current)
 			current = []helpItem{item}
