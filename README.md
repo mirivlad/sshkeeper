@@ -69,19 +69,19 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 
 ### Install from release
 
-The packages below are v0.5.2. The language setting and revised tunnel menu
-described later in this README are currently on `main`, not yet in that release.
+The packages below are v0.5.3. This release includes the language setting and
+revised tunnel menu described later in this README.
 
 Debian/Ubuntu (amd64):
 
 ```bash
-sudo apt install ./sshkeeper_0.5.2-1_amd64.deb
+sudo apt install ./sshkeeper_0.5.3-1_amd64.deb
 ```
 
 Fedora/RHEL-family (x86_64):
 
 ```bash
-sudo dnf install ./sshkeeper-0.5.2-1.x86_64.rpm
+sudo dnf install ./sshkeeper-0.5.3-1.x86_64.rpm
 ```
 
 `arm64`/`aarch64` packages are published alongside the x86_64 builds. Native
@@ -101,8 +101,8 @@ sshkeeper --version
 The traditional tar.gz archive remains available too:
 
 ```bash
-tar -xzf sshkeeper_v0.5.2_linux_amd64.tar.gz
-sudo install -m 0755 sshkeeper_v0.5.2_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
+tar -xzf sshkeeper_v0.5.3_linux_amd64.tar.gz
+sudo install -m 0755 sshkeeper_v0.5.3_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 sshkeeper
 ```
 
