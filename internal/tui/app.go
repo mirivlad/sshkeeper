@@ -294,6 +294,7 @@ type tuiModel struct {
 	forwardIndex      map[int64][]*model.Forward
 	sortMode          string
 	collapsed         map[string]bool
+	managerParent     screen
 	runtime           runtimeStatus
 	testing           map[string]bool
 	testTotal         int
@@ -994,10 +995,12 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startFilter()
 
 	case tea.KeyCtrlG:
+		m.managerParent = screenList
 		m.screen = screenTags
 		return m, m.loadTagsCmd()
 
 	case tea.KeyCtrlP:
+		m.managerParent = screenList
 		m.screen = screenTemplates
 		return m, m.loadTemplatesCmd()
 
@@ -1230,8 +1233,7 @@ func (m *tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.screen = screenList
-		return m, m.reloadServersCmd()
+		return m.leaveManager("tags", m.reloadServersCmd())
 	case tea.KeyCtrlA:
 		m.tagMode = "add"
 		m.tagOldName = ""
@@ -1345,8 +1347,7 @@ func (m *tuiModel) updateTagInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) updateGroups(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.screen = screenList
-		return m, m.reloadServersCmd()
+		return m.leaveManager("groups", m.reloadServersCmd())
 	case tea.KeyCtrlA:
 		m.groupMode = "add"
 		m.groupOldName = ""
@@ -1440,8 +1441,7 @@ func (m *tuiModel) updateGroupInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) updateTemplates(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.screen = screenList
-		return m, nil
+		return m.leaveManager("templates", nil)
 	case tea.KeyCtrlA:
 		m.templateForm = newTemplateFormModel(nil, m.width, m.height)
 		m.screen = screenTemplateForm
@@ -1599,7 +1599,7 @@ func (m *tuiModel) updateBackgroundResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 
 func (m *tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.Type == tea.KeyEsc {
-		if m.form != nil && (m.form.showGroupList || m.form.showAuthList) {
+		if m.form != nil && m.form.hasOverlay() {
 			updated, cmd := m.form.Update(msg)
 			if fm, ok := updated.(*formModel); ok {
 				m.form = fm
@@ -1905,6 +1905,10 @@ func (m *tuiModel) updateManageMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.manageMenu = nil
 	switch *action {
+	case "groups", "tags", "templates", "sessions", "tunnels":
+		m.managerParent = screenManageMenu
+	}
+	switch *action {
 	case "groups":
 		m.screen = screenGroups
 		return m, m.loadGroupsCmd()
@@ -1982,10 +1986,34 @@ func (m *tuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if back {
 		m.settingsScreen = nil
-		m.manageMenu = newManageMenuModel(m.width, m.height, m.sessionsAvailable)
-		m.screen = screenManageMenu
+		m.openManageMenu("settings")
 	}
 	return m, nil
+}
+
+// leaveManager is Esc on a manager screen: back to the Manage menu, with its
+// entry highlighted, when the screen was opened from there, otherwise back to
+// the server list.
+func (m *tuiModel) leaveManager(action string, cmd tea.Cmd) (tea.Model, tea.Cmd) {
+	if m.managerParent == screenManageMenu {
+		m.managerParent = screenList
+		m.openManageMenu(action)
+		return m, cmd
+	}
+	m.screen = screenList
+	return m, cmd
+}
+
+// openManageMenu shows the Manage menu with the given entry selected.
+func (m *tuiModel) openManageMenu(action string) {
+	m.manageMenu = newManageMenuModel(m.width, m.height, m.sessionsAvailable)
+	for index, item := range m.manageMenu.list.Items() {
+		if entry, ok := item.(actionMenuItem); ok && entry.action == action {
+			m.manageMenu.list.Select(index)
+			break
+		}
+	}
+	m.screen = screenManageMenu
 }
 
 func (m *tuiModel) updateForwardList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -2091,9 +2119,8 @@ func (m *tuiModel) startForwardListTunnel() (tea.Model, tea.Cmd) {
 func (m *tuiModel) updateSessionManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.screen = screenList
 		m.sessionScreen = nil
-		return m, nil
+		return m.leaveManager("sessions", nil)
 	case tea.KeyEnter:
 		if m.sessionScreen != nil {
 			if selected := m.sessionScreen.selected(); selected != nil {
@@ -2130,9 +2157,8 @@ func (m *tuiModel) updateSessionManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) updateTunnelManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		m.screen = screenList
 		m.tunnelScreen = nil
-		return m, nil
+		return m.leaveManager("tunnels", nil)
 	case tea.KeyCtrlD:
 		m.confirmTunnelStop()
 		return m, nil
