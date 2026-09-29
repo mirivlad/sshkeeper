@@ -273,3 +273,34 @@ func TestRequiredFieldsAreMarked(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthSelectorCyclesWithArrowsAndIgnoresTyping(t *testing.T) {
+	fm := newFormModel(100, 30)
+	fm.focusIdx = authFieldIndex
+	fm.updateFocus()
+	press := func(msg tea.KeyMsg) {
+		updated, _ := fm.Update(msg)
+		fm = updated.(*formModel)
+	}
+	press(tea.KeyMsg{Type: tea.KeyRight})
+	if fm.authMethodValue() != model.AuthKeyPassphrase {
+		t.Fatalf("Right from key should select key_passphrase, got %s", fm.authMethodValue())
+	}
+	press(tea.KeyMsg{Type: tea.KeyRight})
+	press(tea.KeyMsg{Type: tea.KeyRight})
+	if fm.authMethodValue() != model.AuthPassword {
+		t.Fatalf("selector should wrap to password, got %s", fm.authMethodValue())
+	}
+	press(tea.KeyMsg{Type: tea.KeyLeft})
+	if fm.authMethodValue() != model.AuthAgent {
+		t.Fatalf("Left from password should wrap to agent, got %s", fm.authMethodValue())
+	}
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("xyz")})
+	press(tea.KeyMsg{Type: tea.KeyBackspace})
+	if fm.authMethodValue() != model.AuthAgent || fm.inputs[authFieldIndex].Value() != "agent" {
+		t.Fatalf("typing must not edit the selector, got %q", fm.inputs[authFieldIndex].Value())
+	}
+	if view := fm.View(); !strings.Contains(view, "‹ agent ›") || !strings.Contains(view, "password") {
+		t.Fatalf("selector should show the current and other methods:\n%s", view)
+	}
+}
