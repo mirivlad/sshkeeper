@@ -213,7 +213,7 @@ func ageLong(t *time.Time) string {
 		return i18n.T("never", "никогда")
 	}
 	short := relativeAge(t)
-	if short == i18n.T("now", "сейч") {
+	if short == i18n.T("now", "<1м") {
 		return i18n.T("just now", "только что")
 	}
 	return i18n.Tf("%s ago", "%s назад", short)

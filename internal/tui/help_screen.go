@@ -246,9 +246,16 @@ func (m *fullHelpModel) View() string {
 			{i18n.T("Tags", "Теги"), i18n.T("Manage and apply tags", "Управлять тегами и назначать их")},
 			{i18n.T("Command templates", "Шаблоны команд"), i18n.T("Manage reusable commands", "Управлять повторно используемыми командами")},
 			{i18n.T("Running tunnels", "Работающие туннели"), i18n.T("View and stop tracked tunnel processes", "Просматривать и останавливать процессы туннелей")},
-			{i18n.T("Settings", "Настройки"), i18n.T("Choose interface language", "Выбрать язык интерфейса")},
+			{i18n.T("Settings", "Настройки"), i18n.T("Interface language and synchronization", "Язык интерфейса и синхронизация")},
 			{i18n.T("Import / Export", "Импорт / экспорт"), i18n.T("Move server profile data", "Переносить данные профилей серверов")},
 			{i18n.T("Vault", "Хранилище"), i18n.T("Lock or change master password", "Заблокировать или сменить мастер-пароль")},
+		}},
+		{i18n.T("Synchronization (m → Settings)", "Синхронизация (m → Настройки)"), [][2]string{
+			{"", i18n.T("Profiles, forwards, templates, secrets, and referenced private keys sync through one encrypted file.", "Профили, пробросы, шаблоны, секреты и нужные закрытые ключи синхронизируются через один зашифрованный файл.")},
+			{i18n.T("Storage", "Хранилище"), i18n.T("A shared folder (Syncthing, Nextcloud, …) or a git repository", "Общая папка (Syncthing, Nextcloud, …) или git-репозиторий")},
+			{i18n.T("First device", "Первое устройство"), i18n.T("Create sync space; keep the recovery key offline", "Создать синхронизацию; сохранить ключ восстановления офлайн")},
+			{i18n.T("Other devices", "Другие устройства"), i18n.T("Add device shows a 6-digit code; Join with code + that device's master password", "«Добавить устройство» показывает 6 цифр; «Подключиться по коду» + мастер-пароль того устройства")},
+			{glyphs.sync, i18n.T("Header badge: time since the last sync, or an error", "Значок в шапке: время последней синхронизации или ошибка")},
 		}},
 		{i18n.T("Server state column", "Колонка состояния"), [][2]string{
 			{glyphs.ok, i18n.T("Last test passed", "Последняя проверка прошла")},
@@ -413,7 +420,7 @@ func newManageMenuModel(w, h int, availability ...bool) *actionMenuModel {
 	}
 	items = append(items,
 		actionMenuItem{label: i18n.T("Running tunnels", "Работающие туннели"), action: "tunnels", description: i18n.T("Inspect and stop tracked background tunnel processes.", "Просматривать и останавливать фоновые процессы туннелей.")},
-		actionMenuItem{label: i18n.T("Settings", "Настройки"), action: "settings", description: i18n.T("Choose the interface language.", "Выбрать язык интерфейса.")},
+		actionMenuItem{label: i18n.T("Settings", "Настройки"), action: "settings", description: i18n.T("Interface language and synchronization between devices.", "Язык интерфейса и синхронизация между устройствами.")},
 		actionMenuItem{label: i18n.T("Import SSH config", "Импорт конфигурации SSH"), action: "import", description: i18n.T("Import profiles from ~/.ssh/config.", "Импортировать профили из ~/.ssh/config.")},
 		actionMenuItem{label: i18n.T("Export", "Экспорт"), action: "export", description: i18n.T("Export server profiles.", "Экспортировать профили серверов.")},
 		actionMenuItem{label: i18n.T("Vault: lock", "Заблокировать хранилище"), action: "vault_lock", description: i18n.T("Lock secrets for the current session.", "Заблокировать секреты текущей сессии.")},

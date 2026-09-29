@@ -88,7 +88,29 @@ func (m *tuiModel) renderDashboardHeader(width int) string {
 	if testing := len(m.testing); testing > 0 {
 		detail += i18n.Tf(" · testing %d…", " · проверка: %d…", testing)
 	}
-	return renderAppHeader(width, i18n.T("Servers", "Серверы"), shellStatus(m.vaultUnlocked, detail)) + "\n"
+	status := shellStatus(m.vaultUnlocked, detail)
+	if badge := m.syncBadge(); badge != "" {
+		status = badge + mutedStyle.Render(" "+glyphs.dot+" ") + status
+	}
+	return renderAppHeader(width, i18n.T("Servers", "Серверы"), status) + "\n"
+}
+
+// syncBadge shows sync state in the dashboard header once this device syncs:
+// "⇅ 2m", "⇅ syncing…", or "⇅ sync failed".
+func (m *tuiModel) syncBadge() string {
+	info := m.syncInfo
+	if !info.Joined || info.Settings.Mode == SyncModeOff {
+		return ""
+	}
+	switch {
+	case m.syncing:
+		return stateTestingStyle.Render(glyphs.sync + " " + i18n.T("syncing…", "синхр…"))
+	case info.LastError != "":
+		return testFailStyle.Render(glyphs.sync + " " + i18n.T("sync failed", "ошибка синхр."))
+	case !info.LastSync.IsZero():
+		return mutedStyle.Render(glyphs.sync + " " + relativeAge(&info.LastSync))
+	}
+	return mutedStyle.Render(glyphs.sync)
 }
 
 func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string {

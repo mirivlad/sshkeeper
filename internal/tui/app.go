@@ -250,6 +250,8 @@ const (
 	screenConfirm
 	screenFullHelp
 	screenSettings
+	screenSettingsMenu
+	screenSync
 )
 
 type confirmChoice int
@@ -295,6 +297,12 @@ type tuiModel struct {
 	sortMode          string
 	collapsed         map[string]bool
 	managerParent     screen
+	settingsMenu      *actionMenuModel
+	syncScreen        *syncScreenModel
+	syncInfo          SyncInfo
+	syncing           bool
+	syncGeneration    int
+	seenChanges       int64
 	runtime           runtimeStatus
 	testing           map[string]bool
 	testTotal         int
@@ -390,6 +398,8 @@ func New(servers []*model.Server) *tuiModel {
 		}
 	}
 	m.rebuildServerRows("")
+	m.loadSyncInfo()
+	m.seenChanges = localChanges.Load()
 	return m
 }
 
@@ -399,6 +409,9 @@ func (m *tuiModel) Result() *TUIResult {
 
 func (m *tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.loadForwardIndexCmd(), m.loadRuntimeCmd(), runtimeTickCmd()}
+	if m.autoSyncEnabled() {
+		cmds = append(cmds, m.startSync("auto"))
+	}
 	if m.success != "" {
 		// A notice restored from the previous run fades like any other.
 		cmds = append(cmds, m.expireNoticeCmd())
@@ -427,6 +440,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	before := m.success
 	model, cmd := m.update(msg)
+	if changes := localChanges.Load(); changes != m.seenChanges {
+		m.seenChanges = changes
+		cmd = tea.Batch(cmd, m.scheduleAutoSync())
+	}
 	if m.success != "" && m.success != before {
 		return model, tea.Batch(cmd, m.expireNoticeCmd())
 	}
@@ -502,6 +519,19 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setServers(msg.servers)
 		}
 		return m, nil
+
+	case syncDoneMsg:
+		if m.confirm != nil && m.confirm.pending && m.confirm.parent == screenSync {
+			m.finishConfirm()
+		}
+		return m, m.handleSyncDone(msg)
+
+	case syncPairDoneMsg:
+		m.handleSyncPairDone(msg)
+		return m, nil
+
+	case syncTickMsg:
+		return m, m.handleSyncTick(msg)
 
 	case runtimeLoadedMsg:
 		m.runtime = msg.status
@@ -716,6 +746,8 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forwardForm = nil
 		case screenTemplateForm:
 			m.templateForm = nil
+		case screenSync:
+			m.syncScreen = nil
 		}
 		return m, nil
 
@@ -913,6 +945,10 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateFullHelp(msg)
 		case screenSettings:
 			return m.updateSettings(msg)
+		case screenSettingsMenu:
+			return m.updateSettingsMenu(msg)
+		case screenSync:
+			return m.updateSync(msg)
 		}
 	}
 
@@ -1714,6 +1750,14 @@ func (m *tuiModel) View() string {
 		if m.settingsScreen != nil {
 			b.WriteString(m.settingsScreen.View())
 		}
+	case screenSettingsMenu:
+		if m.settingsMenu != nil {
+			b.WriteString(m.settingsMenu.View())
+		}
+	case screenSync:
+		if m.syncScreen != nil {
+			b.WriteString(m.syncScreen.View(m.vaultUnlocked))
+		}
 	}
 
 	return asciiOnly(b.String())
@@ -1919,12 +1963,7 @@ func (m *tuiModel) updateManageMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenTemplates
 		return m, m.loadTemplatesCmd()
 	case "settings":
-		preference := "auto"
-		if GetLanguagePreference != nil {
-			preference = GetLanguagePreference()
-		}
-		m.settingsScreen = newSettingsModel(m.width, m.height, preference)
-		m.screen = screenSettings
+		m.openSettingsMenu("language")
 		return m, nil
 	case "sessions":
 		m.sessionScreen = newSessionScreenModel(m.width, m.height)
@@ -1959,8 +1998,7 @@ func (m *tuiModel) updateManageMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.settingsScreen == nil {
-		m.screen = screenManageMenu
-		m.manageMenu = newManageMenuModel(m.width, m.height, m.sessionsAvailable)
+		m.openSettingsMenu("language")
 		return m, nil
 	}
 	selected, changed, back := m.settingsScreen.Update(msg)
@@ -1986,7 +2024,7 @@ func (m *tuiModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if back {
 		m.settingsScreen = nil
-		m.openManageMenu("settings")
+		m.openSettingsMenu("language")
 	}
 	return m, nil
 }
@@ -2380,7 +2418,7 @@ func (m *tuiModel) updateFullHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) screenOwnsPrintableInput() bool {
 	switch m.screen {
-	case screenForm, screenSearch, screenTagInput, screenGroupInput, screenTemplateForm, screenForwardForm:
+	case screenForm, screenSearch, screenTagInput, screenGroupInput, screenTemplateForm, screenForwardForm, screenSync:
 		return true
 	default:
 		return false

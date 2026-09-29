@@ -11,6 +11,7 @@ import (
 
 	"github.com/mirivlad/sshkeeper/internal/config"
 	"github.com/mirivlad/sshkeeper/internal/syncer"
+	"github.com/mirivlad/sshkeeper/internal/tui"
 	"github.com/mirivlad/sshkeeper/internal/vault"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -395,5 +396,87 @@ bundle in a folder or a git repository.
 	}
 	if flag := syncSetupCmd.Flags().Lookup("no-auto"); flag != nil {
 		flag.Usage = tr("do not sync automatically from the TUI", "не синхронизировать автоматически из TUI")
+	}
+}
+
+// wireTUISync connects the TUI's sync screen and automatic sync to the
+// engine. Errors reach the TUI already explained in words.
+func wireTUISync() {
+	explain := func(err error) error {
+		if err == nil {
+			return nil
+		}
+		return errors.New(syncErrorText(err))
+	}
+	result := func(report syncer.Report) tui.SyncResult {
+		return tui.SyncResult{Received: report.Received, Sent: report.Sent, Warnings: report.Warnings}
+	}
+	tui.GetSyncInfo = func() tui.SyncInfo {
+		info := tui.SyncInfo{Settings: tui.SyncSettings{
+			Mode: cfg.Sync.Mode, Folder: cfg.Sync.Folder, GitURL: cfg.Sync.GitURL, GitBranch: cfg.Sync.GitBranch, Auto: cfg.Sync.Auto,
+		}}
+		home, _ := os.UserHomeDir()
+		engine := &syncer.Engine{DB: appDB, Vault: getOrCreateVault(), Home: home}
+		status := engine.Status()
+		info.Joined, info.LastSync, info.LastError, info.Records = status.Joined, status.LastSync, status.LastError, status.Records
+		return info
+	}
+	tui.SaveSyncSettings = func(settings tui.SyncSettings) error {
+		return cfg.SetSync(config.SyncConfig{Mode: settings.Mode, Folder: settings.Folder, GitURL: settings.GitURL, GitBranch: settings.GitBranch, Auto: settings.Auto})
+	}
+	tui.RunSync = func() (tui.SyncResult, error) {
+		engine, err := newSyncEngine()
+		if err != nil {
+			return tui.SyncResult{}, err
+		}
+		report, err := engine.Sync()
+		return result(report), explain(err)
+	}
+	tui.CreateSyncSpace = func() (tui.SyncResult, error) {
+		engine, err := newSyncEngine()
+		if err != nil {
+			return tui.SyncResult{}, err
+		}
+		recovery, report, err := engine.Create()
+		out := result(report)
+		out.RecoveryKey = recovery
+		return out, explain(err)
+	}
+	tui.PairSyncDevice = func(password string) (string, time.Time, error) {
+		if err := verifyMasterPassword(password); err != nil {
+			return "", time.Time{}, err
+		}
+		engine, err := newSyncEngine()
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		code, expires, err := engine.Pair(password)
+		return code, expires, explain(err)
+	}
+	tui.JoinSyncSpace = func(secret, password string) (tui.SyncResult, error) {
+		engine, err := newSyncEngine()
+		if err != nil {
+			return tui.SyncResult{}, err
+		}
+		report, err := engine.Join(secret, password)
+		return result(report), explain(err)
+	}
+	tui.SyncRecoveryKey = func() (string, error) {
+		engine, err := newSyncEngine()
+		if err != nil {
+			return "", err
+		}
+		key, err := engine.RecoveryKey()
+		return key, explain(err)
+	}
+	tui.LeaveSync = func() error {
+		home, _ := os.UserHomeDir()
+		engine := &syncer.Engine{DB: appDB, Vault: getOrCreateVault(), Home: home}
+		if err := engine.Leave(); err != nil {
+			return explain(err)
+		}
+		settings := cfg.Sync
+		settings.Mode = config.SyncOff
+		return cfg.SetSync(settings)
 	}
 }

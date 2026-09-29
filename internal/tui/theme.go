@@ -98,6 +98,7 @@ type glyphSet struct {
 	caret     string
 	pickLeft  string
 	pickRight string
+	sync      string
 	crumb     string
 	dot       string
 	arrow     string
@@ -135,6 +136,7 @@ var unicodeGlyphs = glyphSet{
 	caret:     "▏",
 	pickLeft:  "‹",
 	pickRight: "›",
+	sync:      "⇅",
 	crumb:     "›",
 	dot:       "·",
 	arrow:     "→",
@@ -171,6 +173,7 @@ var asciiGlyphs = glyphSet{
 	caret:     "_",
 	pickLeft:  "<",
 	pickRight: ">",
+	sync:      "^",
 	crumb:     ">",
 	dot:       "-",
 	arrow:     ">",
@@ -193,7 +196,7 @@ var asciiReplacer = strings.NewReplacer(
 	"·", "-", "…", "~", "—", "-", "–", "-",
 	"→", ">", "←", "<", "↑", "^", "↓", "v", "⇄", "=",
 	"‹", "<", "›", ">", "▏", "_", "▌", ">", "▸", ">", "▾", "v",
-	"●", "*", "○", "o", "◌", "~", "▣", "#", "✓", "*", "✗", "x",
+	"●", "*", "○", "o", "⇅", "^", "◌", "~", "▣", "#", "✓", "*", "✗", "x",
 	"─", "-", "━", "=", "│", "|", "┃", "|",
 	"┌", "+", "┐", "+", "└", "+", "┘", "+", "╭", "+", "╮", "+", "╰", "+", "╯", "+",
 	"├", "+", "┤", "+", "┬", "+", "┴", "+", "┼", "+", "┳", "+", "┻", "+", "╸", "-", "╹", "'",

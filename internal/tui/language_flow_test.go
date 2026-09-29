@@ -36,6 +36,11 @@ func TestSettingsSwitchesVisibleLanguageAndReturnsToManage(t *testing.T) {
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(*tuiModel)
+	if m.screen != screenSettingsMenu || !strings.Contains(m.View(), "Synchronization") {
+		t.Fatalf("settings menu did not open:\n%s", m.View())
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(*tuiModel)
 	if m.screen != screenSettings || !strings.Contains(m.View(), "English") {
 		t.Fatalf("settings did not open:\n%s", m.View())
 	}
@@ -45,6 +50,11 @@ func TestSettingsSwitchesVisibleLanguageAndReturnsToManage(t *testing.T) {
 	m = updated.(*tuiModel)
 	if preference != i18n.Russian || i18n.Effective() != i18n.Russian || !strings.Contains(m.View(), "Настройки") {
 		t.Fatalf("Russian language was not applied immediately:\n%s", m.View())
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(*tuiModel)
+	if m.screen != screenSettingsMenu || !strings.Contains(m.View(), "Синхронизация") {
+		t.Fatalf("settings menu did not rebuild in Russian:\n%s", m.View())
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(*tuiModel)

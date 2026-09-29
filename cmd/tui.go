@@ -213,6 +213,9 @@ func runTUI() error {
 		return hasServerSecret(v, server, secretType)
 	}
 
+	wireTUISync()
+	tui.TrackLocalChanges()
+
 	// Run TUI in a loop — if user requests connect, handle it and restart TUI
 	var state tui.State
 	for {

@@ -15,5 +15,6 @@ func TestMain(m *testing.M) {
 	_ = i18n.SetPreference(i18n.English)
 	// Notice expiry ticks run inside batched commands; keep them instant.
 	noticeLifetime = time.Millisecond
+	autoSyncDelay = time.Millisecond
 	os.Exit(m.Run())
 }
