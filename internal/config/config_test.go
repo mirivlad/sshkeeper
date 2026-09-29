@@ -209,6 +209,9 @@ func TestSyncSettingsPersistBesideOtherSections(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(path)
+	if !strings.Contains(string(data), "[sync]\nmode = \"git\"\nfolder = ") {
+		t.Fatalf("sync keys should be contiguous:\n%s", data)
+	}
 	if strings.Count(string(data), "[sync]") != 1 || strings.Count(string(data), "mode =") != 1 {
 		t.Fatalf("second save duplicated keys:\n%s", data)
 	}
