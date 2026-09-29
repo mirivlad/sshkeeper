@@ -99,3 +99,48 @@ func TestSetLanguageAddsFieldToLegacyUISection(t *testing.T) {
 		t.Fatalf("ReadLanguage = %q, %v", value, err)
 	}
 }
+
+func TestSortPreferencePersistsAndFallsBack(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UI.Sort != SortByName {
+		t.Fatalf("default sort = %q", cfg.UI.Sort)
+	}
+	if err := cfg.SetLanguage("ru"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetSort(SortByRecent); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.UI.Sort != SortByRecent || reloaded.UI.Language != "ru" {
+		t.Fatalf("reloaded ui = %#v", reloaded.UI)
+	}
+	if err := cfg.SetSort("size"); err == nil || cfg.UI.Sort != SortByRecent {
+		t.Fatal("invalid sort changed in-memory config")
+	}
+
+	path := filepath.Join(cfg.ConfigDir, "config.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), `sort = "recent"`, `sort = "size"`, 1))
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := Load()
+	if err != nil {
+		t.Fatalf("unknown sort must not block startup: %v", err)
+	}
+	if fallback.UI.Sort != SortByName {
+		t.Fatalf("unknown sort should fall back to name, got %q", fallback.UI.Sort)
+	}
+}

@@ -25,6 +25,8 @@ func runTUI() error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", tr("load servers", "загрузить серверы"), err)
 	}
+	tui.GetSortPreference = func() string { return cfg.UI.Sort }
+	tui.SetSortPreference = func(value string) error { return cfg.SetSort(value) }
 
 	tui.ListServers = func() ([]*model.Server, error) {
 		return appDB.ListServers()
@@ -207,8 +209,11 @@ func runTUI() error {
 	}
 
 	// Run TUI in a loop — if user requests connect, handle it and restart TUI
+	var state tui.State
 	for {
 		m := tui.New(servers)
+		m.Restore(state)
+		state = tui.State{}
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("%s: %w", tr("TUI error", "ошибка интерфейса"), err)
@@ -216,6 +221,7 @@ func runTUI() error {
 
 		// Check if TUI requested a connect action
 		result := m.Result()
+		state = m.State()
 		if result != nil && result.Action == "session_open" && result.Server != nil {
 			fresh, err := appDB.GetServer(result.Server.Alias)
 			if err != nil {

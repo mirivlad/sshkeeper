@@ -43,7 +43,7 @@ func TestServerListViewUsesDashboardLayout(t *testing.T) {
 		"2 servers",
 		"Vault",
 		"NAME",
-		"ROUTE",
+		"TARGET",
 		"AUTH",
 		"GROUP",
 		"STATUS",

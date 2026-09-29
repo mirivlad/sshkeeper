@@ -242,6 +242,8 @@ var (
 	VaultUnlocked              func() bool
 	GetLanguagePreference      func() string
 	SetLanguagePreference      func(string) error
+	GetSortPreference          func() string
+	SetSortPreference          func(string) error
 )
 
 // --- Screen type ---
@@ -313,6 +315,7 @@ type tuiModel struct {
 	cursor            int
 	matches           map[string]serverMatch
 	forwardIndex      map[int64][]*model.Forward
+	sortMode          string
 	searchInput       textinput.Model
 	form              *formModel
 	templateForm      *templateFormModel
@@ -392,6 +395,14 @@ func New(servers []*model.Server) *tuiModel {
 		tagList:           tagList,
 		groupList:         groupList,
 		vaultUnlocked:     vaultIsUnlocked,
+		sortMode:          sortByName,
+	}
+	if GetSortPreference != nil {
+		for _, mode := range sortModes {
+			if mode == GetSortPreference() {
+				m.sortMode = mode
+			}
+		}
 	}
 	m.rebuildServerRows("")
 	return m
@@ -981,6 +992,17 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return model, cmd
 		}
 		if m.moveListCursor(msg) {
+			return m, nil
+		}
+		if msg.String() == "s" {
+			mode := m.cycleSort()
+			if SetSortPreference != nil {
+				if err := SetSortPreference(mode); err != nil {
+					m.err = fmt.Errorf("%s: %w", i18n.T("save sort order", "сохранить порядок сортировки"), err)
+					return m, nil
+				}
+			}
+			m.success = i18n.Tf("Sorted by %s.", "Сортировка: %s.", sortModeLabel(mode))
 			return m, nil
 		}
 		if msg.String() == "m" || msg.String() == "M" {
@@ -2918,7 +2940,7 @@ func authLabel(auth model.AuthMethod) string {
 	case model.AuthKey:
 		return "key"
 	case model.AuthKeyPassphrase:
-		return "key+phrase"
+		return "key+pass"
 	case model.AuthAgent:
 		return "agent"
 	default:

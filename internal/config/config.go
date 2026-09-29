@@ -35,6 +35,20 @@ type VaultConfig struct {
 type UIConfig struct {
 	ShowSecurityHints bool   `toml:"show_security_hints"`
 	Language          string `toml:"language"`
+	// Sort is the server list order in the TUI: name, recent, or group.
+	Sort string `toml:"sort"`
+}
+
+// Server list orders accepted by ui.sort.
+const (
+	SortByName   = "name"
+	SortByRecent = "recent"
+	SortByGroup  = "group"
+)
+
+// ValidSort reports whether value is a supported ui.sort order.
+func ValidSort(value string) bool {
+	return value == SortByName || value == SortByRecent || value == SortByGroup
 }
 
 func defaultConfig() *Config {
@@ -50,6 +64,7 @@ func defaultConfig() *Config {
 		UI: UIConfig{
 			ShowSecurityHints: false,
 			Language:          i18n.Auto,
+			Sort:              SortByName,
 		},
 	}
 }
@@ -100,6 +115,10 @@ func Load() (*Config, error) {
 	if !i18n.ValidPreference(cfg.UI.Language) {
 		return nil, fmt.Errorf("unsupported ui.language %q (use auto, ru, or en)", cfg.UI.Language)
 	}
+	if !ValidSort(cfg.UI.Sort) {
+		// The order is a convenience; an unknown value must not block startup.
+		cfg.UI.Sort = SortByName
+	}
 
 	// Re-apply paths since toml decode might overwrite
 	cfg.ConfigDir = configDir
@@ -141,7 +160,6 @@ func ReadLanguage() (string, error) {
 var (
 	uiSectionPattern = regexp.MustCompile(`^\s*\[ui\]\s*(?:#.*)?$`)
 	sectionPattern   = regexp.MustCompile(`^\s*\[[^\]]+\]\s*(?:#.*)?$`)
-	languagePattern  = regexp.MustCompile(`^\s*language\s*=`)
 )
 
 // SetLanguage persists only ui.language, preserving unrelated config values
@@ -150,6 +168,29 @@ func (cfg *Config) SetLanguage(value string) error {
 	if !i18n.ValidPreference(value) {
 		return fmt.Errorf("unsupported ui.language %q (use auto, ru, or en)", value)
 	}
+	if err := cfg.setUIString("language", value); err != nil {
+		return err
+	}
+	cfg.UI.Language = value
+	return nil
+}
+
+// SetSort persists only ui.sort, like SetLanguage.
+func (cfg *Config) SetSort(value string) error {
+	if !ValidSort(value) {
+		return fmt.Errorf("unsupported ui.sort %q (use name, recent, or group)", value)
+	}
+	if err := cfg.setUIString("sort", value); err != nil {
+		return err
+	}
+	cfg.UI.Sort = value
+	return nil
+}
+
+// setUIString writes key = "value" into the [ui] section, preserving unrelated
+// values and comments, and replaces the file atomically.
+func (cfg *Config) setUIString(key, value string) error {
+	keyPattern := regexp.MustCompile(`^\s*` + regexp.QuoteMeta(key) + `\s*=`)
 	path := filepath.Join(cfg.ConfigDir, "config.toml")
 	original, err := os.ReadFile(path)
 	if err != nil {
@@ -173,12 +214,12 @@ func (cfg *Config) SetLanguage(value string) error {
 		if sectionStart >= 0 && sectionEnd == len(lines) {
 			if sectionPattern.MatchString(line) {
 				sectionEnd = index
-			} else if languagePattern.MatchString(line) {
+			} else if keyPattern.MatchString(line) {
 				languageLine = index
 			}
 		}
 	}
-	entry := `language = "` + value + `"`
+	entry := key + ` = "` + value + `"`
 	switch {
 	case languageLine >= 0:
 		lines[languageLine] = entry
@@ -214,11 +255,7 @@ func (cfg *Config) SetLanguage(value string) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(temp.Name(), path); err != nil {
-		return err
-	}
-	cfg.UI.Language = value
-	return nil
+	return os.Rename(temp.Name(), path)
 }
 
 func resolveDirs(configRoot, dataRoot string) (string, string, error) {
