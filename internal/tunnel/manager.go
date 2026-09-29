@@ -32,6 +32,24 @@ func Init(dir string) error {
 	return loadStates()
 }
 
+// Reload re-reads the state file so tunnels started by another sshkeeper
+// process become visible. On a read error the previous states are kept.
+func Reload() error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if dataDir == "" {
+		return nil
+	}
+	previous := states
+	states = map[int64]*model.TunnelState{}
+	if err := loadStates(); err != nil {
+		states = previous
+		return err
+	}
+	return nil
+}
+
 // StateFilePath returns the path to the tunnel state file.
 func StateFilePath() string {
 	return filepath.Join(dataDir, "tunnels.json")

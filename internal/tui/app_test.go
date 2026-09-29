@@ -46,7 +46,7 @@ func TestServerListViewUsesDashboardLayout(t *testing.T) {
 		"TARGET",
 		"AUTH",
 		"GROUP",
-		"STATUS",
+		"STATE",
 		"Mail",
 		"mail.kp",
 		"mirivlad@mail.example.org:222",
