@@ -53,12 +53,12 @@ func TestSettingsSwitchesVisibleLanguageAndReturnsToManage(t *testing.T) {
 	}
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(*tuiModel)
-	if m.screen != screenList || !strings.Contains(m.View(), "Ctrl+W") || !strings.Contains(m.View(), "правила проброса") {
+	if m.screen != screenList || !strings.Contains(m.View(), "f: правила проброса") {
 		t.Fatalf("dashboard lost discoverable forward entry:\n%s", m.View())
 	}
 	m.width, m.height = 60, 16
 	assertUnifiedScreen(t, m.View(), 60, 16)
-	if !strings.Contains(m.View(), "Ctrl+W") {
+	if !strings.Contains(m.View(), "f: правила проброса") {
 		t.Fatalf("narrow dashboard hides forward entry:\n%s", m.View())
 	}
 }

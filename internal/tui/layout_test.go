@@ -48,7 +48,7 @@ func TestDashboardFitsSupportedTerminalSizes(t *testing.T) {
 			m.width, m.height = size.width, size.height
 			assertViewFits(t, m.View(), size.width, size.height)
 			assertRightMargin(t, m.View(), size.width)
-			for _, want := range []string{"sshkeeper", "Servers", "Vault", "Enter", "Ctrl+Q"} {
+			for _, want := range []string{"sshkeeper", "Servers", "Vault", "Enter", "q: quit"} {
 				if !strings.Contains(m.View(), want) {
 					t.Fatalf("dashboard at %dx%d missing %q:\n%s", size.width, size.height, want, m.View())
 				}
