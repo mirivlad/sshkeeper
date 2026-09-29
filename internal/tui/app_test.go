@@ -115,7 +115,7 @@ func TestServerListHelpWrapsOnNarrowTerminal(t *testing.T) {
 			t.Fatalf("expected help line to be bounded, got width %d: %q\nview:\n%s", lipgloss.Width(line), line, view)
 		}
 	}
-	for _, want := range []string{"Ctrl+X", "actions", "/", "filter", "?", "help"} {
+	for _, want := range []string{"x", "actions", "/", "filter", "?", "keys"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected help to contain %q\nview:\n%s", want, view)
 		}
@@ -146,7 +146,7 @@ func TestServerListHelpWrapsSelectionAndResultHints(t *testing.T) {
 		plainLines = append(plainLines, plainHelpLine(line))
 	}
 	joined := strings.Join(plainLines, "\n")
-	for _, want := range []string{"Ins: select (2 selected)", "Esc: clear result", "Ctrl+X: server actions", "m: manage", "Ctrl+Q: quit"} {
+	for _, want := range []string{"Space: select (2 selected)", "Esc: clear result", "x: server actions", "m: manage", "q: quit"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected wrapped help to contain %q\nlines:%#v", want, lines)
 		}
@@ -163,7 +163,7 @@ func TestServerListFooterUsesColonFormatAndColoredHotkeys(t *testing.T) {
 	m.selected["one"] = true
 
 	view := m.View()
-	for _, want := range []string{"Ins", ": select (1 selected)", "Ctrl+A", ": add"} {
+	for _, want := range []string{"Space", ": select (1 selected)", "a", ": add"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected footer to contain %q\nview:\n%s", want, view)
 		}
@@ -175,7 +175,7 @@ func TestServerListFooterUsesColonFormatAndColoredHotkeys(t *testing.T) {
 	if got := len(lines); got != m.height {
 		t.Fatalf("expected footer to be pinned to bottom with %d lines, got %d\nview:\n%s", m.height, got, view)
 	}
-	if !strings.Contains(lines[len(lines)-1], "Ctrl+Q") {
+	if !strings.Contains(lines[len(lines)-1], "q: quit") {
 		t.Fatalf("expected final footer line at terminal bottom, got %q\nview:\n%s", lines[len(lines)-1], view)
 	}
 }

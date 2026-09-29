@@ -924,7 +924,7 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case tea.KeyInsert:
+	case tea.KeyInsert, tea.KeySpace:
 		if item, ok := m.selectedServerItem(); ok {
 			if m.selected[item.server.Alias] {
 				delete(m.selected, item.server.Alias)
@@ -994,6 +994,12 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.moveListCursor(msg) {
 			return m, nil
 		}
+		if alias, ok := listLetterKeys[msg.String()]; ok {
+			return m.updateList(tea.KeyMsg{Type: alias})
+		}
+		if msg.String() == "q" {
+			return m, tea.Quit
+		}
 		if msg.String() == "s" {
 			mode := m.cycleSort()
 			if SetSortPreference != nil {
@@ -1037,6 +1043,18 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// listLetterKeys are single-key aliases for the Ctrl shortcuts on the server
+// list, where no text input can receive letters. The Ctrl forms keep working.
+var listLetterKeys = map[string]tea.KeyType{
+	"a": tea.KeyCtrlA,
+	"e": tea.KeyCtrlE,
+	"d": tea.KeyCtrlD,
+	"t": tea.KeyCtrlT,
+	"f": tea.KeyCtrlW,
+	"x": tea.KeyCtrlX,
+	"r": tea.KeyCtrlR,
 }
 
 // moveListCursor handles list navigation keys and reports whether msg was one.
@@ -2896,16 +2914,16 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 	}
 	items = append(items,
 		helpItem{Key: "Enter", Action: i18n.T("connect", "подключиться")},
-		helpItem{Key: "Ctrl+X", Action: i18n.T("server actions", "действия с сервером")},
-		helpItem{Key: "Ctrl+W", Action: i18n.T("forward rules", "правила проброса")},
-		helpItem{Key: "m", Action: i18n.T("manage", "управление")},
-		helpItem{Key: "Ctrl+A", Action: i18n.T("add", "добавить")},
-		helpItem{Key: "Ctrl+E", Action: i18n.T("edit", "изменить")},
 		helpItem{Key: "/", Action: i18n.T("filter", "фильтр")},
-		helpItem{Key: "Ins", Action: insAction},
-		helpItem{Key: "?", Action: i18n.T("hotkeys", "клавиши")},
-		helpItem{Key: "Ctrl+H", Action: i18n.T("help", "справка")},
-		helpItem{Key: "Ctrl+Q", Action: i18n.T("quit", "выход")},
+		helpItem{Key: "x", Action: i18n.T("server actions", "действия с сервером")},
+		helpItem{Key: "f", Action: i18n.T("forward rules", "правила проброса")},
+		helpItem{Key: "a", Action: i18n.T("add", "добавить")},
+		helpItem{Key: "e", Action: i18n.T("edit", "изменить")},
+		helpItem{Key: "m", Action: i18n.T("manage", "управление")},
+		helpItem{Key: "s", Action: i18n.T("sort", "сортировка")},
+		helpItem{Key: "Space", Action: insAction},
+		helpItem{Key: "?", Action: i18n.T("keys", "клавиши")},
+		helpItem{Key: "q", Action: i18n.T("quit", "выход")},
 	)
 	return items
 }
