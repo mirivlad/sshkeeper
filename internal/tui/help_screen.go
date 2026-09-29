@@ -251,11 +251,12 @@ func (m *fullHelpModel) View() string {
 			{i18n.T("Vault", "Хранилище"), i18n.T("Lock or change master password", "Заблокировать или сменить мастер-пароль")},
 		}},
 		{i18n.T("Server state column", "Колонка состояния"), [][2]string{
-			{"●", i18n.T("Last test passed (green) or failed (red)", "Последняя проверка прошла (зелёный) или нет (красный)")},
-			{"·", i18n.T("Not tested yet", "Ещё не проверялся")},
-			{"◌", i18n.T("Test in progress", "Идёт проверка")},
-			{"⇄", i18n.T("A background tunnel is running", "Работает фоновый туннель")},
-			{"▣", i18n.T("A tmux session is open", "Открыта tmux-сессия")},
+			{glyphs.ok, i18n.T("Last test passed", "Последняя проверка прошла")},
+			{glyphs.fail, i18n.T("Last test failed", "Последняя проверка не прошла")},
+			{glyphs.unknown, i18n.T("Not tested yet", "Ещё не проверялся")},
+			{glyphs.testing, i18n.T("Test in progress", "Идёт проверка")},
+			{glyphs.tunnel, i18n.T("A background tunnel is running", "Работает фоновый туннель")},
+			{glyphs.session, i18n.T("A tmux session is open", "Открыта tmux-сессия")},
 		}},
 		{i18n.T("Routes / ProxyJump", "Маршруты / ProxyJump"), [][2]string{
 			{"", i18n.T("Routes define how to reach a server through jump hosts.", "Маршрут определяет путь к серверу через промежуточные узлы.")},

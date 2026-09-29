@@ -818,9 +818,9 @@ func (fm *formModel) authSelectorView() string {
 		name := authLabel(method)
 		switch {
 		case method == current && focused:
-			parts[index] = selectedStyle.Render("‹ " + name + " ›")
+			parts[index] = selectedStyle.Render(glyphs.pickLeft + " " + name + " " + glyphs.pickRight)
 		case method == current:
-			parts[index] = normalStyle.Copy().Bold(true).Render("‹ " + name + " ›")
+			parts[index] = normalStyle.Copy().Bold(true).Render(glyphs.pickLeft + " " + name + " " + glyphs.pickRight)
 		default:
 			parts[index] = mutedStyle.Render("  " + name + "  ")
 		}

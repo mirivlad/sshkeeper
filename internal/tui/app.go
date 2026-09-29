@@ -1714,7 +1714,7 @@ func (m *tuiModel) View() string {
 		}
 	}
 
-	return b.String()
+	return asciiOnly(b.String())
 }
 
 func (m *tuiModel) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

@@ -281,7 +281,7 @@ func sortModeLabel(mode string) string {
 // "3h", "2d", "6w", "1y", or "—" when it never happened.
 func relativeAge(t *time.Time) string {
 	if t == nil || t.IsZero() {
-		return "—"
+		return glyphs.none
 	}
 	age := now().Sub(*t)
 	switch {

@@ -160,7 +160,7 @@ func (m *tuiModel) renderGroupHeader(width int, row serverRow, selected bool) st
 func (m *tuiModel) renderFilterPrompt(width int) string {
 	prompt := "/ " + m.searchInput.Value()
 	if m.screen == screenSearch {
-		prompt += "▏"
+		prompt += glyphs.caret
 	}
 	return brandStyle.Render(fitLine(prompt, width))
 }

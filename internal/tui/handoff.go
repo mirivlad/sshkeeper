@@ -21,7 +21,7 @@ func HandoffLine(server *model.Server) string {
 		}
 		line += mutedStyle.Render(i18n.T(" via ", " через ") + strings.Join(hops, ", "))
 	}
-	return line
+	return asciiOnly(line)
 }
 
 // ReturnNotice is the dashboard notice after an ssh session ends cleanly:

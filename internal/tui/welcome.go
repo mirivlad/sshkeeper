@@ -15,6 +15,19 @@ var welcomeArt = []string{
 	"╰───╯      ╹ ╹",
 }
 
+var welcomeArtASCII = []string{
+	".---.",
+	"| o |======+-+-.",
+	"'---'      ' '",
+}
+
+func welcomeArtLines() []string {
+	if glyphs == asciiGlyphs {
+		return welcomeArtASCII
+	}
+	return welcomeArt
+}
+
 // renderWelcome replaces the empty server list on the first run with the
 // logo, what the app does, and the three ways to get started.
 func (m *tuiModel) renderWelcome(width, height int) string {
@@ -27,11 +40,12 @@ func (m *tuiModel) renderWelcome(width, height int) string {
 	block := []string{}
 	if height >= 14 {
 		artWidth := 0
-		for _, line := range welcomeArt {
+		art := welcomeArtLines()
+		for _, line := range art {
 			artWidth = max(artWidth, lipgloss.Width(line))
 		}
 		// Equal widths keep the art's rows aligned when each is centered.
-		for _, line := range welcomeArt {
+		for _, line := range art {
 			block = append(block, brandStyle.Render(padCells(line, artWidth)))
 		}
 		block = append(block, "")

@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // The palette is a small set of adaptive tokens. Each token has a light and a
 // dark terminal value from the 256-color table; lipgloss downsamples them on
@@ -80,6 +84,12 @@ type glyphSet struct {
 	marked    string
 	vaultOpen string
 	vaultShut string
+	on        string
+	off       string
+	none      string
+	caret     string
+	pickLeft  string
+	pickRight string
 	crumb     string
 	dot       string
 	arrow     string
@@ -96,9 +106,11 @@ type glyphSet struct {
 var unicodeGlyphs = glyphSet{
 	// The logo is a key drawn with geometric and box-drawing characters,
 	// which every terminal font carries.
-	logo:      "○━┳┳",
-	ok:        "●",
-	fail:      "●",
+	logo: "○━┳┳",
+	ok:   "●",
+	// Failure differs by shape, not only color, for NO_COLOR and
+	// color-blind users.
+	fail:      "✗",
 	unknown:   "·",
 	testing:   "◌",
 	tunnel:    "⇄",
@@ -109,6 +121,12 @@ var unicodeGlyphs = glyphSet{
 	marked:    "✓",
 	vaultOpen: "●",
 	vaultShut: "○",
+	on:        "●",
+	off:       "○",
+	none:      "—",
+	caret:     "▏",
+	pickLeft:  "‹",
+	pickRight: "›",
 	crumb:     "›",
 	dot:       "·",
 	arrow:     "→",
@@ -122,4 +140,70 @@ var unicodeGlyphs = glyphSet{
 	vertical:    "│",
 }
 
+// asciiGlyphs replaces every symbol with plain ASCII for terminals or fonts
+// without Unicode box drawing. Enable with ui.glyphs = "ascii" or
+// SSHKEEPER_ASCII=1.
+var asciiGlyphs = glyphSet{
+	logo:      "o-=[",
+	ok:        "+",
+	fail:      "x",
+	unknown:   ".",
+	testing:   "~",
+	tunnel:    "=",
+	session:   "#",
+	expanded:  "v",
+	collapsed: ">",
+	cursor:    ">",
+	marked:    "*",
+	vaultOpen: "+",
+	vaultShut: "-",
+	on:        "+",
+	off:       "-",
+	none:      "-",
+	caret:     "_",
+	pickLeft:  "<",
+	pickRight: ">",
+	crumb:     ">",
+	dot:       "-",
+	arrow:     ">",
+	ellipsis:  "~",
+
+	topLeft:     "+",
+	topRight:    "+",
+	bottomLeft:  "+",
+	bottomRight: "+",
+	horizontal:  "-",
+	vertical:    "|",
+}
+
 var glyphs = unicodeGlyphs
+
+// asciiReplacer maps the symbols that screens write directly (arrows,
+// separators, box drawing, ellipses) to ASCII of the same cell width, so
+// layouts measured with the Unicode text stay aligned.
+var asciiReplacer = strings.NewReplacer(
+	"·", "-", "…", "~", "—", "-", "–", "-",
+	"→", ">", "←", "<", "↑", "^", "↓", "v", "⇄", "=",
+	"‹", "<", "›", ">", "▏", "_", "▌", ">", "▸", ">", "▾", "v",
+	"●", "*", "○", "o", "◌", "~", "▣", "#", "✓", "*", "✗", "x",
+	"─", "-", "━", "=", "│", "|", "┃", "|",
+	"┌", "+", "┐", "+", "└", "+", "┘", "+", "╭", "+", "╮", "+", "╰", "+", "╯", "+",
+	"├", "+", "┤", "+", "┬", "+", "┴", "+", "┼", "+", "┳", "+", "┻", "+", "╸", "-", "╹", "'",
+)
+
+// asciiOnly applies asciiReplacer when ASCII symbols are selected.
+func asciiOnly(value string) string {
+	if glyphs != asciiGlyphs {
+		return value
+	}
+	return asciiReplacer.Replace(value)
+}
+
+// UseASCII switches the interface to plain ASCII symbols.
+func UseASCII(ascii bool) {
+	if ascii {
+		glyphs = asciiGlyphs
+		return
+	}
+	glyphs = unicodeGlyphs
+}
