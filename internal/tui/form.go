@@ -689,6 +689,23 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if fm.focusIdx == authFieldIndex {
+			// The auth method is a selector, not free text: arrows cycle
+			// the four methods, "/" still opens the list, and other
+			// printable keys are ignored.
+			switch {
+			case msg.Type == tea.KeyLeft:
+				fm.cycleAuthMethod(-1)
+				return fm, nil
+			case msg.Type == tea.KeyRight:
+				fm.cycleAuthMethod(1)
+				return fm, nil
+			case msg.Type == tea.KeyRunes && string(msg.Runes) != "/":
+				return fm, nil
+			case msg.Type == tea.KeyBackspace, msg.Type == tea.KeyDelete, msg.Type == tea.KeySpace:
+				return fm, nil
+			}
+		}
 		switch msg.Type {
 		case tea.KeyTab:
 			fm.advanceFocus(1)
@@ -768,6 +785,49 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return fm, nil
 }
 
+// authFieldIndex is the input that holds the auth method.
+const authFieldIndex = 5
+
+var authMethods = []model.AuthMethod{model.AuthPassword, model.AuthKey, model.AuthKeyPassphrase, model.AuthAgent}
+
+// cycleAuthMethod moves the auth method selector by delta, wrapping around,
+// and refreshes the fields that depend on it.
+func (fm *formModel) cycleAuthMethod(delta int) {
+	current := 0
+	for index, method := range authMethods {
+		if method == fm.authMethodValue() {
+			current = index
+		}
+	}
+	next := (current + delta + len(authMethods)) % len(authMethods)
+	fm.inputs[authFieldIndex].SetValue(string(authMethods[next]))
+	fm.updateFocus()
+}
+
+// authSelectorView draws the auth method as a segmented selector:
+// "Auth Method (←/→)> password ‹ key › key+pass agent".
+func (fm *formModel) authSelectorView() string {
+	label := blurredStyle.Render(fm.labelAt(authFieldIndex) + ": ")
+	focused := fm.focusIdx == authFieldIndex
+	if focused {
+		label = focusedStyle.Render(fm.labelAt(authFieldIndex) + "> ")
+	}
+	current := fm.authMethodValue()
+	parts := make([]string, len(authMethods))
+	for index, method := range authMethods {
+		name := authLabel(method)
+		switch {
+		case method == current && focused:
+			parts[index] = selectedStyle.Render("‹ " + name + " ›")
+		case method == current:
+			parts[index] = normalStyle.Copy().Bold(true).Render("‹ " + name + " ›")
+		default:
+			parts[index] = mutedStyle.Render("  " + name + "  ")
+		}
+	}
+	return label + strings.Join(parts, "")
+}
+
 func (fm *formModel) applySaveError(err error) {
 	fm.err = err
 	if err == nil {
@@ -834,7 +894,7 @@ func (fm *formModel) labelAt(index int) string {
 			return i18n.T("Port *", "Порт *")
 		}
 		if index == 5 {
-			return i18n.T("Auth Method (/ pick)", "Метод аутентификации (/ выбор)")
+			return i18n.T("Auth Method (←/→)", "Метод аутентификации (←/→)")
 		}
 		if index == 6 {
 			return i18n.T("Identity File (/ pick)", "Файл ключа (/ выбор)")
@@ -1085,8 +1145,10 @@ func (fm *formModel) View() string {
 					allFields = append(allFields, sectionStyle.Copy().MarginTop(0).Render(section))
 				}
 			}
-			if i == 5 {
-				fm.inputs[i].Placeholder = "password/key/key_passphrase/agent"
+			if i == authFieldIndex {
+				focusRows[i] = len(allFields)
+				allFields = append(allFields, fm.authSelectorView())
+				continue
 			}
 			if i == 8 && len(fm.groups) > 0 {
 				fm.inputs[i].Placeholder = truncateCells(strings.Join(fm.groups, ", "), 25)

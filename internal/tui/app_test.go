@@ -392,7 +392,7 @@ func TestSelectableFieldHintsAreVisible(t *testing.T) {
 
 	fm := newFormModel(80, 24)
 	view := fm.View()
-	for _, want := range []string{"Auth Method (/ pick)", "Group (/ pick)", "pick list"} {
+	for _, want := range []string{"Auth Method (←/→)", "Group (/ pick)", "pick list"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected form view to contain selectable-field hint %q\nview:\n%s", want, view)
 		}
