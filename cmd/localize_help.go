@@ -117,6 +117,7 @@ func localizeCLIHelp() {
 			}
 		}
 	}
+	localizeSyncHelp()
 	rootCmd.Long = i18n.T(`sshkeeper is a console SSH connection manager.
 Linux and macOS are primary release targets; Windows is experimental.
 It manages server profiles, secrets, and provides a convenient way

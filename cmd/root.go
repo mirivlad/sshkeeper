@@ -219,6 +219,10 @@ func commandRequiresStartupVaultUnlock(args []string) bool {
 	}
 
 	switch args[0] {
+	case "sync":
+		// Sync needs the vault for secrets and the sync key; choosing the
+		// storage and reading the status do not.
+		return len(args) < 2 || (args[1] != "setup" && args[1] != "status")
 	case "connect", "c", "run", "run-template", "test", "edit", "delete", "tunnel":
 		if args[0] == "tunnel" && tunnelCommandSkipsStartupVaultUnlock(args[1:]) {
 			return false

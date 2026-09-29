@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/mirivlad/sshkeeper/internal/ssh"
 	"github.com/mirivlad/sshkeeper/internal/tui"
 	tunnelpkg "github.com/mirivlad/sshkeeper/internal/tunnel"
+	"github.com/mirivlad/sshkeeper/internal/vault"
 )
 
 func runTUI() error {
@@ -218,7 +220,11 @@ func runTUI() error {
 		m.Restore(state)
 		state = tui.State{}
 		p := tea.NewProgram(m, tea.WithAltScreen())
-		if _, err := p.Run(); err != nil {
+		// Background work (sync saves the vault) must not print over the TUI.
+		vault.Progress = io.Discard
+		_, err := p.Run()
+		vault.Progress = os.Stdout
+		if err != nil {
 			return fmt.Errorf("%s: %w", tr("TUI error", "ошибка интерфейса"), err)
 		}
 
