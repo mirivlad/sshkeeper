@@ -37,7 +37,16 @@ type UIConfig struct {
 	Language          string `toml:"language"`
 	// Sort is the server list order in the TUI: name, recent, or group.
 	Sort string `toml:"sort"`
+	// Glyphs selects TUI symbols: unicode (default) or ascii for terminals
+	// and fonts without box drawing.
+	Glyphs string `toml:"glyphs"`
 }
+
+// TUI symbol sets accepted by ui.glyphs.
+const (
+	GlyphsUnicode = "unicode"
+	GlyphsASCII   = "ascii"
+)
 
 // Server list orders accepted by ui.sort.
 const (
@@ -65,6 +74,7 @@ func defaultConfig() *Config {
 			ShowSecurityHints: false,
 			Language:          i18n.Auto,
 			Sort:              SortByName,
+			Glyphs:            GlyphsUnicode,
 		},
 	}
 }
@@ -118,6 +128,9 @@ func Load() (*Config, error) {
 	if !ValidSort(cfg.UI.Sort) {
 		// The order is a convenience; an unknown value must not block startup.
 		cfg.UI.Sort = SortByName
+	}
+	if cfg.UI.Glyphs != GlyphsASCII {
+		cfg.UI.Glyphs = GlyphsUnicode
 	}
 
 	// Re-apply paths since toml decode might overwrite

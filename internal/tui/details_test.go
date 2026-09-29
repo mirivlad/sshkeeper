@@ -32,7 +32,7 @@ func TestDetailsPanelShowsRouteForwardsAndNotes(t *testing.T) {
 		"postgres@db01.internal:22",
 		"you → bastion → gw.example → db01.internal",
 		"Last in   2h ago",
-		"● failed: timeout",
+		"✗ failed: timeout",
 		"1 open in tmux",
 		"⇄ tunnel running",
 		"● L :15432 → 127.0.0.1:5432  pg",
@@ -54,7 +54,7 @@ func TestDetailsPanelSummarizesGroupHeader(t *testing.T) {
 	m.serverByAlias("db").LastTestStatus = model.TestFailed
 	m.cursor = m.headerRow("Production")
 	panel := ansi.Strip(m.renderSelectedPanel(50, 16))
-	for _, want := range []string{"Production", "2 profiles", "Test OK   ● 1", "Failed    ● 1", "Enter fold"} {
+	for _, want := range []string{"Production", "2 profiles", "Test OK   ● 1", "Failed    ✗ 1", "Enter fold"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("group details missing %q:\n%s", want, panel)
 		}

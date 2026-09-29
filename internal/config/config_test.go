@@ -144,3 +144,28 @@ func TestSortPreferencePersistsAndFallsBack(t *testing.T) {
 		t.Fatalf("unknown sort should fall back to name, got %q", fallback.UI.Sort)
 	}
 }
+
+func TestGlyphsDefaultToUnicodeAndAcceptASCII(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UI.Glyphs != GlyphsUnicode {
+		t.Fatalf("default glyphs = %q", cfg.UI.Glyphs)
+	}
+	path := filepath.Join(cfg.ConfigDir, "config.toml")
+	for value, want := range map[string]string{"ascii": GlyphsASCII, "emoji": GlyphsUnicode} {
+		if err := os.WriteFile(path, []byte("[ui]\nglyphs = \""+value+"\"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		reloaded, err := Load()
+		if err != nil {
+			t.Fatalf("glyphs %q must not block startup: %v", value, err)
+		}
+		if reloaded.UI.Glyphs != want {
+			t.Fatalf("glyphs %q loaded as %q, want %q", value, reloaded.UI.Glyphs, want)
+		}
+	}
+}

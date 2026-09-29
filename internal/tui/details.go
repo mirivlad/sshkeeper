@@ -178,9 +178,9 @@ func (m *tuiModel) testSummaryLine(server *model.Server) string {
 // forwardLine renders one saved forward compactly, e.g.
 // "● L :15432 → 127.0.0.1:5432  Local PostgreSQL".
 func forwardLine(fwd *model.Forward) string {
-	state := stateUnknownStyle.Render("○")
+	state := stateUnknownStyle.Render(glyphs.off)
 	if fwd.Enabled {
-		state = testOKStyle.Render("●")
+		state = testOKStyle.Render(glyphs.on)
 	}
 	listen := listenAddr(fwd.LocalAddr, fwd.LocalPort)
 	var rule string

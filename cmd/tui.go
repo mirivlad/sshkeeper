@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mirivlad/sshkeeper/internal/config"
 	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
@@ -26,6 +27,7 @@ func runTUI() error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", tr("load servers", "загрузить серверы"), err)
 	}
+	tui.UseASCII(cfg.UI.Glyphs == config.GlyphsASCII || os.Getenv("SSHKEEPER_ASCII") == "1")
 	tui.GetSortPreference = func() string { return cfg.UI.Sort }
 	tui.SetSortPreference = func(value string) error { return cfg.SetSort(value) }
 
