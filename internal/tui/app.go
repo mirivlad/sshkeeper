@@ -100,6 +100,17 @@ type discardFormMsg struct {
 	origin screen
 }
 
+// noticeLifetime is how long a success notice stays on screen. Tests shorten
+// it.
+var noticeLifetime = 5 * time.Second
+
+// noticeExpiredMsg clears the success notice it was scheduled for, unless a
+// newer notice replaced it.
+type noticeExpiredMsg struct {
+	generation int
+	text       string
+}
+
 type forwardIndexLoadedMsg struct {
 	forwards []*model.Forward
 	err      error
@@ -287,6 +298,7 @@ type tuiModel struct {
 	testing           map[string]bool
 	testTotal         int
 	testPassed        int
+	noticeGeneration  int
 	searchInput       textinput.Model
 	form              *formModel
 	templateForm      *templateFormModel
@@ -384,7 +396,12 @@ func (m *tuiModel) Result() *TUIResult {
 }
 
 func (m *tuiModel) Init() tea.Cmd {
-	return tea.Batch(m.loadForwardIndexCmd(), m.loadRuntimeCmd(), runtimeTickCmd())
+	cmds := []tea.Cmd{m.loadForwardIndexCmd(), m.loadRuntimeCmd(), runtimeTickCmd()}
+	if m.success != "" {
+		// A notice restored from the previous run fades like any other.
+		cmds = append(cmds, m.expireNoticeCmd())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *tuiModel) loadForwardIndexCmd() tea.Cmd {
@@ -397,7 +414,30 @@ func (m *tuiModel) loadForwardIndexCmd() tea.Cmd {
 	}
 }
 
+// Update wraps update so every success notice, wherever it is set, fades
+// after noticeLifetime. Errors stay until the next key.
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if expired, ok := msg.(noticeExpiredMsg); ok {
+		if expired.generation == m.noticeGeneration && m.success == expired.text {
+			m.success = ""
+		}
+		return m, nil
+	}
+	before := m.success
+	model, cmd := m.update(msg)
+	if m.success != "" && m.success != before {
+		return model, tea.Batch(cmd, m.expireNoticeCmd())
+	}
+	return model, cmd
+}
+
+func (m *tuiModel) expireNoticeCmd() tea.Cmd {
+	m.noticeGeneration++
+	expired := noticeExpiredMsg{generation: m.noticeGeneration, text: m.success}
+	return tea.Tick(noticeLifetime, func(time.Time) tea.Msg { return expired })
+}
+
+func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
