@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mirivlad/sshkeeper/internal/model"
 )
 
@@ -218,4 +219,33 @@ func TestOtherDestructiveActionsOpenConfirmation(t *testing.T) {
 			t.Fatalf("tunnel stop did not open confirmation: screen=%v confirm=%#v cmd=%v", m.screen, m.confirm, cmd != nil)
 		}
 	})
+}
+
+func TestConfirmationIsCenteredOverDimmedParent(t *testing.T) {
+	m := New([]*model.Server{{Alias: "prod", DisplayName: "Production web", Host: "web01", Port: 22, User: "ops"}})
+	m.width, m.height = 100, 24
+	m.confirmServerDelete(m.selectedServer())
+	view := ansi.Strip(m.View())
+	lines := strings.Split(view, "\n")
+	if len(lines) != 24 {
+		t.Fatalf("view has %d lines", len(lines))
+	}
+	if !strings.Contains(view, "Production web") {
+		t.Fatal("the dashboard should stay visible behind the dialog")
+	}
+	row := -1
+	for index, line := range lines {
+		if strings.Contains(line, "Delete server profile?") {
+			row = index
+		}
+	}
+	if row < 3 || row > 12 {
+		t.Fatalf("dialog title row %d is not vertically centered:\n%s", row, view)
+	}
+	if col := strings.Index(lines[row], "╭"); col < 10 {
+		t.Fatalf("dialog should be horizontally centered, starts at %d:\n%s", col, view)
+	}
+	if !strings.Contains(lines[len(lines)-1], "Esc cancel") {
+		t.Fatalf("confirm footer must be on the last row:\n%s", view)
+	}
 }

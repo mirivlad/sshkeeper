@@ -2139,58 +2139,6 @@ func (m *tuiModel) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *tuiModel) viewConfirm() string {
-	if m.confirm == nil {
-		return ""
-	}
-	body := func(width, height int) string {
-		innerWidth := max(1, width-4)
-		innerHeight := max(1, height-2)
-		message := wrapCells(m.confirm.target, innerWidth)
-		if m.confirm.consequence != "" {
-			message = append(message, "")
-			message = append(message, wrapCells(m.confirm.consequence, innerWidth)...)
-		}
-		cancel := i18n.T("[ Cancel ]", "[ Отмена ]")
-		accept := "[ " + m.confirm.verb + " ]"
-		if m.confirm.focus == confirmCancel {
-			cancel = selectedStyle.Render("> " + cancel)
-		} else {
-			accept = errorStyle.Render("> " + accept)
-		}
-		action := cancel + "  " + accept
-		if m.confirm.pending {
-			action = i18n.Tf("%s in progress…", "%s: выполняется…", m.confirm.verb)
-		}
-		messageRows := max(0, innerHeight-2)
-		if len(message) > messageRows {
-			message = message[:messageRows]
-			if len(message) > 0 {
-				message[len(message)-1] = truncateCells(strings.TrimSpace(message[len(message)-1])+" …", innerWidth)
-			}
-		}
-		lines := []string{dashboardSection(m.confirm.title)}
-		lines = append(lines, message...)
-		for len(lines) < innerHeight-1 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, action)
-		return renderPaddedPanel(width, height, lines)
-	}
-	return renderScreenShell(screenShell{
-		breadcrumb: i18n.T("Confirm", "Подтверждение"),
-		status:     shellStatus(m.vaultUnlocked, i18n.T("Action required", "Требуется действие")),
-		width:      m.width,
-		height:     m.height,
-		body:       body,
-		footer: []helpItem{
-			{Key: "Tab", Action: i18n.T("choose", "выбрать")},
-			{Key: "Enter", Action: i18n.T("activate", "подтвердить")},
-			{Key: "Esc", Action: i18n.T("cancel", "отмена")},
-		},
-	})
-}
-
 func (m *tuiModel) beginConfirm(state confirmState) {
 	state.focus = confirmCancel
 	m.confirm = &state
