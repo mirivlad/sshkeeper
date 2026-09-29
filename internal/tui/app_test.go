@@ -51,11 +51,9 @@ func TestServerListViewUsesDashboardLayout(t *testing.T) {
 		"mirivlad@mail.example.org:222",
 		"KP",
 		"OK",
-		"Selected",
-		"Host: mail.example.org",
-		"Alias: mail.kp",
-		"Display Name: Mail",
-		"Port: 222",
+		"you → mail.example.org",
+		"Last in",
+		"never",
 		"Enter",
 		"connect",
 	} {
@@ -90,7 +88,7 @@ func TestServerListViewKeepsDetailsVisibleWithManyServers(t *testing.T) {
 	if !strings.Contains(view, "Server 01") {
 		t.Fatalf("expected first selected server to be visible:\n%s", view)
 	}
-	if !strings.Contains(view, "Selected") {
+	if !strings.Contains(view, "you → host-01.example.org") {
 		t.Fatalf("expected selected server details to remain visible:\n%s", view)
 	}
 	if !strings.Contains(view, "Enter") || !strings.Contains(view, "connect") {
