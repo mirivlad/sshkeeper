@@ -31,6 +31,9 @@ port forwarding management.
 - **Tunnel vs Forward** — clear separation: forward = saved rule, tunnel = running SSH process.
 - First-class groups, multi-select tags, command templates, search by metadata/routes/forward ports, and OpenSSH config generation.
 - Import from `~/.ssh/config` and simple tab-separated export.
+- **Sync between devices** — profiles, forwards, templates, vault secrets, and
+  the private keys your profiles use, end-to-end encrypted through a shared
+  folder or a git repository. A new device joins with a six-digit code.
 
 ## Install
 
@@ -71,20 +74,19 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 
 ### Install from release
 
-The packages below are v0.6.0. This release includes the live filter, sort
-modes, state indicators, and the rest of the dashboard described later in this
-README.
+The packages below are v0.7.0. This release adds encrypted sync between
+devices on top of the v0.6 dashboard described later in this README.
 
 Debian/Ubuntu (amd64):
 
 ```bash
-sudo apt install ./sshkeeper_0.6.0-1_amd64.deb
+sudo apt install ./sshkeeper_0.7.0-1_amd64.deb
 ```
 
 Fedora/RHEL-family (x86_64):
 
 ```bash
-sudo dnf install ./sshkeeper-0.6.0-1.x86_64.rpm
+sudo dnf install ./sshkeeper-0.7.0-1.x86_64.rpm
 ```
 
 `arm64`/`aarch64` packages are published alongside the x86_64 builds. Native
@@ -104,8 +106,8 @@ sshkeeper --version
 The traditional tar.gz archive remains available too:
 
 ```bash
-tar -xzf sshkeeper_v0.6.0_linux_amd64.tar.gz
-sudo install -m 0755 sshkeeper_v0.6.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
+tar -xzf sshkeeper_v0.7.0_linux_amd64.tar.gz
+sudo install -m 0755 sshkeeper_v0.7.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 sshkeeper
 ```
 
@@ -236,7 +238,7 @@ The earlier `Ctrl` shortcuts keep working.
 | ←/→ | Fold / unfold a group (group order) |
 | Space / Ins | Mark / unmark a server |
 | `i` | Import `~/.ssh/config` (welcome screen only) |
-| `m` | Manage groups, tags, command templates, running tunnels, settings, import/export, and vault |
+| `m` | Manage groups, tags, command templates, running tunnels, settings (language, sync), import/export, and vault |
 | `?` | Quick help (hotkeys) |
 | Ctrl+H | Full documentation |
 | `q` / Ctrl+Q / Ctrl+C | Quit |
@@ -392,10 +394,70 @@ tunnel is the running process that activates it.
 
 The TUI and CLI messages support Russian and English. By default, language is
 **System**: `LC_ALL`, then `LC_MESSAGES`, then `LANG` on Unix, with English as
-the fallback for other locales. In the TUI, open `m` → **Settings** to choose
+the fallback for other locales. In the TUI, open `m` → **Settings** → **Language** to choose
 System, Русский, or English. The change applies immediately and is saved as
 `ui.language` in `~/.config/sshkeeper/config.toml`. Command and flag names,
 server aliases, and SSH parameters remain unchanged.
+
+## Sync Between Devices
+
+sshkeeper keeps your devices in step through one end-to-end encrypted file.
+It syncs profiles (with routes, groups, tags, and notes), port forwards,
+command templates, groups and tags, vault secrets, and the private key files
+that profiles reference. Device-local facts — last connection, last test,
+running tunnels, language and sort order — stay on each device.
+
+![Sync settings](docs/screenshots/screen_7.png)
+
+**Where the file lives.** Choose in `m` → Settings → Synchronization:
+
+- **Folder** — any folder your devices share: Syncthing, Nextcloud, Dropbox,
+  or a network drive. Conflict copies made by those tools are merged.
+- **Git** — a private repository you can push to with your own credentials.
+  The file lives on its own branch (`sshkeeper` by default), so it never
+  touches anything else in the repository. Git never prompts from inside
+  sshkeeper: use an SSH key loaded in your agent or a credential helper.
+
+**Setting up.**
+
+1. On the first device choose the storage and **Create sync space**.
+   sshkeeper shows a recovery key: keep it offline. It is only needed if every
+   device is lost.
+2. On that device choose **Add device** and confirm the master password.
+   It shows a six-digit code, valid for ten minutes.
+3. On the new device choose the same storage, then **Join with code**, and
+   enter the code and the master password of the first device.
+
+With **Auto sync** on, the TUI syncs when it starts and three seconds after
+each change; the header shows `⇅` with the time since the last sync. The same
+works from the command line:
+
+```bash
+sshkeeper sync setup folder ~/Sync/sshkeeper   # or: sync setup git <url> [--branch]
+sshkeeper sync init                            # first device
+sshkeeper sync add-device                      # prints the six-digit code
+sshkeeper sync join                            # new device
+sshkeeper sync                                 # sync now
+sshkeeper sync status | recovery-key | leave
+```
+
+**How secrets stay secret.**
+
+- Everything travels inside one file sealed with XChaCha20-Poly1305 under a
+  random 256-bit sync key. The storage sees a format tag and a key fingerprint,
+  nothing else — no names, hosts, or even how many secrets exist.
+- The sync key lives only in each device's vault. A stolen sync file has no
+  password to guess.
+- The six-digit code alone is worthless: it wraps the sync key together with
+  the master password of the device that shows it (Argon2id), expires after
+  ten minutes, and is deleted once used. In git it uses a separate branch
+  that is removed afterwards, so it never enters the history.
+- Sync refuses to run while the vault is locked, so missing secrets are never
+  mistaken for deletions.
+- An existing key file is never overwritten. If a device already has a
+  different key at the same path, it keeps its own, reports it, and never
+  sends it to other devices.
+- Changes merge per item by the latest edit; deletions travel too.
 
 ## Vault
 
@@ -437,6 +499,7 @@ before using it for high-risk environments.
 | Config | `~/.config/sshkeeper/config.toml` |
 | Database | `~/.local/share/sshkeeper/sshkeeper.db` |
 | Vault | `~/.local/share/sshkeeper/vault.bin` |
+| Git sync cache | `~/.local/share/sshkeeper/sync-git/` |
 | Generated OpenSSH config | `~/.ssh/config.d/sshkeeper.conf` |
 
 If `XDG_CONFIG_HOME` or `XDG_DATA_HOME` are set, sshkeeper stores data under
@@ -463,6 +526,7 @@ sshkeeper/
 ├── internal/db/         # SQLite migrations and CRUD
 ├── internal/model/      # Domain models
 ├── internal/ssh/        # OpenSSH command building, PTY prompt handling
+├── internal/syncer/     # Encrypted sync: records, merge, bundle, folder/git storage
 ├── internal/tui/        # Bubble Tea UI
 ├── internal/vault/      # Encrypted vault
 ├── internal/tunnel/     # Tunnel state management
