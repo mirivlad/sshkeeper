@@ -28,19 +28,6 @@ func renderScreenShell(shell screenShell) string {
 	}
 	canvasWidth := max(1, width-1)
 
-	headerLeft := "sshkeeper"
-	if shell.breadcrumb != "" {
-		headerLeft += " / " + shell.breadcrumb
-	}
-	header := headerLeft
-	if shell.status != "" {
-		if gap := canvasWidth - lipgloss.Width(headerLeft) - lipgloss.Width(shell.status); gap > 0 {
-			header = headerLeft + strings.Repeat(" ", gap) + shell.status
-		} else {
-			header = headerLeft + " " + shell.status
-		}
-	}
-
 	footer := renderHelp(shell.footer, canvasWidth)
 	footerLines := splitBlock(footer)
 	if len(footerLines) == 0 {
@@ -60,10 +47,7 @@ func renderScreenShell(shell screenShell) string {
 	bodyLines := fitBlock(body, canvasWidth, bodyHeight)
 
 	lines := make([]string, 0, height)
-	lines = append(lines,
-		titleStyle.Copy().MarginLeft(0).Render(fitLine(header, canvasWidth)),
-		helpStyle.Copy().MarginLeft(0).Render(strings.Repeat("─", canvasWidth)),
-	)
+	lines = append(lines, splitBlock(renderAppHeader(canvasWidth, shell.breadcrumb, shell.status))...)
 	lines = append(lines, notificationLines...)
 	lines = append(lines, bodyLines...)
 	for _, line := range footerLines {
@@ -122,13 +106,46 @@ func classifyShellContent(contentWidth int) terminalSizeClass {
 	return sizeNarrow
 }
 
-func shellStatus(vaultUnlocked bool, detail string) string {
-	vault := i18n.T("Vault locked", "Хранилище заблокировано")
-	if vaultUnlocked {
-		vault = i18n.T("Vault unlocked", "Хранилище разблокировано")
+// renderAppHeader draws the two header rows shared by every screen: the logo,
+// app name, and breadcrumb on the left, status on the right, and a rule.
+func renderAppHeader(width int, breadcrumb, status string) string {
+	left := brandStyle.Render(glyphs.logo) + " " + brandStyle.Render("sshkeeper")
+	if breadcrumb != "" {
+		crumb := mutedStyle.Render(" " + glyphs.crumb + " ")
+		// Screens build nested breadcrumbs as "Actions / alias".
+		parts := strings.Split(breadcrumb, " / ")
+		for index, part := range parts {
+			left += crumb
+			if index == len(parts)-1 {
+				left += normalStyle.Copy().Bold(true).Render(part)
+			} else {
+				left += normalStyle.Render(part)
+			}
+		}
 	}
+	line := left
+	if status != "" {
+		if gap := width - lipgloss.Width(left) - lipgloss.Width(status); gap > 0 {
+			line = left + strings.Repeat(" ", gap) + status
+		} else {
+			line = left + " " + status
+		}
+	}
+	return fitLine(line, width) + "\n" + borderStyle.Render(strings.Repeat(glyphs.horizontal, width))
+}
+
+// vaultBadge is the colored vault state shown in every header.
+func vaultBadge(unlocked bool) string {
+	if unlocked {
+		return vaultOpen.Render(glyphs.vaultOpen + " " + i18n.T("Vault unlocked", "Хранилище открыто"))
+	}
+	return vaultLocked.Render(glyphs.vaultShut + " " + i18n.T("Vault locked", "Хранилище заблокировано"))
+}
+
+func shellStatus(vaultUnlocked bool, detail string) string {
+	vault := vaultBadge(vaultUnlocked)
 	if detail == "" {
 		return vault
 	}
-	return fmt.Sprintf("%s · %s", vault, detail)
+	return vault + mutedStyle.Render(fmt.Sprintf(" %s %s", glyphs.dot, detail))
 }

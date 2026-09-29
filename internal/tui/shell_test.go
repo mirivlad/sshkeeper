@@ -25,10 +25,10 @@ func TestScreenShellFitsAndAnchorsFooter(t *testing.T) {
 			if len(lines) != size.height {
 				t.Fatalf("shell has %d lines, want %d:\n%s", len(lines), size.height, view)
 			}
-			if !strings.Contains(ansi.Strip(lines[0]), "sshkeeper / Actions") {
+			if !strings.Contains(ansi.Strip(lines[0]), "sshkeeper › Actions") {
 				t.Fatalf("missing breadcrumb header: %q", ansi.Strip(lines[0]))
 			}
-			if !strings.HasPrefix(ansi.Strip(lines[2]), "┌") || !strings.HasSuffix(ansi.Strip(lines[size.height-2]), "┘") {
+			if !strings.HasPrefix(ansi.Strip(lines[2]), "╭") || !strings.HasSuffix(ansi.Strip(lines[size.height-2]), "╯") {
 				t.Fatalf("body panel does not fill shell:\n%s", view)
 			}
 			if !strings.Contains(ansi.Strip(lines[size.height-1]), "Ctrl+H") {
