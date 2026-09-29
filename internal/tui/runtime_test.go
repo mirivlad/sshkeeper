@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mirivlad/sshkeeper/internal/model"
 )
 
@@ -141,5 +142,16 @@ func TestStateColumnShowsTunnelAndSessionIndicators(t *testing.T) {
 	}
 	if strings.Contains(webLine, glyphs.tunnel) || !strings.Contains(webLine, glyphs.unknown) {
 		t.Fatalf("web row should show only the unknown status:\n%s", webLine)
+	}
+}
+
+func TestStateGlyphsKeepTheirColorInsideRows(t *testing.T) {
+	selected := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("236"))
+	styled := layer(selected, testFailStyle)
+	if styled.GetForeground() != testFailStyle.GetForeground() {
+		t.Fatalf("glyph lost its color: %v", styled.GetForeground())
+	}
+	if styled.GetBackground() != selected.GetBackground() {
+		t.Fatalf("glyph lost the row background: %v", styled.GetBackground())
 	}
 }

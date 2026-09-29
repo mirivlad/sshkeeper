@@ -70,6 +70,13 @@ var (
 	groupHeaderStyle  = lipgloss.NewStyle().Foreground(colorText).Bold(true)
 )
 
+// layer renders with top's colors and attributes over base's background.
+// lipgloss Inherit never overrides a property that is already set, so
+// base.Inherit(top) would keep base's foreground and lose top's color.
+func layer(base, top lipgloss.Style) lipgloss.Style {
+	return top.Copy().Inherit(base)
+}
+
 // glyphSet holds the symbols the interface draws.
 type glyphSet struct {
 	logo      string
