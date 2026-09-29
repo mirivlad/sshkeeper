@@ -32,25 +32,10 @@ func (m *tuiModel) renderServerDashboard() string {
 	}
 
 	var body string
-	switch sizeClass {
-	case sizeWide:
-		leftWidth := width * 62 / 100
-		rightWidth := width - leftWidth - 1
-		left := m.renderServerPanel(leftWidth, bodyHeight, true)
-		right := m.renderSelectedPanel(rightWidth, bodyHeight)
-		body = joinPanelColumns(left, leftWidth, right, rightWidth)
-	case sizeMedium:
-		detailsHeight := 4
-		listHeight := bodyHeight - detailsHeight
-		if listHeight < 5 {
-			listHeight = 5
-		}
-		body = m.renderServerPanel(width, listHeight, true)
-		if listHeight+detailsHeight <= bodyHeight {
-			body += "\n" + m.renderCompactSelected(width, detailsHeight)
-		}
-	default:
-		body = m.renderServerPanel(width, bodyHeight, false)
+	if len(m.servers) == 0 {
+		body = m.renderWelcome(width, bodyHeight)
+	} else {
+		body = m.renderDashboardBody(sizeClass, width, bodyHeight)
 	}
 
 	view := header + notification + body
@@ -59,6 +44,27 @@ func (m *tuiModel) renderServerDashboard() string {
 		view += strings.Repeat("\n", padding)
 	}
 	return view + "\n" + footer
+}
+
+func (m *tuiModel) renderDashboardBody(sizeClass terminalSizeClass, width, bodyHeight int) string {
+	switch sizeClass {
+	case sizeWide:
+		leftWidth := width * 62 / 100
+		rightWidth := width - leftWidth - 1
+		left := m.renderServerPanel(leftWidth, bodyHeight, true)
+		right := m.renderSelectedPanel(rightWidth, bodyHeight)
+		return joinPanelColumns(left, leftWidth, right, rightWidth)
+	case sizeMedium:
+		detailsHeight := 4
+		listHeight := max(5, bodyHeight-detailsHeight)
+		body := m.renderServerPanel(width, listHeight, true)
+		if listHeight+detailsHeight <= bodyHeight {
+			body += "\n" + m.renderCompactSelected(width, detailsHeight)
+		}
+		return body
+	default:
+		return m.renderServerPanel(width, bodyHeight, false)
+	}
 }
 
 func (m *tuiModel) renderDashboardNotification(width int) string {
