@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mirivlad/sshkeeper/internal/i18n"
@@ -257,22 +258,23 @@ func runTUI() error {
 				continue
 			}
 
-			fmt.Printf(tr("Connecting to %s@%s:%d...\n", "Подключение к %s@%s:%d...\n"), fresh.User, fresh.Host, fresh.Port)
+			fmt.Println(tui.HandoffLine(fresh))
 
-			if err := ssh.ConnectResolved(cfg, fresh, dbProfileResolver, serverVaultFunc(fresh)); err != nil {
-				fmt.Fprintln(os.Stderr, trf("Connection error: %v", "Ошибка подключения: %v", err))
-			} else {
-				fmt.Println(tr("Connection closed.", "Подключение закрыто."))
-			}
-
+			started := time.Now()
+			connectErr := ssh.ConnectResolved(cfg, fresh, dbProfileResolver, serverVaultFunc(fresh))
 			appDB.UpdateLastConnected(server.Alias)
 
-			// Wait for user to press Enter before returning to TUI
-			fmt.Println(tr("\n[Press Enter to return to sshkeeper]", "\n[Нажмите Enter, чтобы вернуться в sshkeeper]"))
-			buf := make([]byte, 1)
-			os.Stdin.Read(buf)
+			if connectErr != nil {
+				// Keep ssh's own output on screen until the user has read it.
+				fmt.Fprintln(os.Stderr, trf("Connection error: %v", "Ошибка подключения: %v", connectErr))
+				waitForTUIReturn()
+				state.Notice = tui.ErrorNotice(fresh, connectErr)
+				state.NoticeIsError = true
+			} else {
+				// A clean exit returns straight to the dashboard.
+				state.Notice = tui.ReturnNotice(fresh, time.Since(started))
+			}
 
-			// Reload servers for TUI
 			servers, _ = appDB.ListServers()
 			continue
 		}
