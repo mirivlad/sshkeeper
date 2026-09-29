@@ -286,7 +286,7 @@ func relativeAge(t *time.Time) string {
 	age := now().Sub(*t)
 	switch {
 	case age < time.Minute:
-		return i18n.T("now", "сейч")
+		return i18n.T("now", "<1м")
 	case age < time.Hour:
 		return i18n.Tf("%dm", "%dм", int(age/time.Minute))
 	case age < 24*time.Hour:
