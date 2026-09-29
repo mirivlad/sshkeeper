@@ -16,6 +16,7 @@ type Config struct {
 	SSH   SSHConfig   `toml:"ssh"`
 	Vault VaultConfig `toml:"vault"`
 	UI    UIConfig    `toml:"ui"`
+	Sync  SyncConfig  `toml:"sync"`
 
 	// resolved paths
 	ConfigDir string `toml:"-"`
@@ -40,6 +41,47 @@ type UIConfig struct {
 	// Glyphs selects TUI symbols: unicode (default) or ascii for terminals
 	// and fonts without box drawing.
 	Glyphs string `toml:"glyphs"`
+}
+
+// SyncConfig selects where the encrypted sync bundle is stored. The sync key
+// itself lives in the vault, never in this file.
+type SyncConfig struct {
+	// Mode is off, folder, or git.
+	Mode      string `toml:"mode"`
+	Folder    string `toml:"folder"`
+	GitURL    string `toml:"git_url"`
+	GitBranch string `toml:"git_branch"`
+	// Auto syncs when the TUI starts and shortly after local changes.
+	Auto bool `toml:"auto"`
+}
+
+// Sync modes accepted by sync.mode.
+const (
+	SyncOff    = "off"
+	SyncFolder = "folder"
+	SyncGit    = "git"
+)
+
+// SetSync persists the [sync] section.
+func (cfg *Config) SetSync(sync SyncConfig) error {
+	if sync.Mode != SyncFolder && sync.Mode != SyncGit {
+		sync.Mode = SyncOff
+	}
+	auto := "false"
+	if sync.Auto {
+		auto = "true"
+	}
+	if err := cfg.setValues("sync", [][2]string{
+		{"mode", tomlString(sync.Mode)},
+		{"folder", tomlString(strings.TrimSpace(sync.Folder))},
+		{"git_url", tomlString(strings.TrimSpace(sync.GitURL))},
+		{"git_branch", tomlString(strings.TrimSpace(sync.GitBranch))},
+		{"auto", auto},
+	}); err != nil {
+		return err
+	}
+	cfg.Sync = sync
+	return nil
 }
 
 // TUI symbol sets accepted by ui.glyphs.
@@ -70,6 +112,7 @@ func defaultConfig() *Config {
 		Vault: VaultConfig{
 			AutoLockMinutes: 15,
 		},
+		Sync: SyncConfig{Mode: SyncOff, Auto: true},
 		UI: UIConfig{
 			ShowSecurityHints: false,
 			Language:          i18n.Auto,
@@ -132,6 +175,9 @@ func Load() (*Config, error) {
 	if cfg.UI.Glyphs != GlyphsASCII {
 		cfg.UI.Glyphs = GlyphsUnicode
 	}
+	if cfg.Sync.Mode != SyncFolder && cfg.Sync.Mode != SyncGit {
+		cfg.Sync.Mode = SyncOff
+	}
 
 	// Re-apply paths since toml decode might overwrite
 	cfg.ConfigDir = configDir
@@ -171,8 +217,7 @@ func ReadLanguage() (string, error) {
 }
 
 var (
-	uiSectionPattern = regexp.MustCompile(`^\s*\[ui\]\s*(?:#.*)?$`)
-	sectionPattern   = regexp.MustCompile(`^\s*\[[^\]]+\]\s*(?:#.*)?$`)
+	sectionPattern = regexp.MustCompile(`^\s*\[[^\]]+\]\s*(?:#.*)?$`)
 )
 
 // SetLanguage persists only ui.language, preserving unrelated config values
@@ -200,10 +245,22 @@ func (cfg *Config) SetSort(value string) error {
 	return nil
 }
 
-// setUIString writes key = "value" into the [ui] section, preserving unrelated
-// values and comments, and replaces the file atomically.
+// setUIString writes key = "value" into the [ui] section.
 func (cfg *Config) setUIString(key, value string) error {
-	keyPattern := regexp.MustCompile(`^\s*` + regexp.QuoteMeta(key) + `\s*=`)
+	return cfg.setValues("ui", [][2]string{{key, tomlString(value)}})
+}
+
+// tomlString renders a TOML basic string.
+func tomlString(value string) string {
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(value)
+	return `"` + escaped + `"`
+}
+
+// setValues writes the given key = value lines (values already rendered as
+// TOML) into a section, preserving unrelated values and comments, and
+// replaces the file atomically. A missing section is appended.
+func (cfg *Config) setValues(section string, entries [][2]string) error {
+	headerPattern := regexp.MustCompile(`^\s*\[` + regexp.QuoteMeta(section) + `\]\s*(?:#.*)?$`)
 	path := filepath.Join(cfg.ConfigDir, "config.toml")
 	original, err := os.ReadFile(path)
 	if err != nil {
@@ -218,31 +275,34 @@ func (cfg *Config) setUIString(key, value string) error {
 		newline = "\r\n"
 	}
 	lines := strings.Split(strings.ReplaceAll(string(original), "\r\n", "\n"), "\n")
-	sectionStart, sectionEnd, languageLine := -1, len(lines), -1
-	for index, line := range lines {
-		if uiSectionPattern.MatchString(line) {
-			sectionStart = index
-			continue
-		}
-		if sectionStart >= 0 && sectionEnd == len(lines) {
-			if sectionPattern.MatchString(line) {
-				sectionEnd = index
-			} else if keyPattern.MatchString(line) {
-				languageLine = index
+	for _, entry := range entries {
+		keyPattern := regexp.MustCompile(`^\s*` + regexp.QuoteMeta(entry[0]) + `\s*=`)
+		sectionStart, sectionEnd, keyLine := -1, len(lines), -1
+		for index, line := range lines {
+			if headerPattern.MatchString(line) {
+				sectionStart = index
+				continue
+			}
+			if sectionStart >= 0 && sectionEnd == len(lines) {
+				if sectionPattern.MatchString(line) {
+					sectionEnd = index
+				} else if keyPattern.MatchString(line) {
+					keyLine = index
+				}
 			}
 		}
-	}
-	entry := key + ` = "` + value + `"`
-	switch {
-	case languageLine >= 0:
-		lines[languageLine] = entry
-	case sectionStart >= 0:
-		lines = append(lines[:sectionEnd], append([]string{entry}, lines[sectionEnd:]...)...)
-	default:
-		if len(lines) > 0 && lines[len(lines)-1] != "" {
-			lines = append(lines, "")
+		text := entry[0] + " = " + entry[1]
+		switch {
+		case keyLine >= 0:
+			lines[keyLine] = text
+		case sectionStart >= 0:
+			lines = append(lines[:sectionEnd], append([]string{text}, lines[sectionEnd:]...)...)
+		default:
+			for len(lines) > 0 && lines[len(lines)-1] == "" {
+				lines = lines[:len(lines)-1]
+			}
+			lines = append(lines, "", "["+section+"]", text, "")
 		}
-		lines = append(lines, "[ui]", entry)
 	}
 	updated := strings.Join(lines, newline)
 	if !strings.HasSuffix(updated, newline) {

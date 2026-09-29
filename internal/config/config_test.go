@@ -169,3 +169,47 @@ func TestGlyphsDefaultToUnicodeAndAcceptASCII(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncSettingsPersistBesideOtherSections(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sync.Mode != SyncOff || !cfg.Sync.Auto {
+		t.Fatalf("default sync = %#v", cfg.Sync)
+	}
+	path := filepath.Join(cfg.ConfigDir, "config.toml")
+	legacy := "[ui]\nlanguage = \"ru\" # keep\n"
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	want := SyncConfig{Mode: SyncFolder, Folder: `C:\Users\me\Sync "shared"`, GitBranch: "sshkeeper", Auto: false}
+	if err := cfg.SetSync(want); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Load()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Sync != want {
+		t.Fatalf("sync = %#v, want %#v", reloaded.Sync, want)
+	}
+	if reloaded.UI.Language != "ru" {
+		t.Fatal("unrelated section lost")
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), `language = "ru" # keep`) {
+		t.Fatalf("comment lost:\n%s", data)
+	}
+	want.Mode = SyncGit
+	want.GitURL = "git@example.org:me/keys.git"
+	if err := cfg.SetSync(want); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	if strings.Count(string(data), "[sync]") != 1 || strings.Count(string(data), "mode =") != 1 {
+		t.Fatalf("second save duplicated keys:\n%s", data)
+	}
+}

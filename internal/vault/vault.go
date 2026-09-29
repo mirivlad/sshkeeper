@@ -27,6 +27,10 @@ const (
 	verifierPlaintext = "sshkeeper-vault-verifier-v1"
 )
 
+// Progress receives the short progress notes printed while a key is derived.
+// The TUI discards them so they cannot draw over the screen.
+var Progress io.Writer = os.Stdout
+
 type KDFMeta struct {
 	Name        string `json:"name"`
 	MemoryKiB   int    `json:"memory_kib"`
@@ -105,7 +109,7 @@ func Create(path string, masterPassword string) error {
 		Salt:        base64.StdEncoding.EncodeToString(salt),
 	}
 
-	fmt.Print("Deriving key...")
+	fmt.Fprint(Progress, "Deriving key...")
 
 	key := argon2.IDKey([]byte(masterPassword), salt, uint32(kdf.Iterations), uint32(kdf.MemoryKiB), uint8(kdf.Parallelism), keyLen)
 
@@ -141,7 +145,7 @@ func Create(path string, masterPassword string) error {
 		key[i] = 0
 	}
 
-	fmt.Println(" done.")
+	fmt.Fprintln(Progress, " done.")
 	return nil
 }
 
@@ -150,7 +154,7 @@ func (v *Vault) Unlock(masterPassword string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	fmt.Print("Unlocking vault...")
+	fmt.Fprint(Progress, "Unlocking vault...")
 
 	data, err := os.ReadFile(v.path)
 	if err != nil {
@@ -196,7 +200,7 @@ func (v *Vault) Unlock(masterPassword string) error {
 		}
 	}
 
-	fmt.Println(" done.")
+	fmt.Fprintln(Progress, " done.")
 	return nil
 }
 
@@ -333,8 +337,6 @@ func (v *Vault) Save() error {
 		Salt:        base64.StdEncoding.EncodeToString(salt),
 	}
 
-	fmt.Print("Deriving key...")
-
 	var records []Record
 	for id, record := range v.records {
 		rec, err := encryptRecordWithType(v.masterKey, id, record.secretType, record.plaintext)
@@ -407,7 +409,7 @@ func (v *Vault) ChangePassword(newPassword string) error {
 		Salt:        base64.StdEncoding.EncodeToString(salt),
 	}
 
-	fmt.Print("Deriving key...")
+	fmt.Fprint(Progress, "Deriving key...")
 
 	var records []Record
 	for id, record := range v.records {
