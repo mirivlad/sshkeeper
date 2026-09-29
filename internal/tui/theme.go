@@ -55,6 +55,8 @@ var (
 	vaultLocked  = lipgloss.NewStyle().Foreground(colorWarn)
 	mutedStyle   = lipgloss.NewStyle().Foreground(colorMuted)
 	spinnerStyle = lipgloss.NewStyle().Foreground(colorAccent)
+	dimStyle     = lipgloss.NewStyle().Foreground(colorFaint)
+	dangerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(colorFail).Bold(true)
 
 	stateUnknownStyle = lipgloss.NewStyle().Foreground(colorFaint)
 	stateTestingStyle = lipgloss.NewStyle().Foreground(colorWarn)
