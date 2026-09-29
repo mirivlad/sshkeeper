@@ -167,9 +167,11 @@ func TestActionMenuStartsBackgroundTunnelWithoutQuitting(t *testing.T) {
 	if start == nil || m.screen != screenList || m.Result() != nil || !strings.Contains(m.View(), "Starting background tunnel") {
 		t.Fatalf("background action quit or lost pending feedback:\n%s", m.View())
 	}
-	updated, _ = m.Update(start())
-	m = updated.(*tuiModel)
-	if m.screen != screenList || !strings.Contains(m.View(), "connection refused") || !strings.Contains(m.View(), "connection refused") {
+	for _, msg := range runBatch(start) {
+		updated, _ = m.Update(msg)
+		m = updated.(*tuiModel)
+	}
+	if m.screen != screenList || !strings.Contains(m.View(), "connection refused") {
 		t.Fatalf("background failure did not persist on dashboard:\n%s", m.View())
 	}
 }
