@@ -16,7 +16,9 @@ port forwarding management.
 
 ## Features
 
-- Bubble Tea TUI for daily interactive use.
+- Bubble Tea TUI for daily interactive use: live fuzzy filter, sort by recent
+  use or group, per-server test/tunnel/session indicators, and single-key
+  shortcuts.
 - CLI commands for scripting and quick edits.
 - Encrypted vault for SSH passwords and key passphrases.
 - Password and key-passphrase auth through a PTY prompt handler, without putting
@@ -69,19 +71,20 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 
 ### Install from release
 
-The packages below are v0.5.3. This release includes the language setting and
-revised tunnel menu described later in this README.
+The packages below are v0.6.0. This release includes the live filter, sort
+modes, state indicators, and the rest of the dashboard described later in this
+README.
 
 Debian/Ubuntu (amd64):
 
 ```bash
-sudo apt install ./sshkeeper_0.5.3-1_amd64.deb
+sudo apt install ./sshkeeper_0.6.0-1_amd64.deb
 ```
 
 Fedora/RHEL-family (x86_64):
 
 ```bash
-sudo dnf install ./sshkeeper-0.5.3-1.x86_64.rpm
+sudo dnf install ./sshkeeper-0.6.0-1.x86_64.rpm
 ```
 
 `arm64`/`aarch64` packages are published alongside the x86_64 builds. Native
@@ -101,8 +104,8 @@ sshkeeper --version
 The traditional tar.gz archive remains available too:
 
 ```bash
-tar -xzf sshkeeper_v0.5.3_linux_amd64.tar.gz
-sudo install -m 0755 sshkeeper_v0.5.3_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
+tar -xzf sshkeeper_v0.6.0_linux_amd64.tar.gz
+sudo install -m 0755 sshkeeper_v0.6.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 sshkeeper
 ```
 
@@ -128,15 +131,63 @@ Running `sshkeeper` without arguments opens the TUI.
 ### Main Window
 
 ```
-sshkeeper / Servers                                  Vault unlocked · 1 profiles
-────────────────────────────────────────────────────────────────────────────────
-┌──────────────────────────────────────────────────────────────────────────────┐
-│1 servers                                                                     │
-│   NAME                                          AUTH       GROUP      STATUS │
-│>  Production                                    agent      -          ?      │
-└──────────────────────────────────────────────────────────────────────────────┘
-  Enter: connect | Ctrl+X: actions | Ctrl+A: add | Ctrl+E: edit | Ctrl+Q: quit
+○━┳┳ sshkeeper › Servers                                              ● Vault unlocked · 6 profiles
+───────────────────────────────────────────────────────────────────────────────────────────────────
+╭─ 6 servers ──────────────────────────────── s sort: name ─╮ ╭─ DB Master ───────────────── key ─╮
+│   NAME          TARGET               GROUP      SEEN STATE│ │ postgres@db01.internal.example.c… │
+│   Bastion Host  jump@bastion.exampl… Edge       3h   ●    │ │ you → bastion → db01.internal.ex… │
+│   CI Build Run… ci@runner.ci.exampl… Staging    —    ✗    │ │                                   │
+│▌  DB Master     bastion → postgres@… Production 2d   ● ⇄  │ │ Alias     db                      │
+│   Mail server   admin@mail.example.… -          —    ●    │ │ Group     Production              │
+│   Production w… bastion → ops@web01… Production 12m  ●    │ │ Tags      database                │
+│   Staging API   deploy@api.staging.… Staging    3w   ●    │ │ Last in   2d ago                  │
+│                                                           │ │ Test      ● OK · just now         │
+│                                                           │ │                                   │
+│                                                           │ │ Forwards  ⇄ tunnel running        │
+│                                                           │ │ ● L :15432 → 127.0.0.1:5432  Loc… │
+│                                                           │ │                                   │
+╰───────────────────────────────────────────────────────────╯ ╰───────────────────────────────────╯
+  Enter connect · / filter · x actions · f forwards · a add · e edit · m manage · s sort · ? keys
+  q quit
 ```
+
+The list shows each profile's name, target or bastion chain, group, time
+since the last connection (SEEN), and a STATE column. The details panel adds
+the route as a chain (`you → bastion → host`), tags, the last test and its
+reason, saved forwards with their state, open tmux sessions, and notes.
+
+| State | Meaning |
+|-------|---------|
+| `●` / `✗` | Last connection test passed / failed |
+| `·` / `◌` | Not tested yet / test in progress |
+| `⇄` | A background tunnel for this server is running |
+| `▣` | A tmux session for this server is open |
+
+Tunnels and sessions are re-read every 10 seconds, so tunnels started by
+another sshkeeper process show up too.
+
+**Live filter.** Press `/` and type: the list narrows on every keystroke and
+matched letters are highlighted. Name matches rank first, then alias, then
+fuzzy name matches (`bst` finds `Bastion`), then any metadata — host, user,
+group, tags, notes, route hops, and forward names or ports. `Enter` connects to
+the highlighted server, `Tab` keeps the filter, `Esc` clears it.
+
+**Sort and groups.** `s` cycles the order between name, most recent
+connection, and group, and remembers it as `ui.sort`. In group order each
+group gets a heading you can fold with `Enter`, `Space`, `←`, or `→`.
+
+**Back after a session.** When ssh exits cleanly, sshkeeper returns straight to
+the dashboard with the cursor on the same server and a
+`← Back from <server> · 42m` notice. A failed connection keeps ssh's output on
+screen until you press Enter.
+
+**First run.** With no profiles yet, a welcome screen offers `i` to import
+hosts from `~/.ssh/config`, `a` to add one by hand, and `?` for every key.
+
+**Appearance.** Colors adapt to light and dark terminals around a single amber
+accent and switch off under `NO_COLOR`. For terminals or fonts without box
+drawing, set `glyphs = "ascii"` under `[ui]` in `~/.config/sshkeeper/config.toml`,
+or export `SSHKEEPER_ASCII=1`.
 
 ### Quick Help (?)
 
@@ -165,19 +216,30 @@ it to DEL (in xterm, `backarrowKey: false`).
 
 ### Key Reference
 
+The server list has no text input, so the main actions are single letters.
+The earlier `Ctrl` shortcuts keep working.
+
 | Key | Action |
 |-----|--------|
 | Enter | Connect to selected server |
-| Ctrl+A | Add server |
-| Ctrl+E | Edit server |
-| Ctrl+F | Search |
-| Ctrl+W | Manage port forwards for selected server |
-| Ctrl+X | Server actions (connect, tunnels, forwards, route, test, edit, delete) |
-| m | Manage groups, tags, command templates, running tunnels, settings, import/export, and vault |
-| Ins | Select / deselect a server |
-| ? | Quick help (hotkeys) |
+| `/` or Ctrl+F | Live filter |
+| ↑/↓, `j`/`k`, `g`/`G` | Move, jump to first / last |
+| `a` / Ctrl+A | Add server |
+| `e` / Ctrl+E | Edit server |
+| `d` / Ctrl+D | Delete server (with confirmation) |
+| `t` / Ctrl+T | Test connection |
+| `T` | Test every visible (or marked) server, six at a time |
+| `x` / Ctrl+X | Server actions (connect, tunnels, forwards, route, test, edit, delete) |
+| `f` / Ctrl+W | Manage port forwards for selected server |
+| `r` / Ctrl+R | Run a command template |
+| `s` | Sort by name / recent / group |
+| ←/→ | Fold / unfold a group (group order) |
+| Space / Ins | Mark / unmark a server |
+| `i` | Import `~/.ssh/config` (welcome screen only) |
+| `m` | Manage groups, tags, command templates, running tunnels, settings, import/export, and vault |
+| `?` | Quick help (hotkeys) |
 | Ctrl+H | Full documentation |
-| Ctrl+Q / Ctrl+C | Quit |
+| `q` / Ctrl+Q / Ctrl+C | Quit |
 
 Templates are global entities and can run on any server. Foreground template
 runs leave the TUI, show the SSH session in the terminal, and then return to the
@@ -190,6 +252,7 @@ In add/edit forms:
 |-----|--------|
 | Tab / Down | Next field |
 | Shift+Tab / Up | Previous field |
+| Left / Right on Auth | Cycle password / key / key+pass / agent |
 | `/` on Auth, Identity File, Route, Group, Startup Command, or Tags | Open the relevant picker/editor |
 | Enter | Move to action / activate |
 | Esc | Back |

@@ -154,7 +154,7 @@ func (m *tuiModel) renderGroupHeader(width int, row serverRow, selected bool) st
 	if selected {
 		style, marker = selectedRowStyle, cursorStyle.Render(glyphs.cursor)
 	}
-	count := style.Copy().Inherit(mutedStyle).Render(fmt.Sprint(row.count))
+	count := layer(style, mutedStyle).Render(fmt.Sprint(row.count))
 	text := style.Render(" "+fold+" "+name+"  ") + count
 	return marker + text + style.Render(strings.Repeat(" ", max(0, width-1-lipgloss.Width(text))))
 }
@@ -210,7 +210,7 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 	}
 	parts := []string{
 		m.renderRowMarker(server, selected, style),
-		highlightCells(name, nameWidth, hits, style, style.Copy().Inherit(matchStyle)),
+		highlightCells(name, nameWidth, hits, style, layer(style, matchStyle)),
 		style.Render(" "),
 	}
 	if showTarget {
@@ -229,7 +229,7 @@ func (m *tuiModel) renderRowMarker(server *model.Server, selected bool, style li
 	}
 	mark := style.Render(" ")
 	if m.selected[server.Alias] {
-		mark = style.Copy().Inherit(markStyle).Render(glyphs.marked)
+		mark = layer(style, markStyle).Render(glyphs.marked)
 	}
 	return cursor + mark + style.Render(" ")
 }
@@ -237,22 +237,22 @@ func (m *tuiModel) renderRowMarker(server *model.Server, selected bool, style li
 // renderServerState draws the five-cell STATE column: the last test result
 // (or a test in progress), a running tunnel, and an open tmux session.
 func (m *tuiModel) renderServerState(server *model.Server, base lipgloss.Style) string {
-	status := base.Copy().Inherit(stateUnknownStyle).Render(glyphs.unknown)
+	status := layer(base, stateUnknownStyle).Render(glyphs.unknown)
 	switch {
 	case m.testing[server.Alias]:
-		status = base.Copy().Inherit(stateTestingStyle).Render(glyphs.testing)
+		status = layer(base, stateTestingStyle).Render(glyphs.testing)
 	case server.LastTestStatus == model.TestOK:
-		status = base.Copy().Inherit(testOKStyle).Render(glyphs.ok)
+		status = layer(base, testOKStyle).Render(glyphs.ok)
 	case server.LastTestStatus == model.TestFailed:
-		status = base.Copy().Inherit(testFailStyle).Render(glyphs.fail)
+		status = layer(base, testFailStyle).Render(glyphs.fail)
 	}
 	tunnel := base.Render(" ")
 	if m.runtime.tunnels[server.Alias] > 0 {
-		tunnel = base.Copy().Inherit(stateTunnelStyle).Render(glyphs.tunnel)
+		tunnel = layer(base, stateTunnelStyle).Render(glyphs.tunnel)
 	}
 	session := base.Render(" ")
 	if m.runtime.sessions[server.Alias] > 0 {
-		session = base.Copy().Inherit(stateSessionStyle).Render(glyphs.session)
+		session = layer(base, stateSessionStyle).Render(glyphs.session)
 	}
 	gap := base.Render(" ")
 	return status + gap + tunnel + gap + session
