@@ -20,12 +20,15 @@ func renderHelp(items []helpItem, width int) string {
 	return strings.Join(rendered, "\n")
 }
 
+// helpSeparator divides footer items: "Enter connect · / filter".
+const helpSeparator = " · "
+
 func renderHelpLine(items []helpItem) string {
 	parts := make([]string, len(items))
 	for i, item := range items {
-		parts[i] = hotkeyStyle.Render(item.Key) + helpTextStyle.Render(": "+item.Action)
+		parts[i] = hotkeyStyle.Render(item.Key) + helpTextStyle.Render(" "+item.Action)
 	}
-	return strings.Join(parts, helpTextStyle.Render(" | "))
+	return strings.Join(parts, borderStyle.Render(helpSeparator))
 }
 
 func wrapHelpItems(items []helpItem, width int) [][]helpItem {
@@ -42,7 +45,7 @@ func wrapHelpItems(items []helpItem, width int) [][]helpItem {
 			currentWidth = itemWidth
 			continue
 		}
-		nextWidth := currentWidth + ansi.StringWidth(" | ") + itemWidth
+		nextWidth := currentWidth + ansi.StringWidth(helpSeparator) + itemWidth
 		if nextWidth > width {
 			lines = append(lines, current)
 			current = []helpItem{item}
@@ -59,7 +62,7 @@ func wrapHelpItems(items []helpItem, width int) [][]helpItem {
 }
 
 func plainHelpItem(item helpItem) string {
-	return item.Key + ": " + item.Action
+	return item.Key + " " + item.Action
 }
 
 func plainHelpLine(items []helpItem) string {
@@ -67,5 +70,5 @@ func plainHelpLine(items []helpItem) string {
 	for i, item := range items {
 		parts[i] = plainHelpItem(item)
 	}
-	return strings.Join(parts, " | ")
+	return strings.Join(parts, helpSeparator)
 }

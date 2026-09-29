@@ -44,7 +44,6 @@ func TestServerListViewUsesDashboardLayout(t *testing.T) {
 		"Vault",
 		"NAME",
 		"TARGET",
-		"AUTH",
 		"GROUP",
 		"STATE",
 		"Mail",
@@ -137,8 +136,8 @@ func TestServerListHelpWrapsSelectionAndResultHints(t *testing.T) {
 	}
 	for _, line := range lines {
 		plain := plainHelpLine(line)
-		if len(plain) > m.width-2 {
-			t.Fatalf("help line too long: len=%d line=%q", len(plain), plain)
+		if lipgloss.Width(plain) > m.width-2 {
+			t.Fatalf("help line too long: width=%d line=%q", lipgloss.Width(plain), plain)
 		}
 	}
 	var plainLines []string
@@ -146,14 +145,14 @@ func TestServerListHelpWrapsSelectionAndResultHints(t *testing.T) {
 		plainLines = append(plainLines, plainHelpLine(line))
 	}
 	joined := strings.Join(plainLines, "\n")
-	for _, want := range []string{"Space: select (2 selected)", "Esc: clear result", "x: server actions", "m: manage", "q: quit"} {
+	for _, want := range []string{"Space select (2 selected)", "Esc clear result", "x actions", "m manage", "q quit"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected wrapped help to contain %q\nlines:%#v", want, lines)
 		}
 	}
 }
 
-func TestServerListFooterUsesColonFormatAndColoredHotkeys(t *testing.T) {
+func TestServerListFooterUsesKeyActionFormatAndColoredHotkeys(t *testing.T) {
 	m := New([]*model.Server{
 		{Alias: "one", Host: "one.example.org", Port: 22, User: "root", AuthMethod: model.AuthKey},
 		{Alias: "two", Host: "two.example.org", Port: 22, User: "root", AuthMethod: model.AuthKey},
@@ -163,7 +162,7 @@ func TestServerListFooterUsesColonFormatAndColoredHotkeys(t *testing.T) {
 	m.selected["one"] = true
 
 	view := m.View()
-	for _, want := range []string{"Space", ": select (1 selected)", "a", ": add"} {
+	for _, want := range []string{"Space", " select (1 selected)", "a", " add"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected footer to contain %q\nview:\n%s", want, view)
 		}
@@ -175,7 +174,7 @@ func TestServerListFooterUsesColonFormatAndColoredHotkeys(t *testing.T) {
 	if got := len(lines); got != m.height {
 		t.Fatalf("expected footer to be pinned to bottom with %d lines, got %d\nview:\n%s", m.height, got, view)
 	}
-	if !strings.Contains(lines[len(lines)-1], "q: quit") {
+	if !strings.Contains(lines[len(lines)-1], "q quit") {
 		t.Fatalf("expected final footer line at terminal bottom, got %q\nview:\n%s", lines[len(lines)-1], view)
 	}
 }

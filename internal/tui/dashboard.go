@@ -45,7 +45,7 @@ func (m *tuiModel) renderServerDashboard() string {
 		if listHeight < 5 {
 			listHeight = 5
 		}
-		body = m.renderServerPanel(width, listHeight, false)
+		body = m.renderServerPanel(width, listHeight, true)
 		if selected := m.selectedServer(); selected != nil && listHeight+detailsHeight <= bodyHeight {
 			body += "\n" + m.renderCompactSelected(selected, width, detailsHeight-1)
 		}
@@ -72,32 +72,26 @@ func (m *tuiModel) renderDashboardNotification(width int) string {
 }
 
 func (m *tuiModel) renderDashboardHeader(width int) string {
-	left := i18n.T("sshkeeper / Servers", "sshkeeper / Серверы")
-	vault := i18n.T("Vault locked", "Хранилище заблокировано")
-	if m.vaultUnlocked {
-		vault = i18n.T("Vault unlocked", "Хранилище открыто")
-	}
-	right := i18n.Tf("%s · %d profiles", "%s · профилей: %d", vault, len(m.servers))
+	detail := i18n.Tf("%d profiles", "профилей: %d", len(m.servers))
 	if selected := len(m.selectedServers()); selected > 0 {
-		right += i18n.Tf(" · %d selected", " · выбрано: %d", selected)
+		detail += i18n.Tf(" · %d selected", " · выбрано: %d", selected)
 	}
 	if testing := len(m.testing); testing > 0 {
-		right += i18n.Tf(" · testing %d…", " · проверка: %d…", testing)
+		detail += i18n.Tf(" · testing %d…", " · проверка: %d…", testing)
 	}
-	line := left + " " + right
-	if lipgloss.Width(left)+lipgloss.Width(right)+1 <= width {
-		line = left + strings.Repeat(" ", width-lipgloss.Width(left)-lipgloss.Width(right)) + right
-	}
-	headerStyle := titleStyle.Copy().MarginLeft(0)
-	separatorStyle := helpStyle.Copy().MarginLeft(0)
-	return headerStyle.Render(fitLine(line, width)) + "\n" + separatorStyle.Render(strings.Repeat("─", width)) + "\n"
+	return renderAppHeader(width, i18n.T("Servers", "Серверы"), shellStatus(m.vaultUnlocked, detail)) + "\n"
 }
 
 func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string {
 	innerWidth := max(1, width-2)
 	innerHeight := max(1, height-2)
 	lines := make([]string, 0, innerHeight)
-	lines = append(lines, m.renderServerPanelTitle(innerWidth))
+	title := i18n.Tf("%d servers", "Серверов: %d", len(m.servers))
+	info := i18n.Tf("s sort: %s", "s сортировка: %s", sortModeLabel(m.sortMode))
+	if m.filtering() {
+		info = i18n.Tf("%d of %d", "%d из %d", m.visibleServerCount(), len(m.servers))
+		lines = append(lines, m.renderFilterPrompt(innerWidth))
+	}
 	lines = append(lines, m.renderServerColumns(innerWidth, showTarget, nil, true))
 
 	rowCapacity := max(0, innerHeight-len(lines))
@@ -129,7 +123,12 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 	if len(lines) > innerHeight {
 		lines = lines[:innerHeight]
 	}
-	return renderPanel(width, height, lines)
+	return renderTitledPanel(width, height, title, info, lines)
+}
+
+// filtering reports whether the live filter is being typed or is kept.
+func (m *tuiModel) filtering() bool {
+	return m.screen == screenSearch || m.filterQuery() != ""
 }
 
 // renderGroupHeader draws a foldable group heading: "▾ Production  3".
@@ -142,56 +141,31 @@ func (m *tuiModel) renderGroupHeader(width int, row serverRow, selected bool) st
 	if name == "" {
 		name = i18n.T("No group", "Без группы")
 	}
-	marker := "  "
-	style := groupHeaderStyle
+	style, marker := groupHeaderStyle, " "
 	if selected {
-		marker = "> "
-		style = selectedRowStyle.Copy().Bold(true)
+		style, marker = selectedRowStyle, cursorStyle.Render(glyphs.cursor)
 	}
-	line := marker + fold + " " + name + "  " + fmt.Sprint(row.count)
-	return style.Render(padCells(line, width))
+	count := style.Copy().Inherit(mutedStyle).Render(fmt.Sprint(row.count))
+	text := style.Render(" "+fold+" "+name+"  ") + count
+	return marker + text + style.Render(strings.Repeat(" ", max(0, width-1-lipgloss.Width(text))))
 }
 
-// renderServerPanelTitle shows the profile count, or the live filter prompt
-// with its match count while a filter is typed or kept.
-func (m *tuiModel) renderServerPanelTitle(width int) string {
-	query := m.searchInput.Value()
-	if m.screen != screenSearch && strings.TrimSpace(query) == "" {
-		title := i18n.Tf("%d servers", "Серверов: %d", len(m.servers))
-		order := i18n.Tf("s: sort by %s", "s: сортировка — %s", sortModeLabel(m.sortMode))
-		gap := width - lipgloss.Width(title) - lipgloss.Width(order)
-		if gap < 1 {
-			return listHeaderStyle.Render(fitLine(title, width))
-		}
-		return listHeaderStyle.Render(title) + strings.Repeat(" ", gap) + dashboardHelp(order)
-	}
-	count := i18n.Tf("%d of %d", "%d из %d", m.visibleServerCount(), len(m.servers))
-	prompt := "/ " + query
+// renderFilterPrompt is the live filter input line: "/ prod▏".
+func (m *tuiModel) renderFilterPrompt(width int) string {
+	prompt := "/ " + m.searchInput.Value()
 	if m.screen == screenSearch {
 		prompt += "▏"
 	}
-	gap := width - lipgloss.Width(prompt) - lipgloss.Width(count)
-	if gap < 1 {
-		return listHeaderStyle.Render(fitLine(prompt, width))
-	}
-	return listHeaderStyle.Render(prompt) + strings.Repeat(" ", gap) + dashboardHelp(count)
+	return brandStyle.Render(fitLine(prompt, width))
 }
 
 func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model.Server, selected bool) string {
-	marker, name, target, auth, group, seen, status := "", i18n.T("NAME", "ИМЯ"), i18n.T("TARGET", "ЦЕЛЬ"), i18n.T("AUTH", "АВТОР."), i18n.T("GROUP", "ГРУППА"), i18n.T("SEEN", "ВХОД"), i18n.T("STATE", "СОСТ")
+	marker, name, target, group, seen, status := "  ", i18n.T("NAME", "ИМЯ"), i18n.T("TARGET", "ЦЕЛЬ"), i18n.T("GROUP", "ГРУППА"), i18n.T("SEEN", "ВХОД"), i18n.T("STATE", "СОСТ")
 	style := normalStyle
 	var hits []int
 	if server != nil {
-		marker = " "
 		if selected {
-			marker = ">"
 			style = selectedRowStyle
-		}
-		if m.selected[server.Alias] {
-			marker = "*"
-			if selected {
-				marker = ">*"
-			}
 		}
 		name = serverLabel(server)
 		hits = m.matches[server.Alias].label
@@ -199,7 +173,6 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 		if len(server.Route.Hops) > 0 {
 			target = server.Route.DisplaySummary(target)
 		}
-		auth = authLabel(server.AuthMethod)
 		group = server.GroupName
 		if group == "" {
 			group = "-"
@@ -207,14 +180,17 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 		seen = relativeAge(server.LastConnectedAt)
 	}
 
-	markerWidth, authWidth, groupWidth, seenWidth, statusWidth := 2, 8, 10, 4, 5
-	nameWidth := width - markerWidth - authWidth - groupWidth - seenWidth - statusWidth - 5
+	// The auth method lives in the details panel; the list keeps the name
+	// wide enough to scan.
+	markerWidth, groupWidth, seenWidth, statusWidth := 2, 10, 4, 5
+	nameWidth := width - markerWidth - groupWidth - seenWidth - statusWidth - 4
 	targetWidth := 0
 	if showTarget {
-		nameWidth = min(18, max(10, nameWidth/3))
-		targetWidth = width - markerWidth - nameWidth - authWidth - groupWidth - seenWidth - statusWidth - 6
+		available := nameWidth - 1
+		nameWidth = min(24, max(12, available*2/5))
+		targetWidth = available - nameWidth
 	}
-	tail := padCells(auth, authWidth) + " " + padCells(group, groupWidth) + " " + padCells(seen, seenWidth) + " "
+	tail := padCells(group, groupWidth) + " " + padCells(seen, seenWidth) + " "
 	if server == nil {
 		line := padCells(marker, markerWidth) + " " + padCells(name, nameWidth) + " "
 		if showTarget {
@@ -224,7 +200,7 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 		return listHeaderStyle.Render(fitLine(line, width))
 	}
 	parts := []string{
-		style.Render(padCells(marker, markerWidth) + " "),
+		m.renderRowMarker(server, selected, style),
 		highlightCells(name, nameWidth, hits, style, style.Copy().Inherit(matchStyle)),
 		style.Render(" "),
 	}
@@ -233,6 +209,20 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 	}
 	parts = append(parts, style.Render(tail), m.renderServerState(server, style))
 	return fitLine(strings.Join(parts, ""), width)
+}
+
+// renderRowMarker draws the two leading cells of a row: the accent cursor bar
+// and a check for profiles marked with Space, followed by a gap.
+func (m *tuiModel) renderRowMarker(server *model.Server, selected bool, style lipgloss.Style) string {
+	cursor := style.Render(" ")
+	if selected {
+		cursor = cursorStyle.Render(glyphs.cursor)
+	}
+	mark := style.Render(" ")
+	if m.selected[server.Alias] {
+		mark = style.Copy().Inherit(markStyle).Render(glyphs.marked)
+	}
+	return cursor + mark + style.Render(" ")
 }
 
 // renderServerState draws the five-cell STATE column: the last test result
@@ -309,7 +299,7 @@ func (m *tuiModel) renderSelectedPanel(width, height int) string {
 	lines := make([]string, 0, innerHeight)
 	selected := m.selectedServer()
 	if selected == nil {
-		lines = append(lines, dashboardSection(i18n.T("Selected profile", "Выбранный профиль")), dashboardHelp(i18n.T("No profile selected.", "Профиль не выбран.")))
+		lines = append(lines, dashboardHelp(i18n.T("No profile selected.", "Профиль не выбран.")))
 	} else {
 		target := fmt.Sprintf("%s@%s:%d", selected.User, selected.Host, selected.Port)
 		route := i18n.T("direct", "напрямую")
@@ -321,7 +311,6 @@ func (m *tuiModel) renderSelectedPanel(width, height int) string {
 			group = "-"
 		}
 		lines = append(lines,
-			dashboardSection(i18n.T("Selected profile", "Выбранный профиль")),
 			fitLine(i18n.T("Alias: ", "Псевдоним: ")+selected.Alias, innerWidth),
 			fitLine(i18n.T("Display Name: ", "Имя: ")+selected.DisplayName, innerWidth),
 			fitLine(i18n.T("Host: ", "Хост: ")+selected.Host, innerWidth),
@@ -344,7 +333,7 @@ func (m *tuiModel) renderSelectedPanel(width, height int) string {
 	if len(lines) > innerHeight {
 		lines = lines[:innerHeight]
 	}
-	return renderPanel(width, height, lines)
+	return renderTitledPanel(width, height, i18n.T("Selected profile", "Выбранный профиль"), "", lines)
 }
 
 func (m *tuiModel) backgroundPanelLines(alias string, width int) []string {
@@ -405,21 +394,50 @@ func dashboardHelp(value string) string {
 }
 
 func renderPanel(width, height int, lines []string) string {
+	return renderTitledPanel(width, height, "", "", lines)
+}
+
+// renderTitledPanel draws a rounded box. A title sits in the top border on
+// the left and optional info on the right: "╭─ Servers ───── sort: name ─╮".
+func renderTitledPanel(width, height int, title, info string, lines []string) string {
 	if width < 2 || height < 2 {
 		return ""
 	}
 	innerWidth := width - 2
 	var b strings.Builder
-	b.WriteString("┌" + strings.Repeat("─", innerWidth) + "┐\n")
+	b.WriteString(panelTopBorder(innerWidth, title, info) + "\n")
+	side := borderStyle.Render(glyphs.vertical)
 	for row := 0; row < height-2; row++ {
 		line := ""
 		if row < len(lines) {
 			line = lines[row]
 		}
-		b.WriteString("│" + padCells(line, innerWidth) + "│\n")
+		b.WriteString(side + padCells(line, innerWidth) + side + "\n")
 	}
-	b.WriteString("└" + strings.Repeat("─", innerWidth) + "┘")
+	b.WriteString(borderStyle.Render(glyphs.bottomLeft + strings.Repeat(glyphs.horizontal, innerWidth) + glyphs.bottomRight))
 	return b.String()
+}
+
+func panelTopBorder(innerWidth int, title, info string) string {
+	h := glyphs.horizontal
+	if title == "" && info == "" {
+		return borderStyle.Render(glyphs.topLeft + strings.Repeat(h, innerWidth) + glyphs.topRight)
+	}
+	// "─ title " on the left and " info ─" on the right; each needs at least
+	// one border cell around it.
+	left, right := "", ""
+	leftWidth, rightWidth := 0, 0
+	if title != "" {
+		title = truncateCells(title, max(1, innerWidth-4))
+		left = borderStyle.Render(h+" ") + panelTitle.Render(title) + " "
+		leftWidth = 3 + lipgloss.Width(title)
+	}
+	if info != "" && innerWidth-leftWidth-lipgloss.Width(info)-4 >= 1 {
+		right = " " + mutedStyle.Render(info) + borderStyle.Render(" "+h)
+		rightWidth = 3 + lipgloss.Width(info)
+	}
+	fill := max(0, innerWidth-leftWidth-rightWidth)
+	return borderStyle.Render(glyphs.topLeft) + left + borderStyle.Render(strings.Repeat(h, fill)) + right + borderStyle.Render(glyphs.topRight)
 }
 
 func joinPanelColumns(left string, leftWidth int, right string, rightWidth int) string {

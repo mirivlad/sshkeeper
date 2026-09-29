@@ -48,7 +48,7 @@ func TestDashboardFitsSupportedTerminalSizes(t *testing.T) {
 			m.width, m.height = size.width, size.height
 			assertViewFits(t, m.View(), size.width, size.height)
 			assertRightMargin(t, m.View(), size.width)
-			for _, want := range []string{"sshkeeper", "Servers", "Vault", "Enter", "q: quit"} {
+			for _, want := range []string{"sshkeeper", "Servers", "Vault", "Enter", "q quit"} {
 				if !strings.Contains(m.View(), want) {
 					t.Fatalf("dashboard at %dx%d missing %q:\n%s", size.width, size.height, want, m.View())
 				}
@@ -390,10 +390,10 @@ func assertUnifiedScreen(t *testing.T, view string, width, height int) {
 	if len(lines) != height {
 		t.Fatalf("unified screen has %d lines, want %d:\n%s", len(lines), height, view)
 	}
-	if !strings.HasPrefix(ansi.Strip(lines[0]), "sshkeeper / ") {
+	if !strings.Contains(ansi.Strip(lines[0]), "sshkeeper › ") {
 		t.Fatalf("unified screen has no breadcrumb header: %q", ansi.Strip(lines[0]))
 	}
-	if !strings.Contains(ansi.Strip(view), "┌") || !strings.Contains(ansi.Strip(view), "┘") {
+	if !strings.Contains(ansi.Strip(view), "╭") || !strings.Contains(ansi.Strip(view), "╯") {
 		t.Fatalf("unified screen has no framed content:\n%s", view)
 	}
 	if strings.TrimSpace(ansi.Strip(lines[height-1])) == "" {

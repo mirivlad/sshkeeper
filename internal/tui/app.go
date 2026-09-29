@@ -8,43 +8,9 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
-)
-
-// --- Styles ---
-
-var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("12")).
-			MarginLeft(2)
-
-	selectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("4")).
-			Bold(true)
-
-	normalStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	matchStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true).Underline(true)
-	selectedRowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4"))
-	listHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
-	sectionStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).MarginTop(1)
-
-	testOKStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	testFailStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).MarginLeft(2)
-	hotkeyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
-	helpTextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-
-	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-
-	focusedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	blurredStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
 )
 
 // --- Messages ---
@@ -2931,8 +2897,8 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 	items = append(items,
 		helpItem{Key: "Enter", Action: i18n.T("connect", "подключиться")},
 		helpItem{Key: "/", Action: i18n.T("filter", "фильтр")},
-		helpItem{Key: "x", Action: i18n.T("server actions", "действия с сервером")},
-		helpItem{Key: "f", Action: i18n.T("forward rules", "правила проброса")},
+		helpItem{Key: "x", Action: i18n.T("actions", "действия")},
+		helpItem{Key: "f", Action: i18n.T("forwards", "пробросы")},
 		helpItem{Key: "a", Action: i18n.T("add", "добавить")},
 		helpItem{Key: "e", Action: i18n.T("edit", "изменить")},
 		helpItem{Key: "m", Action: i18n.T("manage", "управление")},
