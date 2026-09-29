@@ -982,6 +982,9 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "q" {
 			return m, tea.Quit
 		}
+		if msg.String() == "i" && len(m.servers) == 0 {
+			return m, importServersCmd()
+		}
 		if msg.String() == "T" {
 			return m, m.testServersCmd(m.testTargets())
 		}
@@ -1028,6 +1031,22 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// importServersCmd imports hosts from ~/.ssh/config; existing aliases are
+// skipped, so running it twice is safe.
+func importServersCmd() tea.Cmd {
+	return func() tea.Msg {
+		if ImportServers == nil {
+			return importDoneMsg{err: fmt.Errorf("%s", i18n.T("import is unavailable", "импорт недоступен"))}
+		}
+		count, err := ImportServers()
+		if err != nil {
+			return importDoneMsg{err: err}
+		}
+		servers, err := ListServers()
+		return importDoneMsg{servers: servers, count: count, err: err}
+	}
 }
 
 // listLetterKeys are single-key aliases for the Ctrl shortcuts on the server
@@ -1871,17 +1890,7 @@ func (m *tuiModel) updateManageMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.tunnelScreen.loadTunnels()
 	case "import":
 		m.screen = screenList
-		return m, func() tea.Msg {
-			if ImportServers == nil {
-				return importDoneMsg{err: fmt.Errorf("%s", i18n.T("import is unavailable", "импорт недоступен"))}
-			}
-			count, err := ImportServers()
-			if err != nil {
-				return importDoneMsg{err: err}
-			}
-			servers, err := ListServers()
-			return importDoneMsg{servers: servers, count: count, err: err}
-		}
+		return m, importServersCmd()
 	case "export":
 		m.result = &TUIResult{Action: "export"}
 		return m, tea.Quit
@@ -2826,6 +2835,15 @@ func (m *tuiModel) renderListHelp(selectedCount int, hasBackgroundResult bool) s
 }
 
 func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []helpItem {
+	if len(m.servers) == 0 {
+		return []helpItem{
+			{Key: "i", Action: i18n.T("import ~/.ssh/config", "импорт ~/.ssh/config")},
+			{Key: "a", Action: i18n.T("add", "добавить")},
+			{Key: "m", Action: i18n.T("manage", "управление")},
+			{Key: "?", Action: i18n.T("keys", "клавиши")},
+			{Key: "q", Action: i18n.T("quit", "выход")},
+		}
+	}
 	if m.screen == screenSearch {
 		return []helpItem{
 			{Key: "Enter", Action: i18n.T("connect", "подключиться")},
