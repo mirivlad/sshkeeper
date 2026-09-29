@@ -130,7 +130,13 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 func (m *tuiModel) renderServerPanelTitle(width int) string {
 	query := m.searchInput.Value()
 	if m.screen != screenSearch && strings.TrimSpace(query) == "" {
-		return listHeaderStyle.Render(fitLine(i18n.Tf("%d servers", "Серверов: %d", len(m.servers)), width))
+		title := i18n.Tf("%d servers", "Серверов: %d", len(m.servers))
+		order := i18n.Tf("s: sort by %s", "s: сортировка — %s", sortModeLabel(m.sortMode))
+		gap := width - lipgloss.Width(title) - lipgloss.Width(order)
+		if gap < 1 {
+			return listHeaderStyle.Render(fitLine(title, width))
+		}
+		return listHeaderStyle.Render(title) + strings.Repeat(" ", gap) + dashboardHelp(order)
 	}
 	count := i18n.Tf("%d of %d", "%d из %d", m.visibleServerCount(), len(m.servers))
 	prompt := "/ " + query
@@ -145,7 +151,7 @@ func (m *tuiModel) renderServerPanelTitle(width int) string {
 }
 
 func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model.Server, selected bool) string {
-	marker, name, target, auth, group, status := "", i18n.T("NAME", "ИМЯ"), i18n.T("TARGET / ROUTE", "ЦЕЛЬ / МАРШРУТ"), i18n.T("AUTH", "АВТОР."), i18n.T("GROUP", "ГРУППА"), i18n.T("STATUS", "СТАТУС")
+	marker, name, target, auth, group, seen, status := "", i18n.T("NAME", "ИМЯ"), i18n.T("TARGET", "ЦЕЛЬ"), i18n.T("AUTH", "АВТОР."), i18n.T("GROUP", "ГРУППА"), i18n.T("SEEN", "ВХОД"), i18n.T("STATUS", "СТАТУС")
 	style := normalStyle
 	var hits []int
 	if server != nil {
@@ -171,22 +177,24 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 		if group == "" {
 			group = "-"
 		}
+		seen = relativeAge(server.LastConnectedAt)
 		status = testStatusLabel(server)
 	}
 
-	markerWidth, authWidth, groupWidth, statusWidth := 2, 10, 10, 7
-	nameWidth := width - markerWidth - authWidth - groupWidth - statusWidth - 4
+	markerWidth, authWidth, groupWidth, seenWidth, statusWidth := 2, 8, 10, 4, 6
+	nameWidth := width - markerWidth - authWidth - groupWidth - seenWidth - statusWidth - 5
 	targetWidth := 0
 	if showTarget {
 		nameWidth = min(18, max(10, nameWidth/3))
-		targetWidth = width - markerWidth - nameWidth - authWidth - groupWidth - statusWidth - 5
+		targetWidth = width - markerWidth - nameWidth - authWidth - groupWidth - seenWidth - statusWidth - 6
 	}
+	tail := padCells(auth, authWidth) + " " + padCells(group, groupWidth) + " " + padCells(seen, seenWidth) + " " + padCells(status, statusWidth)
 	if server == nil {
 		line := padCells(marker, markerWidth) + " " + padCells(name, nameWidth) + " "
 		if showTarget {
 			line += padCells(target, targetWidth) + " "
 		}
-		line += padCells(auth, authWidth) + " " + padCells(group, groupWidth) + " " + padCells(status, statusWidth)
+		line += tail
 		return listHeaderStyle.Render(fitLine(line, width))
 	}
 	parts := []string{
@@ -197,7 +205,7 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 	if showTarget {
 		parts = append(parts, style.Render(padCells(target, targetWidth)+" "))
 	}
-	parts = append(parts, style.Render(padCells(auth, authWidth)+" "+padCells(group, groupWidth)+" "+padCells(status, statusWidth)))
+	parts = append(parts, style.Render(tail))
 	return fitLine(strings.Join(parts, ""), width)
 }
 

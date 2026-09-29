@@ -5,8 +5,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
+	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 )
 
@@ -22,6 +24,18 @@ type serverMatch struct {
 	score int
 	label []int
 }
+
+// Server list orders. The values match config ui.sort.
+const (
+	sortByName   = "name"
+	sortByRecent = "recent"
+	sortByGroup  = "group"
+)
+
+var sortModes = []string{sortByName, sortByRecent, sortByGroup}
+
+// now is replaced in tests that render relative times.
+var now = time.Now
 
 // serverLabel is the name shown in the list: the display name when set,
 // otherwise the alias.
@@ -68,10 +82,14 @@ func (m *tuiModel) rebuildServerRows(prefer string) {
 	query := m.filterQuery()
 	visible := make([]*model.Server, 0, len(m.servers))
 	m.matches = map[string]serverMatch{}
-	if query == "" {
-		visible = append(visible, m.servers...)
-	} else {
-		for _, server := range m.servers {
+	visible = append(visible, m.servers...)
+	sort.SliceStable(visible, func(i, j int) bool {
+		return m.serverLess(visible[i], visible[j])
+	})
+	if query != "" {
+		all := visible
+		visible = make([]*model.Server, 0, len(all))
+		for _, server := range all {
 			if match, ok := matchServer(server, query, m.forwardSearchText(server.ID)); ok {
 				m.matches[server.Alias] = match
 				visible = append(visible, server)
@@ -96,6 +114,86 @@ func (m *tuiModel) rebuildServerRows(prefer string) {
 		}
 	}
 	m.cursor = m.firstServerRow()
+}
+
+// serverLess orders profiles by the active sort mode. Ties fall back to the
+// label so the order is stable and predictable.
+func (m *tuiModel) serverLess(a, b *model.Server) bool {
+	switch m.sortMode {
+	case sortByRecent:
+		switch {
+		case a.LastConnectedAt != nil && b.LastConnectedAt != nil:
+			if !a.LastConnectedAt.Equal(*b.LastConnectedAt) {
+				return a.LastConnectedAt.After(*b.LastConnectedAt)
+			}
+		case a.LastConnectedAt != nil:
+			return true
+		case b.LastConnectedAt != nil:
+			return false
+		}
+	case sortByGroup:
+		ga, gb := strings.ToLower(a.GroupName), strings.ToLower(b.GroupName)
+		if ga != gb {
+			// Ungrouped profiles go last.
+			if ga == "" || gb == "" {
+				return gb == ""
+			}
+			return ga < gb
+		}
+	}
+	la, lb := strings.ToLower(serverLabel(a)), strings.ToLower(serverLabel(b))
+	if la != lb {
+		return la < lb
+	}
+	return a.Alias < b.Alias
+}
+
+// cycleSort switches to the next sort mode and returns it.
+func (m *tuiModel) cycleSort() string {
+	next := sortModes[0]
+	for index, mode := range sortModes {
+		if mode == m.sortMode {
+			next = sortModes[(index+1)%len(sortModes)]
+			break
+		}
+	}
+	m.sortMode = next
+	m.refreshServerRows()
+	return next
+}
+
+func sortModeLabel(mode string) string {
+	switch mode {
+	case sortByRecent:
+		return i18n.T("recent", "недавние")
+	case sortByGroup:
+		return i18n.T("group", "группы")
+	default:
+		return i18n.T("name", "имя")
+	}
+}
+
+// relativeAge renders how long ago t was in at most four cells: "now", "5m",
+// "3h", "2d", "6w", "1y", or "—" when it never happened.
+func relativeAge(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return "—"
+	}
+	age := now().Sub(*t)
+	switch {
+	case age < time.Minute:
+		return i18n.T("now", "сейч")
+	case age < time.Hour:
+		return i18n.Tf("%dm", "%dм", int(age/time.Minute))
+	case age < 24*time.Hour:
+		return i18n.Tf("%dh", "%dч", int(age/time.Hour))
+	case age < 14*24*time.Hour:
+		return i18n.Tf("%dd", "%dд", int(age/(24*time.Hour)))
+	case age < 365*24*time.Hour:
+		return i18n.Tf("%dw", "%dн", int(age/(7*24*time.Hour)))
+	default:
+		return i18n.Tf("%dy", "%dг", int(age/(365*24*time.Hour)))
+	}
 }
 
 func (m *tuiModel) firstServerRow() int {
