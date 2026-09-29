@@ -71,6 +71,9 @@ func (m *tuiModel) renderDashboardNotification(width int) string {
 	if m.err != nil {
 		return fitLine(errorStyle.Render(i18n.T("Error: ", "Ошибка: ")+m.err.Error()), width) + "\n"
 	}
+	if m.warning != "" {
+		return fitLine(warningStyle.Render(m.warning), width) + "\n"
+	}
 	if m.success != "" {
 		return fitLine(successStyle.Render(m.success), width) + "\n"
 	}

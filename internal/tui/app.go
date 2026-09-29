@@ -322,6 +322,7 @@ type tuiModel struct {
 	bgResults         []templateRunResult
 	err               error
 	success           string
+	warning           string
 	width             int
 	height            int
 	result            *TUIResult
@@ -846,9 +847,10 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		if m.err != nil || m.success != "" {
+		if m.err != nil || m.success != "" || m.warning != "" {
 			m.err = nil
 			m.success = ""
+			m.warning = ""
 		}
 		if msg.Type == tea.KeyCtrlH && m.screen != screenHelp && m.screen != screenFullHelp && m.screen != screenConfirm {
 			m.helpParent = m.screen
