@@ -11,6 +11,8 @@ type State struct {
 	Notice string
 	// NoticeIsError renders Notice as an error.
 	NoticeIsError bool
+	// Collapsed lists the folded groups in group order.
+	Collapsed []string
 }
 
 // State returns the dashboard state to restore after the next restart.
@@ -19,14 +21,21 @@ func (m *tuiModel) State() State {
 	if selected := m.selectedServer(); selected != nil {
 		state.SelectedAlias = selected.Alias
 	}
+	for group := range m.collapsed {
+		state.Collapsed = append(state.Collapsed, group)
+	}
 	return state
 }
 
 // Restore applies a State saved from a previous TUI run.
 func (m *tuiModel) Restore(state State) {
-	if state.SelectedAlias != "" {
-		m.rebuildServerRows(state.SelectedAlias)
+	if len(state.Collapsed) > 0 {
+		m.collapsed = map[string]bool{}
+		for _, group := range state.Collapsed {
+			m.collapsed[group] = true
+		}
 	}
+	m.rebuildServerRows(state.SelectedAlias)
 	if state.Notice != "" {
 		if state.NoticeIsError {
 			m.err = errorNotice(state.Notice)

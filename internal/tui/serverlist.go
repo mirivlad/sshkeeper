@@ -14,9 +14,16 @@ import (
 
 // serverRow is one line of the dashboard list. The list is a flat sequence of
 // rows so the cursor, scrolling, and rendering share one index space.
+// In group order, a header row precedes each group; its server is nil.
 type serverRow struct {
 	server *model.Server
+	// group is the group name for header rows; "" is the ungrouped header.
+	group string
+	// count is the number of profiles under a header row.
+	count int
 }
+
+func (r serverRow) isHeader() bool { return r.server == nil }
 
 // serverMatch records why a server matched the live filter: the ranking score
 // and the rune positions of the matched characters in its display label.
@@ -101,8 +108,12 @@ func (m *tuiModel) rebuildServerRows(prefer string) {
 	}
 
 	rows := make([]serverRow, 0, len(visible))
-	for _, server := range visible {
-		rows = append(rows, serverRow{server: server})
+	if query == "" && m.sortMode == sortByGroup {
+		rows = m.groupedRows(visible)
+	} else {
+		for _, server := range visible {
+			rows = append(rows, serverRow{server: server})
+		}
 	}
 	m.rows = rows
 
@@ -113,7 +124,100 @@ func (m *tuiModel) rebuildServerRows(prefer string) {
 			return
 		}
 	}
+	// A profile hidden in a collapsed group leaves the cursor on its header.
+	if server := m.serverByAlias(prefer); server != nil && m.collapsed[server.GroupName] {
+		if index := m.headerRow(server.GroupName); index >= 0 {
+			m.cursor = index
+			return
+		}
+	}
 	m.cursor = m.firstServerRow()
+}
+
+// groupedRows inserts a header before each group of the already group-sorted
+// profiles and omits the members of collapsed groups.
+func (m *tuiModel) groupedRows(servers []*model.Server) []serverRow {
+	rows := make([]serverRow, 0, len(servers)+8)
+	for start := 0; start < len(servers); {
+		group := servers[start].GroupName
+		end := start
+		for end < len(servers) && strings.EqualFold(servers[end].GroupName, group) {
+			end++
+		}
+		rows = append(rows, serverRow{group: group, count: end - start})
+		if !m.collapsed[group] {
+			for _, server := range servers[start:end] {
+				rows = append(rows, serverRow{server: server})
+			}
+		}
+		start = end
+	}
+	return rows
+}
+
+func (m *tuiModel) headerRow(group string) int {
+	for index, row := range m.rows {
+		if row.isHeader() && row.group == group {
+			return index
+		}
+	}
+	return -1
+}
+
+// selectedHeader returns the header row under the cursor.
+func (m *tuiModel) selectedHeader() (serverRow, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.rows) || !m.rows[m.cursor].isHeader() {
+		return serverRow{}, false
+	}
+	return m.rows[m.cursor], true
+}
+
+// setGroupCollapsed folds or unfolds a group and keeps the cursor on its
+// header.
+func (m *tuiModel) setGroupCollapsed(group string, collapsed bool) {
+	if m.collapsed == nil {
+		m.collapsed = map[string]bool{}
+	}
+	if collapsed {
+		m.collapsed[group] = true
+	} else {
+		delete(m.collapsed, group)
+	}
+	m.rebuildServerRows("")
+	if index := m.headerRow(group); index >= 0 {
+		m.cursor = index
+	}
+}
+
+// updateGroupFold handles folding keys in group order: Enter or Space toggle
+// a header, Left folds the current group, Right unfolds it.
+func (m *tuiModel) updateGroupFold(key string) bool {
+	if m.sortMode != sortByGroup || m.filterQuery() != "" {
+		return false
+	}
+	header, onHeader := m.selectedHeader()
+	switch key {
+	case "enter", " ":
+		if onHeader {
+			m.setGroupCollapsed(header.group, !m.collapsed[header.group])
+			return true
+		}
+	case "left", "h":
+		if onHeader {
+			m.setGroupCollapsed(header.group, true)
+			return true
+		}
+		if server := m.selectedServer(); server != nil {
+			m.setGroupCollapsed(server.GroupName, true)
+			return true
+		}
+	case "right", "l":
+		if onHeader {
+			m.setGroupCollapsed(header.group, false)
+			return true
+		}
+	}
+	return false
 }
 
 // serverLess orders profiles by the active sort mode. Ties fall back to the

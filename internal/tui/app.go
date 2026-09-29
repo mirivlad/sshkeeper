@@ -316,6 +316,7 @@ type tuiModel struct {
 	matches           map[string]serverMatch
 	forwardIndex      map[int64][]*model.Forward
 	sortMode          string
+	collapsed         map[string]bool
 	runtime           runtimeStatus
 	testing           map[string]bool
 	testTotal         int
@@ -910,6 +911,20 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Key repeat or fast typing can deliver several runes in one event
+	// ("jjj"). Replay them one by one so each acts as its own key; a rune
+	// that opens another screen hands the rest to that screen.
+	if msg.Type == tea.KeyRunes && len(msg.Runes) > 1 && msg.Runes[0] != '/' && !msg.Paste {
+		var cmds []tea.Cmd
+		for _, r := range msg.Runes {
+			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+	}
+	if m.updateGroupFold(msg.String()) {
+		return m, nil
+	}
 	switch msg.Type {
 	case tea.KeyEsc:
 		if len(m.bgResults) > 0 {
