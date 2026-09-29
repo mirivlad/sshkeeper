@@ -28,6 +28,7 @@ var (
 			Bold(true)
 
 	normalStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	matchStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true).Underline(true)
 	selectedRowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4"))
 	listHeaderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
 	sectionStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).MarginTop(1)
@@ -133,6 +134,11 @@ type discardFormMsg struct {
 	origin screen
 }
 
+type forwardIndexLoadedMsg struct {
+	forwards []*model.Forward
+	err      error
+}
+
 type importDoneMsg struct {
 	servers []*model.Server
 	count   int
@@ -203,7 +209,6 @@ type helpItem struct {
 
 var (
 	ListServers    func() ([]*model.Server, error)
-	SearchServers  func(query string) ([]*model.Server, error)
 	DeleteServer   func(alias string) error
 	TestConnection func(server *model.Server) (bool, string)
 	// TestConnectionWithPassword tests with explicit password (for form test before save)
@@ -227,6 +232,7 @@ var (
 	DeleteCommandTemplate      func(name string) error
 	RunTemplateBackground      func(server *model.Server, command string) (string, error)
 	ListForwards               func(serverID int64) ([]*model.Forward, error)
+	ListAllForwards            func() ([]*model.Forward, error)
 	SaveForward                func(fwd *model.Forward) error
 	UpdateForward              func(fwd *model.Forward) error
 	DeleteForward              func(forwardID int64) error
@@ -302,8 +308,11 @@ type TUIResult struct {
 
 type tuiModel struct {
 	screen            screen
-	list              list.Model
 	servers           []*model.Server
+	rows              []serverRow
+	cursor            int
+	matches           map[string]serverMatch
+	forwardIndex      map[int64][]*model.Forward
 	searchInput       textinput.Model
 	form              *formModel
 	templateForm      *templateFormModel
@@ -345,17 +354,6 @@ type tuiModel struct {
 }
 
 func New(servers []*model.Server) *tuiModel {
-	items := make([]list.Item, len(servers))
-	for i, s := range servers {
-		items[i] = serverItem{server: s}
-	}
-
-	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "sshkeeper"
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	l.Styles.Title = titleStyle
-
 	search := textinput.New()
 	search.Placeholder = i18n.T("Search...", "Поиск...")
 	search.CharLimit = 64
@@ -382,9 +380,8 @@ func New(servers []*model.Server) *tuiModel {
 		vaultIsUnlocked = VaultUnlocked()
 	}
 
-	return &tuiModel{
+	m := &tuiModel{
 		screen:            screenList,
-		list:              l,
 		servers:           servers,
 		searchInput:       search,
 		selected:          map[string]bool{},
@@ -396,6 +393,8 @@ func New(servers []*model.Server) *tuiModel {
 		groupList:         groupList,
 		vaultUnlocked:     vaultIsUnlocked,
 	}
+	m.rebuildServerRows("")
+	return m
 }
 
 func (m *tuiModel) Result() *TUIResult {
@@ -403,7 +402,17 @@ func (m *tuiModel) Result() *TUIResult {
 }
 
 func (m *tuiModel) Init() tea.Cmd {
-	return nil
+	return m.loadForwardIndexCmd()
+}
+
+func (m *tuiModel) loadForwardIndexCmd() tea.Cmd {
+	if ListAllForwards == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		forwards, err := ListAllForwards()
+		return forwardIndexLoadedMsg{forwards: forwards, err: err}
+	}
 }
 
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -412,7 +421,6 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.list.SetSize(msg.Width, msg.Height-4)
 		if m.form != nil {
 			m.form.width = msg.Width
 			m.form.height = msg.Height
@@ -467,12 +475,16 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
-			m.servers = msg.servers
-			items := make([]list.Item, len(msg.servers))
-			for i, s := range msg.servers {
-				items[i] = serverItem{server: s}
+			m.setServers(msg.servers)
+		}
+		return m, nil
+
+	case forwardIndexLoadedMsg:
+		if msg.err == nil {
+			m.setForwardIndex(msg.forwards)
+			if m.filterQuery() != "" {
+				m.refreshServerRows()
 			}
-			m.list.SetItems(items)
 		}
 		return m, nil
 
@@ -557,12 +569,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.servers = msg.servers
-		items := make([]list.Item, len(msg.servers))
-		for i, s := range msg.servers {
-			items[i] = serverItem{server: s}
-		}
-		m.list.SetItems(items)
+		m.setServers(msg.servers)
 		m.success = i18n.Tf("Imported %d server(s).", "Импортировано серверов: %d.", msg.count)
 		return m, nil
 
@@ -573,6 +580,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.forwardScreen.err = nil
 				m.forwardScreen.list = msg.forwards
+				if m.forwardIndex == nil {
+					m.forwardIndex = map[int64][]*model.Forward{}
+				}
+				m.forwardIndex[m.forwardScreen.serverID] = msg.forwards
 				if len(msg.forwards) > 0 && m.forwardScreen.selected < 0 {
 					m.forwardScreen.selected = 0
 				}
@@ -650,12 +661,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.servers = msg.servers
-		items := make([]list.Item, len(msg.servers))
-		for i, server := range msg.servers {
-			items[i] = serverItem{server: server}
-		}
-		m.list.SetItems(items)
+		m.setServers(msg.servers)
 		delete(m.selected, msg.alias)
 		return m, nil
 
@@ -756,7 +762,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form.err = nil
 			return m, nil
 		}
-		if item, ok := m.list.SelectedItem().(serverItem); ok && UpdateTestResult != nil {
+		if item, ok := m.selectedServerItem(); ok && UpdateTestResult != nil {
 			status := model.TestUnknown
 			if msg.ok {
 				status = model.TestOK
@@ -895,24 +901,26 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.bgResults = nil
 			return m, nil
 		}
+		if m.filterQuery() != "" {
+			m.clearFilter()
+			return m, nil
+		}
 
 	case tea.KeyEnter:
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
+		if item, ok := m.selectedServerItem(); ok {
 			return m, func() tea.Msg {
 				return connectRequestMsg{server: item.server}
 			}
 		}
 
 	case tea.KeyInsert:
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
+		if item, ok := m.selectedServerItem(); ok {
 			if m.selected[item.server.Alias] {
 				delete(m.selected, item.server.Alias)
 			} else {
 				m.selected[item.server.Alias] = true
 			}
-			if m.list.Index() < len(m.servers)-1 {
-				m.list.Select(m.list.Index() + 1)
-			}
+			m.moveCursor(1)
 		}
 		return m, nil
 
@@ -926,7 +934,7 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlE:
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
+		if item, ok := m.selectedServerItem(); ok {
 			m.form = newEditFormModel(item.server, m.width, m.height)
 			m.form.setRouteProfiles(m.servers)
 			m.screen = screenForm
@@ -934,13 +942,13 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlD:
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
+		if item, ok := m.selectedServerItem(); ok {
 			m.confirmServerDelete(item.server)
 			return m, nil
 		}
 
 	case tea.KeyCtrlT:
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
+		if item, ok := m.selectedServerItem(); ok {
 			return m, func() tea.Msg {
 				ok, testErr := TestConnection(item.server)
 				return testDoneMsg{ok: ok, err: testErr}
@@ -948,9 +956,7 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyCtrlF, tea.KeyCtrlS:
-		m.screen = screenSearch
-		m.searchInput.Focus()
-		return m, nil
+		return m.startFilter()
 
 	case tea.KeyCtrlG:
 		m.screen = screenTags
@@ -964,6 +970,19 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openTemplatePicker()
 
 	case tea.KeyRunes:
+		if len(msg.Runes) > 0 && msg.Runes[0] == '/' {
+			// Fast typing can arrive as one event ("/pro"); the rest is
+			// the first part of the filter.
+			model, cmd := m.startFilter()
+			if rest := msg.Runes[1:]; len(rest) > 0 {
+				_, typed := m.updateSearch(tea.KeyMsg{Type: tea.KeyRunes, Runes: rest})
+				cmd = tea.Batch(cmd, typed)
+			}
+			return model, cmd
+		}
+		if m.moveListCursor(msg) {
+			return m, nil
+		}
 		if msg.String() == "m" || msg.String() == "M" {
 			m.manageMenu = newManageMenuModel(m.width, m.height, m.sessionsAvailable)
 			m.screen = screenManageMenu
@@ -978,26 +997,71 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlW:
 		// Open forward manager for selected server
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
+		if item, ok := m.selectedServerItem(); ok {
 			m.forwardScreen = newForwardScreenModel(item.server.ID, item.server.Alias, m.width, m.height)
 			m.screen = screenForwardList
 			return m, m.forwardScreen.loadForwards()
 		}
 
 	case tea.KeyCtrlX:
-		if item, ok := m.list.SelectedItem().(serverItem); ok {
+		if item, ok := m.selectedServerItem(); ok {
 			return m.openServerActions(item.server, screenList, nil)
 		}
 		m.err = fmt.Errorf("%s", i18n.T("select a server before opening server actions", "выберите сервер перед открытием действий"))
 		return m, nil
 
 	default:
-		var cmd tea.Cmd
-		m.list, cmd = m.list.Update(msg)
-		return m, cmd
+		m.moveListCursor(msg)
 	}
 
 	return m, nil
+}
+
+// moveListCursor handles list navigation keys and reports whether msg was one.
+func (m *tuiModel) moveListCursor(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "up", "k", "ctrl+k":
+		m.moveCursor(-1)
+	case "down", "j", "ctrl+j":
+		m.moveCursor(1)
+	case "pgup":
+		m.moveCursor(-m.listPageSize())
+	case "pgdown":
+		m.moveCursor(m.listPageSize())
+	case "home", "g":
+		m.cursor = 0
+	case "end", "G":
+		m.cursor = max(0, len(m.rows)-1)
+	default:
+		return false
+	}
+	return true
+}
+
+func (m *tuiModel) listPageSize() int {
+	return max(1, m.height-8)
+}
+
+func (m *tuiModel) startFilter() (tea.Model, tea.Cmd) {
+	m.screen = screenSearch
+	return m, m.searchInput.Focus()
+}
+
+func (m *tuiModel) clearFilter() {
+	prefer := ""
+	if selected := m.selectedServer(); selected != nil {
+		prefer = selected.Alias
+	}
+	m.searchInput.SetValue("")
+	m.rebuildServerRows(prefer)
+}
+
+func (m *tuiModel) refreshServerRows() {
+	prefer := ""
+	if selected := m.selectedServer(); selected != nil {
+		prefer = selected.Alias
+	}
+	m.rebuildServerRows(prefer)
 }
 
 func (m *tuiModel) requestQuit() (tea.Model, tea.Cmd) {
@@ -1027,32 +1091,52 @@ func (m *tuiModel) requestQuit() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateSearch drives the live filter. Every edit re-filters the list and puts
+// the cursor on the best match, so "/", a few letters, and Enter connect.
 func (m *tuiModel) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.screen = screenList
 		m.searchInput.Blur()
-		m.searchInput.SetValue("")
+		m.clearFilter()
 		return m, nil
 
 	case tea.KeyEnter:
+		if selected := m.selectedServer(); selected != nil {
+			m.searchInput.Blur()
+			m.screen = screenList
+			return m, func() tea.Msg { return connectRequestMsg{server: selected} }
+		}
+		return m, nil
+
+	case tea.KeyTab:
 		m.screen = screenList
 		m.searchInput.Blur()
-		query := m.searchInput.Value()
-		if query != "" {
-			return m, func() tea.Msg {
-				servers, err := SearchServers(query)
-				return serversLoadedMsg{servers: servers, err: err}
-			}
-		}
-		return m, func() tea.Msg {
-			servers, err := ListServers()
-			return serversLoadedMsg{servers: servers, err: err}
-		}
+		return m, nil
+
+	case tea.KeyUp, tea.KeyCtrlP:
+		m.moveCursor(-1)
+		return m, nil
+
+	case tea.KeyDown, tea.KeyCtrlN:
+		m.moveCursor(1)
+		return m, nil
+
+	case tea.KeyPgUp:
+		m.moveCursor(-m.listPageSize())
+		return m, nil
+
+	case tea.KeyPgDown:
+		m.moveCursor(m.listPageSize())
+		return m, nil
 
 	default:
+		before := m.searchInput.Value()
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
+		if m.searchInput.Value() != before {
+			m.rebuildServerRows("")
+		}
 		return m, cmd
 	}
 }
@@ -1469,7 +1553,7 @@ func (m *tuiModel) View() string {
 		b.WriteString(m.viewServerList())
 
 	case screenSearch:
-		b.WriteString(m.viewSearch())
+		b.WriteString(m.viewServerList())
 
 	case screenForm:
 		b.WriteString(m.form.View())
@@ -1634,7 +1718,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if action != nil {
 		switch *action {
 		case "connect":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				m.screen = screenList
 				m.actionMenu = nil
 				return m, func() tea.Msg {
@@ -1642,13 +1726,13 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "session_open":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				m.actionMenu = nil
 				m.result = &TUIResult{Server: item.server, Action: "session_open"}
 				return m, tea.Quit
 			}
 		case "tunnel":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				m.actionMenu = nil
 				m.result = &TUIResult{
 					Server:  item.server,
@@ -1658,7 +1742,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case "tunnel_n":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				m.actionMenu = nil
 				m.result = &TUIResult{
 					Server:  item.server,
@@ -1668,14 +1752,14 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case "tunnel_bg":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				origin := m.actionMenuParent
 				m.actionMenu = nil
 				m.screen = origin
 				return m.beginBackgroundTunnel(item.server, origin)
 			}
 		case "forwards":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				if m.actionMenuParent == screenForwardList && m.forwardScreen != nil {
 					m.screen = screenForwardList
 					m.actionMenu = nil
@@ -1687,7 +1771,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.forwardScreen.loadForwards()
 			}
 		case "route":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				m.form = newEditFormModel(item.server, m.width, m.height)
 				m.form.setRouteProfiles(m.servers)
 				m.form.focusIdx = 7
@@ -1696,7 +1780,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.actionMenu = nil
 			}
 		case "test":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				m.screen = screenList
 				m.actionMenu = nil
 				return m, func() tea.Msg {
@@ -1705,7 +1789,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "edit":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				m.form = newEditFormModel(item.server, m.width, m.height)
 				m.form.setRouteProfiles(m.servers)
 				m.screen = screenForm
@@ -1713,7 +1797,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "delete":
-			if item, ok := m.list.SelectedItem().(serverItem); ok {
+			if item, ok := m.selectedServerItem(); ok {
 				m.actionMenu = nil
 				m.confirmServerDelete(item.server)
 				return m, nil
@@ -2166,13 +2250,8 @@ func (m *tuiModel) removeServer(alias string) {
 			servers = append(servers, server)
 		}
 	}
-	m.servers = servers
-	items := make([]list.Item, len(servers))
-	for index, server := range servers {
-		items[index] = serverItem{server: server}
-	}
-	m.list.SetItems(items)
 	delete(m.selected, alias)
+	m.setServers(servers)
 }
 
 func (m *tuiModel) confirmForwardDelete(fwd *model.Forward) {
@@ -2300,26 +2379,6 @@ func (m *tuiModel) rootNotification() string {
 	return ""
 }
 
-func (m *tuiModel) viewSearch() string {
-	return renderScreenShell(screenShell{
-		breadcrumb:   i18n.T("Search", "Поиск"),
-		status:       shellStatus(m.vaultUnlocked, i18n.Tf("%d profiles", "Профилей: %d", len(m.servers))),
-		notification: m.rootNotification(),
-		width:        m.width,
-		height:       m.height,
-		body: func(width, height int) string {
-			return renderPaddedPanel(width, height, []string{
-				dashboardSection(i18n.T("Find server", "Найти сервер")),
-				"",
-				m.searchInput.View(),
-				"",
-				dashboardHelp(i18n.T("Search alias, host, display name, group, tags, notes, and route.", "Поиск по псевдониму, хосту, имени, группе, тегам, заметкам и маршруту.")),
-			})
-		},
-		footer: []helpItem{{Key: i18n.T("Type", "Ввод"), Action: i18n.T("search", "поиск")}, {Key: "Enter", Action: i18n.T("confirm", "подтвердить")}, {Key: "Ctrl+H", Action: i18n.T("help", "справка")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}},
-	})
-}
-
 func (m *tuiModel) viewInlineBackgroundResults() string {
 	var b strings.Builder
 	b.WriteString(sectionStyle.Render(i18n.T("Last Background Run", "Последний фоновый запуск")))
@@ -2383,11 +2442,9 @@ func (m *tuiModel) renderBackgroundOutputLine(line string) string {
 	return line + strings.Repeat(" ", width-len(line))
 }
 
-func (m *tuiModel) selectedServer() *model.Server {
-	if item, ok := m.list.SelectedItem().(serverItem); ok && item.server != nil {
-		return item.server
-	}
-	return nil
+func (m *tuiModel) selectedServerItem() (serverItem, bool) {
+	server := m.selectedServer()
+	return serverItem{server: server}, server != nil
 }
 
 func (m *tuiModel) visibleServerRows() int {
@@ -2799,6 +2856,14 @@ func (m *tuiModel) renderListHelp(selectedCount int, hasBackgroundResult bool) s
 }
 
 func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []helpItem {
+	if m.screen == screenSearch {
+		return []helpItem{
+			{Key: "Enter", Action: i18n.T("connect", "подключиться")},
+			{Key: "↑/↓", Action: i18n.T("move", "перемещение")},
+			{Key: "Tab", Action: i18n.T("keep filter", "оставить фильтр")},
+			{Key: "Esc", Action: i18n.T("clear", "сбросить")},
+		}
+	}
 	insAction := i18n.T("select", "выбрать")
 	if selectedCount > 0 {
 		insAction = i18n.Tf("select (%d selected)", "выбрать (отмечено: %d)", selectedCount)
@@ -2814,7 +2879,7 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 		helpItem{Key: "m", Action: i18n.T("manage", "управление")},
 		helpItem{Key: "Ctrl+A", Action: i18n.T("add", "добавить")},
 		helpItem{Key: "Ctrl+E", Action: i18n.T("edit", "изменить")},
-		helpItem{Key: "Ctrl+F", Action: i18n.T("search", "поиск")},
+		helpItem{Key: "/", Action: i18n.T("filter", "фильтр")},
 		helpItem{Key: "Ins", Action: insAction},
 		helpItem{Key: "?", Action: i18n.T("hotkeys", "клавиши")},
 		helpItem{Key: "Ctrl+H", Action: i18n.T("help", "справка")},

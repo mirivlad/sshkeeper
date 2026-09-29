@@ -600,6 +600,22 @@ func (db *DB) GetForwards(serverID int64) ([]*model.Forward, error) {
 	if err != nil {
 		return nil, err
 	}
+	return scanForwards(rows)
+}
+
+// ListAllForwards returns every saved forward in one query, ordered by server
+// and then by ID, so the TUI can index them without a query per profile.
+func (db *DB) ListAllForwards() ([]*model.Forward, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, server_id, name, description, type, local_addr, local_port, remote_addr, remote_port, enabled
+		FROM forwards ORDER BY server_id, id`)
+	if err != nil {
+		return nil, err
+	}
+	return scanForwards(rows)
+}
+
+func scanForwards(rows *sql.Rows) ([]*model.Forward, error) {
 	defer rows.Close()
 
 	var forwards []*model.Forward

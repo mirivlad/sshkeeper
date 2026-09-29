@@ -29,9 +29,6 @@ func runTUI() error {
 	tui.ListServers = func() ([]*model.Server, error) {
 		return appDB.ListServers()
 	}
-	tui.SearchServers = func(query string) ([]*model.Server, error) {
-		return appDB.SearchServers(query)
-	}
 	tui.DeleteServer = func(alias string) error {
 		server, err := appDB.GetServer(alias)
 		if err != nil {
@@ -155,6 +152,9 @@ func runTUI() error {
 	}
 	tui.ListForwards = func(serverID int64) ([]*model.Forward, error) {
 		return appDB.GetForwards(serverID)
+	}
+	tui.ListAllForwards = func() ([]*model.Forward, error) {
+		return appDB.ListAllForwards()
 	}
 	tui.SaveForward = func(fwd *model.Forward) error {
 		_, err := appDB.AddForward(fwd)

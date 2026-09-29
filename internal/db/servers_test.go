@@ -357,3 +357,38 @@ func TestRouteCycleIsRejected(t *testing.T) {
 		t.Fatalf("expected cycle error, got %v", err)
 	}
 }
+
+func TestListAllForwardsReturnsEveryServerOrdered(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	first := &model.Server{Alias: "a", Host: "a.internal", Port: 22, User: "root", AuthMethod: model.AuthKey}
+	second := &model.Server{Alias: "b", Host: "b.internal", Port: 22, User: "root", AuthMethod: model.AuthKey}
+	for _, server := range []*model.Server{first, second} {
+		if err := db.CreateServer(server); err != nil {
+			t.Fatalf("create %s: %v", server.Alias, err)
+		}
+	}
+	for _, fwd := range []*model.Forward{
+		{ServerID: second.ID, Name: "socks", Type: model.ForwardDynamic, LocalAddr: "127.0.0.1", LocalPort: 1080},
+		{ServerID: first.ID, Name: "pg", Type: model.ForwardLocal, LocalAddr: "127.0.0.1", LocalPort: 15432, RemoteAddr: "127.0.0.1", RemotePort: 5432, Enabled: true},
+	} {
+		if _, err := db.AddForward(fwd); err != nil {
+			t.Fatalf("add forward %s: %v", fwd.Name, err)
+		}
+	}
+
+	forwards, err := db.ListAllForwards()
+	if err != nil {
+		t.Fatalf("list forwards: %v", err)
+	}
+	if len(forwards) != 2 || forwards[0].ServerID != first.ID || forwards[1].ServerID != second.ID {
+		t.Fatalf("unexpected forwards: %#v", forwards)
+	}
+	if forwards[0].Name != "pg" || !forwards[0].Enabled || forwards[1].Enabled {
+		t.Fatalf("forward fields not scanned: %#v %#v", forwards[0], forwards[1])
+	}
+}

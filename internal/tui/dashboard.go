@@ -94,24 +94,26 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 	innerWidth := max(1, width-2)
 	innerHeight := max(1, height-2)
 	lines := make([]string, 0, innerHeight)
-	lines = append(lines, listHeaderStyle.Render(fitLine(i18n.Tf("%d servers", "Серверов: %d", len(m.servers)), innerWidth)))
+	lines = append(lines, m.renderServerPanelTitle(innerWidth))
 	lines = append(lines, m.renderServerColumns(innerWidth, showTarget, nil, true))
 
 	rowCapacity := max(0, innerHeight-len(lines))
-	showRange := len(m.servers) > rowCapacity
+	showRange := len(m.rows) > rowCapacity
 	if showRange {
 		rowCapacity = max(1, rowCapacity-1)
 	}
-	if len(m.servers) == 0 {
+	switch {
+	case len(m.servers) == 0:
 		lines = append(lines, helpStyle.Render(fitLine(i18n.T("No servers yet. Ctrl+A adds the first profile.", "Серверов пока нет. Ctrl+A добавит первый профиль."), innerWidth)))
-	} else if rowCapacity > 0 {
-		start, end := visibleServerRange(len(m.servers), m.list.Index(), rowCapacity)
-		selected := m.selectedServer()
-		for _, server := range m.servers[start:end] {
-			lines = append(lines, m.renderServerColumns(innerWidth, showTarget, server, selected != nil && server.Alias == selected.Alias))
+	case len(m.rows) == 0:
+		lines = append(lines, helpStyle.Render(fitLine(i18n.T("Nothing matches. Esc clears the filter.", "Ничего не найдено. Esc сбрасывает фильтр."), innerWidth)))
+	case rowCapacity > 0:
+		start, end := visibleServerRange(len(m.rows), m.cursor, rowCapacity)
+		for index, row := range m.rows[start:end] {
+			lines = append(lines, m.renderServerColumns(innerWidth, showTarget, row.server, start+index == m.cursor))
 		}
 		if showRange {
-			lines = append(lines, dashboardHelp(i18n.Tf("Showing %d-%d of %d", "Показаны %d–%d из %d", start+1, end, len(m.servers))))
+			lines = append(lines, dashboardHelp(i18n.Tf("Showing %d-%d of %d", "Показаны %d–%d из %d", start+1, end, len(m.rows))))
 		}
 	}
 	for len(lines) < innerHeight {
@@ -123,9 +125,29 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 	return renderPanel(width, height, lines)
 }
 
+// renderServerPanelTitle shows the profile count, or the live filter prompt
+// with its match count while a filter is typed or kept.
+func (m *tuiModel) renderServerPanelTitle(width int) string {
+	query := m.searchInput.Value()
+	if m.screen != screenSearch && strings.TrimSpace(query) == "" {
+		return listHeaderStyle.Render(fitLine(i18n.Tf("%d servers", "Серверов: %d", len(m.servers)), width))
+	}
+	count := i18n.Tf("%d of %d", "%d из %d", m.visibleServerCount(), len(m.servers))
+	prompt := "/ " + query
+	if m.screen == screenSearch {
+		prompt += "▏"
+	}
+	gap := width - lipgloss.Width(prompt) - lipgloss.Width(count)
+	if gap < 1 {
+		return listHeaderStyle.Render(fitLine(prompt, width))
+	}
+	return listHeaderStyle.Render(prompt) + strings.Repeat(" ", gap) + dashboardHelp(count)
+}
+
 func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model.Server, selected bool) string {
 	marker, name, target, auth, group, status := "", i18n.T("NAME", "ИМЯ"), i18n.T("TARGET / ROUTE", "ЦЕЛЬ / МАРШРУТ"), i18n.T("AUTH", "АВТОР."), i18n.T("GROUP", "ГРУППА"), i18n.T("STATUS", "СТАТУС")
 	style := normalStyle
+	var hits []int
 	if server != nil {
 		marker = " "
 		if selected {
@@ -138,10 +160,8 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 				marker = ">*"
 			}
 		}
-		name = server.DisplayName
-		if name == "" {
-			name = server.Alias
-		}
+		name = serverLabel(server)
+		hits = m.matches[server.Alias].label
 		target = fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
 		if len(server.Route.Hops) > 0 {
 			target = server.Route.DisplaySummary(target)
@@ -156,20 +176,73 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 
 	markerWidth, authWidth, groupWidth, statusWidth := 2, 10, 10, 7
 	nameWidth := width - markerWidth - authWidth - groupWidth - statusWidth - 4
+	targetWidth := 0
 	if showTarget {
 		nameWidth = min(18, max(10, nameWidth/3))
-		targetWidth := width - markerWidth - nameWidth - authWidth - groupWidth - statusWidth - 5
-		line := padCells(marker, markerWidth) + " " + padCells(name, nameWidth) + " " + padCells(target, targetWidth) + " " + padCells(auth, authWidth) + " " + padCells(group, groupWidth) + " " + padCells(status, statusWidth)
-		if server == nil {
-			return listHeaderStyle.Render(fitLine(line, width))
-		}
-		return style.Render(fitLine(line, width))
+		targetWidth = width - markerWidth - nameWidth - authWidth - groupWidth - statusWidth - 5
 	}
-	line := padCells(marker, markerWidth) + " " + padCells(name, nameWidth) + " " + padCells(auth, authWidth) + " " + padCells(group, groupWidth) + " " + padCells(status, statusWidth)
 	if server == nil {
+		line := padCells(marker, markerWidth) + " " + padCells(name, nameWidth) + " "
+		if showTarget {
+			line += padCells(target, targetWidth) + " "
+		}
+		line += padCells(auth, authWidth) + " " + padCells(group, groupWidth) + " " + padCells(status, statusWidth)
 		return listHeaderStyle.Render(fitLine(line, width))
 	}
-	return style.Render(fitLine(line, width))
+	parts := []string{
+		style.Render(padCells(marker, markerWidth) + " "),
+		highlightCells(name, nameWidth, hits, style, style.Copy().Inherit(matchStyle)),
+		style.Render(" "),
+	}
+	if showTarget {
+		parts = append(parts, style.Render(padCells(target, targetWidth)+" "))
+	}
+	parts = append(parts, style.Render(padCells(auth, authWidth)+" "+padCells(group, groupWidth)+" "+padCells(status, statusWidth)))
+	return fitLine(strings.Join(parts, ""), width)
+}
+
+// highlightCells pads value to width and renders the runes at hits with hl.
+// Truncation happens on the plain text first so rune positions stay aligned.
+func highlightCells(value string, width int, hits []int, base, hl lipgloss.Style) string {
+	plain := padCells(value, width)
+	if len(hits) == 0 {
+		return base.Render(plain)
+	}
+	marked := make(map[int]bool, len(hits))
+	for _, hit := range hits {
+		marked[hit] = true
+	}
+	truncated := []rune(value)
+	if lipgloss.Width(value) > width {
+		// Keep the "…" that padCells added unhighlighted.
+		truncated = []rune(truncateCells(value, width))
+		truncated = truncated[:max(0, len(truncated)-1)]
+	}
+	var b strings.Builder
+	var run []rune
+	runHL := false
+	flush := func() {
+		if len(run) == 0 {
+			return
+		}
+		if runHL {
+			b.WriteString(hl.Render(string(run)))
+		} else {
+			b.WriteString(base.Render(string(run)))
+		}
+		run = run[:0]
+	}
+	plainRunes := []rune(plain)
+	for index, r := range plainRunes {
+		isHit := index < len(truncated) && marked[index]
+		if isHit != runHL {
+			flush()
+			runHL = isHit
+		}
+		run = append(run, r)
+	}
+	flush()
+	return b.String()
 }
 
 func (m *tuiModel) renderSelectedPanel(width, height int) string {

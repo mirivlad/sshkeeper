@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mirivlad/sshkeeper/internal/model"
@@ -37,7 +36,6 @@ func TestServerListViewUsesDashboardLayout(t *testing.T) {
 	})
 	m.width = 100
 	m.height = 30
-	m.list.SetSize(100, 24)
 
 	view := m.View()
 	for _, want := range []string{
@@ -117,7 +115,7 @@ func TestServerListHelpWrapsOnNarrowTerminal(t *testing.T) {
 			t.Fatalf("expected help line to be bounded, got width %d: %q\nview:\n%s", lipgloss.Width(line), line, view)
 		}
 	}
-	for _, want := range []string{"Ctrl+X", "actions", "Ctrl+F", "search", "?", "help"} {
+	for _, want := range []string{"Ctrl+X", "actions", "/", "filter", "?", "help"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected help to contain %q\nview:\n%s", want, view)
 		}
@@ -496,7 +494,6 @@ func TestFormTestResultDoesNotUpdateSelectedListServer(t *testing.T) {
 	m := New([]*model.Server{selected})
 	m.screen = screenForm
 	m.form = newFormModel(80, 24)
-	m.list = list.New([]list.Item{serverItem{server: selected}}, list.NewDefaultDelegate(), 80, 20)
 
 	updated, cmd := m.Update(testDoneMsg{ok: true})
 	m = updated.(*tuiModel)
@@ -542,8 +539,8 @@ func TestInsertTogglesServerSelection(t *testing.T) {
 	if !model.selected["one"] {
 		t.Fatal("expected Insert to select current server")
 	}
-	if model.list.Index() != 1 {
-		t.Fatalf("expected Insert to advance to next server, index = %d", model.list.Index())
+	if model.cursor != 1 {
+		t.Fatalf("expected Insert to advance to next server, index = %d", model.cursor)
 	}
 
 	updated, _ = model.updateList(tea.KeyMsg{Type: tea.KeyInsert})
