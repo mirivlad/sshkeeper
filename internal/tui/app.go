@@ -2903,7 +2903,13 @@ func (m *tuiModel) listHelpItems(selectedCount int, hasBackgroundResult bool) []
 		helpItem{Key: "e", Action: i18n.T("edit", "изменить")},
 		helpItem{Key: "m", Action: i18n.T("manage", "управление")},
 		helpItem{Key: "s", Action: i18n.T("sort", "сортировка")},
-		helpItem{Key: "Space", Action: insAction},
+	)
+	// Space is in the quick help; the footer names it once something is
+	// marked, when the count matters.
+	if selectedCount > 0 {
+		items = append(items, helpItem{Key: "Space", Action: insAction})
+	}
+	items = append(items,
 		helpItem{Key: "?", Action: i18n.T("keys", "клавиши")},
 		helpItem{Key: "q", Action: i18n.T("quit", "выход")},
 	)

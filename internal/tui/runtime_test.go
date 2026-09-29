@@ -126,7 +126,7 @@ func TestStateColumnShowsTunnelAndSessionIndicators(t *testing.T) {
 	}})
 	m = updated.(*tuiModel)
 	var dbLine, webLine string
-	for _, line := range strings.Split(m.View(), "\n") {
+	for _, line := range strings.Split(m.renderServerPanel(80, 8, true), "\n") {
 		// Take the first hit: the list row comes before the details panel.
 		switch {
 		case dbLine == "" && strings.Contains(line, "u@a:22"):

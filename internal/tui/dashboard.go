@@ -40,14 +40,14 @@ func (m *tuiModel) renderServerDashboard() string {
 		right := m.renderSelectedPanel(rightWidth, bodyHeight)
 		body = joinPanelColumns(left, leftWidth, right, rightWidth)
 	case sizeMedium:
-		detailsHeight := 6
+		detailsHeight := 4
 		listHeight := bodyHeight - detailsHeight
 		if listHeight < 5 {
 			listHeight = 5
 		}
 		body = m.renderServerPanel(width, listHeight, true)
-		if selected := m.selectedServer(); selected != nil && listHeight+detailsHeight <= bodyHeight {
-			body += "\n" + m.renderCompactSelected(selected, width, detailsHeight-1)
+		if listHeight+detailsHeight <= bodyHeight {
+			body += "\n" + m.renderCompactSelected(width, detailsHeight)
 		}
 	default:
 		body = m.renderServerPanel(width, bodyHeight, false)
@@ -293,49 +293,6 @@ func highlightCells(value string, width int, hits []int, base, hl lipgloss.Style
 	return b.String()
 }
 
-func (m *tuiModel) renderSelectedPanel(width, height int) string {
-	innerWidth := max(1, width-2)
-	innerHeight := max(1, height-2)
-	lines := make([]string, 0, innerHeight)
-	selected := m.selectedServer()
-	if selected == nil {
-		lines = append(lines, dashboardHelp(i18n.T("No profile selected.", "Профиль не выбран.")))
-	} else {
-		target := fmt.Sprintf("%s@%s:%d", selected.User, selected.Host, selected.Port)
-		route := i18n.T("direct", "напрямую")
-		if len(selected.Route.Hops) > 0 {
-			route = selected.Route.DisplaySummary(target)
-		}
-		group := selected.GroupName
-		if group == "" {
-			group = "-"
-		}
-		lines = append(lines,
-			fitLine(i18n.T("Alias: ", "Псевдоним: ")+selected.Alias, innerWidth),
-			fitLine(i18n.T("Display Name: ", "Имя: ")+selected.DisplayName, innerWidth),
-			fitLine(i18n.T("Host: ", "Хост: ")+selected.Host, innerWidth),
-			fitLine(i18n.Tf("Port: %d  User: %s", "Порт: %d  Пользователь: %s", selected.Port, selected.User), innerWidth),
-			fitLine(target, innerWidth),
-			fitLine(i18n.T("Route      ", "Маршрут   ")+route, innerWidth),
-			fitLine(i18n.T("Group      ", "Группа    ")+group, innerWidth),
-			fitLine(i18n.T("Tags       ", "Теги      ")+strings.Join(selected.Tags, ", "), innerWidth),
-			fitLine(i18n.T("Last test  ", "Проверка  ")+testStatusLabel(selected), innerWidth),
-			"",
-			dashboardSection(i18n.T("Primary actions", "Основные действия")),
-			i18n.T("Enter      Connect", "Enter      Подключиться"),
-			i18n.T("Ctrl+X     More actions…", "Ctrl+X     Другие действия…"),
-		)
-		lines = append(lines, m.backgroundPanelLines(selected.Alias, innerWidth)...)
-	}
-	for len(lines) < innerHeight {
-		lines = append(lines, "")
-	}
-	if len(lines) > innerHeight {
-		lines = lines[:innerHeight]
-	}
-	return renderTitledPanel(width, height, i18n.T("Selected profile", "Выбранный профиль"), "", lines)
-}
-
 func (m *tuiModel) backgroundPanelLines(alias string, width int) []string {
 	if len(m.bgResults) == 0 {
 		return nil
@@ -365,24 +322,6 @@ func (m *tuiModel) backgroundPanelLines(alias string, width int) []string {
 		}
 	}
 	return lines
-}
-
-func (m *tuiModel) renderCompactSelected(server *model.Server, width, height int) string {
-	target := fmt.Sprintf("%s@%s:%d", server.User, server.Host, server.Port)
-	group := server.GroupName
-	if group == "" {
-		group = "-"
-	}
-	lines := []string{
-		dashboardSection(i18n.T("Selected profile", "Выбранный профиль")),
-		fitLine(i18n.T("Alias: ", "Псевдоним: ")+server.Alias+i18n.T("  Target: ", "  Цель: ")+target, width),
-		fitLine(i18n.T("Auth: ", "Автор.: ")+authLabel(server.AuthMethod)+i18n.T("  Group: ", "  Группа: ")+group+i18n.T("  Status: ", "  Статус: ")+testStatusLabel(server), width),
-		fitLine(i18n.T("Enter: Connect  Ctrl+X: More actions…", "Enter: Подключиться  Ctrl+X: Действия…"), width),
-	}
-	if len(lines) > height {
-		lines = lines[:height]
-	}
-	return strings.Join(lines, "\n")
 }
 
 func dashboardSection(value string) string {
