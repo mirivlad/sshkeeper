@@ -81,6 +81,9 @@ func (m *tuiModel) renderDashboardHeader(width int) string {
 	if selected := len(m.selectedServers()); selected > 0 {
 		right += i18n.Tf(" · %d selected", " · выбрано: %d", selected)
 	}
+	if testing := len(m.testing); testing > 0 {
+		right += i18n.Tf(" · testing %d…", " · проверка: %d…", testing)
+	}
 	line := left + " " + right
 	if lipgloss.Width(left)+lipgloss.Width(right)+1 <= width {
 		line = left + strings.Repeat(" ", width-lipgloss.Width(left)-lipgloss.Width(right)) + right
@@ -151,7 +154,7 @@ func (m *tuiModel) renderServerPanelTitle(width int) string {
 }
 
 func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model.Server, selected bool) string {
-	marker, name, target, auth, group, seen, status := "", i18n.T("NAME", "ИМЯ"), i18n.T("TARGET", "ЦЕЛЬ"), i18n.T("AUTH", "АВТОР."), i18n.T("GROUP", "ГРУППА"), i18n.T("SEEN", "ВХОД"), i18n.T("STATUS", "СТАТУС")
+	marker, name, target, auth, group, seen, status := "", i18n.T("NAME", "ИМЯ"), i18n.T("TARGET", "ЦЕЛЬ"), i18n.T("AUTH", "АВТОР."), i18n.T("GROUP", "ГРУППА"), i18n.T("SEEN", "ВХОД"), i18n.T("STATE", "СОСТ")
 	style := normalStyle
 	var hits []int
 	if server != nil {
@@ -178,23 +181,22 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 			group = "-"
 		}
 		seen = relativeAge(server.LastConnectedAt)
-		status = testStatusLabel(server)
 	}
 
-	markerWidth, authWidth, groupWidth, seenWidth, statusWidth := 2, 8, 10, 4, 6
+	markerWidth, authWidth, groupWidth, seenWidth, statusWidth := 2, 8, 10, 4, 5
 	nameWidth := width - markerWidth - authWidth - groupWidth - seenWidth - statusWidth - 5
 	targetWidth := 0
 	if showTarget {
 		nameWidth = min(18, max(10, nameWidth/3))
 		targetWidth = width - markerWidth - nameWidth - authWidth - groupWidth - seenWidth - statusWidth - 6
 	}
-	tail := padCells(auth, authWidth) + " " + padCells(group, groupWidth) + " " + padCells(seen, seenWidth) + " " + padCells(status, statusWidth)
+	tail := padCells(auth, authWidth) + " " + padCells(group, groupWidth) + " " + padCells(seen, seenWidth) + " "
 	if server == nil {
 		line := padCells(marker, markerWidth) + " " + padCells(name, nameWidth) + " "
 		if showTarget {
 			line += padCells(target, targetWidth) + " "
 		}
-		line += tail
+		line += tail + padCells(status, statusWidth)
 		return listHeaderStyle.Render(fitLine(line, width))
 	}
 	parts := []string{
@@ -205,8 +207,32 @@ func (m *tuiModel) renderServerColumns(width int, showTarget bool, server *model
 	if showTarget {
 		parts = append(parts, style.Render(padCells(target, targetWidth)+" "))
 	}
-	parts = append(parts, style.Render(tail))
+	parts = append(parts, style.Render(tail), m.renderServerState(server, style))
 	return fitLine(strings.Join(parts, ""), width)
+}
+
+// renderServerState draws the five-cell STATE column: the last test result
+// (or a test in progress), a running tunnel, and an open tmux session.
+func (m *tuiModel) renderServerState(server *model.Server, base lipgloss.Style) string {
+	status := base.Copy().Inherit(stateUnknownStyle).Render(glyphs.unknown)
+	switch {
+	case m.testing[server.Alias]:
+		status = base.Copy().Inherit(stateTestingStyle).Render(glyphs.testing)
+	case server.LastTestStatus == model.TestOK:
+		status = base.Copy().Inherit(testOKStyle).Render(glyphs.ok)
+	case server.LastTestStatus == model.TestFailed:
+		status = base.Copy().Inherit(testFailStyle).Render(glyphs.fail)
+	}
+	tunnel := base.Render(" ")
+	if m.runtime.tunnels[server.Alias] > 0 {
+		tunnel = base.Copy().Inherit(stateTunnelStyle).Render(glyphs.tunnel)
+	}
+	session := base.Render(" ")
+	if m.runtime.sessions[server.Alias] > 0 {
+		session = base.Copy().Inherit(stateSessionStyle).Render(glyphs.session)
+	}
+	gap := base.Render(" ")
+	return status + gap + tunnel + gap + session
 }
 
 // highlightCells pads value to width and renders the runes at hits with hl.

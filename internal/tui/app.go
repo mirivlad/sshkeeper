@@ -316,6 +316,10 @@ type tuiModel struct {
 	matches           map[string]serverMatch
 	forwardIndex      map[int64][]*model.Forward
 	sortMode          string
+	runtime           runtimeStatus
+	testing           map[string]bool
+	testTotal         int
+	testPassed        int
 	searchInput       textinput.Model
 	form              *formModel
 	templateForm      *templateFormModel
@@ -413,7 +417,7 @@ func (m *tuiModel) Result() *TUIResult {
 }
 
 func (m *tuiModel) Init() tea.Cmd {
-	return m.loadForwardIndexCmd()
+	return tea.Batch(m.loadForwardIndexCmd(), m.loadRuntimeCmd(), runtimeTickCmd())
 }
 
 func (m *tuiModel) loadForwardIndexCmd() tea.Cmd {
@@ -488,6 +492,17 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setServers(msg.servers)
 		}
+		return m, nil
+
+	case runtimeLoadedMsg:
+		m.runtime = msg.status
+		return m, nil
+
+	case runtimeTickMsg:
+		return m, tea.Batch(m.loadRuntimeCmd(), runtimeTickCmd())
+
+	case serverTestedMsg:
+		m.applyServerTest(msg)
 		return m, nil
 
 	case forwardIndexLoadedMsg:
@@ -633,7 +648,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.success = notice
 		}
-		return m, nil
+		return m, m.loadRuntimeCmd()
 
 	case forwardDeletedMsg:
 		m.finishConfirm()
@@ -755,7 +770,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.tunnelScreen.err = nil
-			return m, m.tunnelScreen.loadTunnels()
+			return m, tea.Batch(m.tunnelScreen.loadTunnels(), m.loadRuntimeCmd())
 		}
 		return m, nil
 
@@ -771,21 +786,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.form.testResultTime = time.Now()
 			m.form.err = nil
-			return m, nil
 		}
-		if item, ok := m.selectedServerItem(); ok && UpdateTestResult != nil {
-			status := model.TestUnknown
-			if msg.ok {
-				status = model.TestOK
-			} else if msg.err != "" {
-				status = model.TestFailed
-			}
-			UpdateTestResult(item.server.Alias, status, msg.err)
-		}
-		return m, func() tea.Msg {
-			servers, err := ListServers()
-			return serversLoadedMsg{servers: servers, err: err}
-		}
+		// A form test that finishes after the form closed has no target;
+		// list tests use serverTestedMsg, which names its profile.
+		return m, nil
 
 	case saveDoneMsg:
 		if m.forwardForm != nil {
@@ -960,10 +964,7 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlT:
 		if item, ok := m.selectedServerItem(); ok {
-			return m, func() tea.Msg {
-				ok, testErr := TestConnection(item.server)
-				return testDoneMsg{ok: ok, err: testErr}
-			}
+			return m, m.testServersCmd([]*model.Server{item.server})
 		}
 
 	case tea.KeyCtrlF, tea.KeyCtrlS:
@@ -999,6 +1000,9 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if msg.String() == "q" {
 			return m, tea.Quit
+		}
+		if msg.String() == "T" {
+			return m, m.testServersCmd(m.testTargets())
 		}
 		if msg.String() == "s" {
 			mode := m.cycleSort()
@@ -1823,10 +1827,7 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if item, ok := m.selectedServerItem(); ok {
 				m.screen = screenList
 				m.actionMenu = nil
-				return m, func() tea.Msg {
-					ok, testErr := TestConnection(item.server)
-					return testDoneMsg{ok: ok, err: testErr}
-				}
+				return m, m.testServersCmd([]*model.Server{item.server})
 			}
 		case "edit":
 			if item, ok := m.selectedServerItem(); ok {

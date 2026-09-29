@@ -1,7 +1,9 @@
 package tunnel
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -41,5 +43,31 @@ func TestIsRunningDetectsLiveProcess(t *testing.T) {
 
 	if !IsRunning(1) {
 		t.Fatalf("expected pid %d to be detected as running", cmd.Process.Pid)
+	}
+}
+
+func TestReloadPicksUpStatesWrittenByAnotherProcess(t *testing.T) {
+	dir := t.TempDir()
+	if err := Init(dir); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tunnels.json"), []byte(`[{"id": 7, "server_alias": "db", "pid": 1}]`), 0600); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	if err := Reload(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := Get(7); got == nil || got.ServerAlias != "db" {
+		t.Fatalf("reload did not pick up state: %#v", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "tunnels.json"), []byte(`{broken`), 0600); err != nil {
+		t.Fatalf("write broken state: %v", err)
+	}
+	if err := Reload(); err == nil {
+		t.Fatal("expected error for broken state file")
+	}
+	if Get(7) == nil {
+		t.Fatal("a failed reload must keep the previous states")
 	}
 }
