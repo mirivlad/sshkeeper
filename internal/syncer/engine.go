@@ -299,8 +299,11 @@ func (e *Engine) syncOnce() (Report, error) {
 }
 
 // saveStates remembers the merged state. When an incoming change could not be
-// applied, the local version is recorded with the merged time, so it is not
-// mistaken for a newer local edit and the change is retried next time.
+// applied (a different key file or a clashing alias was kept), the local
+// version is recorded as strictly older than the merged one. It then loses
+// every later merge, so a device's own key or profile never travels to other
+// devices by winning a tie, and the change is retried next time. Only a new
+// local edit makes it newer again.
 func (e *Engine) saveStates(merged []Record) error {
 	current, _, err := e.local().Export()
 	if err != nil {
@@ -316,6 +319,7 @@ func (e *Engine) saveStates(merged []Record) error {
 		if !record.Deleted {
 			if hash, ok := localHash[record.ID]; ok && hash != record.Hash {
 				state.Hash = hash
+				state.Updated = record.Updated - 1
 			}
 		}
 		states = append(states, state)
