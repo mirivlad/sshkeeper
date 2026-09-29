@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -303,5 +304,61 @@ func TestGitStorageEndToEnd(t *testing.T) {
 	}
 	if _, err := b.db.GetServer("web"); err != nil {
 		t.Fatal("web missing on B")
+	}
+}
+
+func TestKeptLocalKeyNeverTravelsToOtherDevices(t *testing.T) {
+	storage := &Folder{Dir: t.TempDir()}
+	a := newDevice(t, storage)
+	b := newDevice(t, storage)
+	seedDeviceA(t, a)
+	original, _ := os.ReadFile(filepath.Join(a.home, ".ssh", "id_web"))
+	originalPublic, _ := os.ReadFile(filepath.Join(a.home, ".ssh", "id_web.pub"))
+	remote, _ := NewRecord(KindKey, "~/.ssh/id_web", KeyData{Path: "~/.ssh/id_web", Private: original, Public: originalPublic})
+
+	// B's own key must lose even when its content hash would win a tie.
+	content := ""
+	for index := 0; ; index++ {
+		candidate := fmt.Sprintf("B key %d", index)
+		local, _ := NewRecord(KindKey, "~/.ssh/id_web", KeyData{Path: "~/.ssh/id_web", Private: []byte(candidate)})
+		if local.Hash > remote.Hash {
+			content = candidate
+			break
+		}
+	}
+	keyPath := filepath.Join(b.home, ".ssh", "id_web")
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recovery, _, err := a.engine.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.engine.Join(recovery, ""); err != nil {
+		t.Fatal(err)
+	}
+	for round := 0; round < 3; round++ {
+		mustSync(t, b)
+		mustSync(t, a)
+	}
+	key, _ := a.engine.Key()
+	bundle, _ := os.ReadFile(filepath.Join(storage.Dir, BundleFile))
+	records, err := Open(key, bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if record.Kind == KindKey && record.Hash != remote.Hash {
+			t.Fatal("B's private key reached the bundle")
+		}
+	}
+	if data, _ := os.ReadFile(filepath.Join(a.home, ".ssh", "id_web")); string(data) != string(original) {
+		t.Fatal("A's key changed")
+	}
+	if data, _ := os.ReadFile(keyPath); string(data) != content {
+		t.Fatal("B's key changed")
 	}
 }
