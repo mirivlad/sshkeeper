@@ -301,7 +301,7 @@ func (cfg *Config) setValues(section string, entries [][2]string) error {
 			for len(lines) > 0 && lines[len(lines)-1] == "" {
 				lines = lines[:len(lines)-1]
 			}
-			lines = append(lines, "", "["+section+"]", text, "")
+			lines = append(lines, "", "["+section+"]", text)
 		}
 	}
 	updated := strings.Join(lines, newline)
