@@ -805,7 +805,7 @@ func (fm *formModel) cycleAuthMethod(delta int) {
 }
 
 // authSelectorView draws the auth method as a segmented selector:
-// "Auth Method (←/→)> password ‹ key › key+pass agent".
+// "Auth Method (←/→)> password ‹key› key+pass agent".
 func (fm *formModel) authSelectorView() string {
 	label := blurredStyle.Render(fm.labelAt(authFieldIndex) + ": ")
 	focused := fm.focusIdx == authFieldIndex
@@ -818,14 +818,14 @@ func (fm *formModel) authSelectorView() string {
 		name := authLabel(method)
 		switch {
 		case method == current && focused:
-			parts[index] = selectedStyle.Render(glyphs.pickLeft + " " + name + " " + glyphs.pickRight)
+			parts[index] = selectedStyle.Render(glyphs.pickLeft + name + glyphs.pickRight)
 		case method == current:
-			parts[index] = normalStyle.Copy().Bold(true).Render(glyphs.pickLeft + " " + name + " " + glyphs.pickRight)
+			parts[index] = normalStyle.Copy().Bold(true).Render(glyphs.pickLeft + name + glyphs.pickRight)
 		default:
-			parts[index] = mutedStyle.Render("  " + name + "  ")
+			parts[index] = mutedStyle.Render(name)
 		}
 	}
-	return label + strings.Join(parts, "")
+	return label + strings.Join(parts, " ")
 }
 
 func (fm *formModel) applySaveError(err error) {

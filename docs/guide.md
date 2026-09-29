@@ -296,7 +296,7 @@ Add Server
   Host *:             mail.example.org
   Port *:             22
   User:               root
-  Auth Method (←/→):    password  ‹ key ›  key+pass  agent
+  Auth Method (←/→):    password ‹key› key+pass agent
   Identity File:      ~/.ssh/id_ed25519
   Route:              profile:bastion
   Group:              KP

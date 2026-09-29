@@ -300,7 +300,7 @@ func TestAuthSelectorCyclesWithArrowsAndIgnoresTyping(t *testing.T) {
 	if fm.authMethodValue() != model.AuthAgent || fm.inputs[authFieldIndex].Value() != "agent" {
 		t.Fatalf("typing must not edit the selector, got %q", fm.inputs[authFieldIndex].Value())
 	}
-	if view := fm.View(); !strings.Contains(view, "‹ agent ›") || !strings.Contains(view, "password") {
+	if view := fm.View(); !strings.Contains(view, "‹agent›") || !strings.Contains(view, "password") {
 		t.Fatalf("selector should show the current and other methods:\n%s", view)
 	}
 }
