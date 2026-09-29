@@ -132,8 +132,8 @@ func (m *tuiModel) applyServerTest(msg serverTestedMsg) {
 		m.err = nil
 		m.success = i18n.Tf("Tested %d servers: all OK.", "Проверено серверов: %d, все доступны.", total)
 	default:
-		m.success = ""
-		m.err = errorNotice(i18n.Tf("Tested %d servers: %d OK, %d failed.", "Проверено серверов: %d; доступны: %d, с ошибкой: %d.", total, passed, total-passed))
+		m.err, m.success = nil, ""
+		m.warning = i18n.Tf("Tested %d servers: %d OK, %d failed.", "Проверено серверов: %d; доступны: %d, с ошибкой: %d.", total, passed, total-passed)
 	}
 }
 

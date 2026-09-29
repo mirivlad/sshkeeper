@@ -84,8 +84,8 @@ func TestTestAllChecksVisibleServersAndSummarizes(t *testing.T) {
 	if m.serverByAlias("down").LastTestStatus != model.TestFailed {
 		t.Fatal("in-memory status not updated")
 	}
-	if m.err == nil || !strings.Contains(m.err.Error(), "2 OK, 1 failed") {
-		t.Fatalf("expected batch summary, got err=%v success=%q", m.err, m.success)
+	if m.err != nil || !strings.Contains(m.warning, "2 OK, 1 failed") || !strings.Contains(m.View(), "2 OK, 1 failed") {
+		t.Fatalf("expected batch summary warning, got err=%v warning=%q", m.err, m.warning)
 	}
 }
 

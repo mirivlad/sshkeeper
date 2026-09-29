@@ -46,6 +46,7 @@ var (
 
 	errorStyle   = lipgloss.NewStyle().Foreground(colorFail).Bold(true)
 	successStyle = lipgloss.NewStyle().Foreground(colorOK).Bold(true)
+	warningStyle = lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
 
 	focusedStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	blurredStyle = lipgloss.NewStyle().Foreground(colorMuted)
