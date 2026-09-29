@@ -180,7 +180,9 @@ Vault created and unlocked for this command. You're ready to go!
 
 ![Широкий главный экран](screenshots/screen_1.png)
 
-![Главный экран 80x24](screenshots/screen_2.png)
+![Живой фильтр на экране 80x24](screenshots/screen_2.png)
+
+![Сортировка по группам со свёрнутой группой](screenshots/screen_6.png)
 
 **Столбцы:**
 
@@ -897,7 +899,7 @@ SSH-сервера через промежуточные узлы, а не ад�
 | `Y` | Подтвердить действие |
 | `Esc` / `N` | Отменить |
 
-![Безопасное подтверждение удаления](screenshots/screen_5.png)
+![Диалог подтверждения удаления](screenshots/screen_5.png)
 
 ---
 

@@ -206,13 +206,13 @@ it to DEL (in xterm, `backarrowKey: false`).
 
 ### Screenshots
 
-| Wide dashboard | Dashboard 80x24 | Server form 60x16 |
-|----------------|-----------------|-------------------|
-| ![Wide dashboard](docs/screenshots/screen_1.png) | ![Dashboard 80x24](docs/screenshots/screen_2.png) | ![Server form 60x16](docs/screenshots/screen_3.png) |
+| Wide dashboard | Live filter, 80x24 | Server form, 60x16 |
+|----------------|--------------------|--------------------|
+| ![Wide dashboard](docs/screenshots/screen_1.png) | ![Live filter at 80x24](docs/screenshots/screen_2.png) | ![Server form at 60x16](docs/screenshots/screen_3.png) |
 
-| Port forward form | Safe confirmation |
-|-------------------|-------------------|
-| ![Port forward form](docs/screenshots/screen_4.png) | ![Safe confirmation](docs/screenshots/screen_5.png) |
+| Group order | Port forward form | Confirmation dialog |
+|-------------|-------------------|---------------------|
+| ![Group order with a folded group](docs/screenshots/screen_6.png) | ![Port forward form](docs/screenshots/screen_4.png) | ![Confirmation dialog](docs/screenshots/screen_5.png) |
 
 ### Key Reference
 
