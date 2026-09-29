@@ -383,10 +383,25 @@ func (fm *formModel) loadStartupPicker() {
 	fm.showStartupList = true
 }
 
+// filterActive reports whether a picker list has a filter being typed or
+// applied. Esc then clears the filter first; the next Esc closes the picker.
+func filterActive(l list.Model) bool {
+	return l.FilterState() != list.Unfiltered
+}
+
+// hasOverlay reports whether a picker or editor is open on top of the form,
+// so Esc must close it instead of leaving the form.
+func (fm *formModel) hasOverlay() bool {
+	return fm.showAuthList || fm.showGroupList || fm.showIdentityList || fm.showTagList || fm.showStartupList || fm.showRouteList
+}
+
 func (fm *formModel) updateStartupPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.Type {
 		case tea.KeyEsc:
+			if filterActive(fm.startupList) {
+				break
+			}
 			fm.showStartupList = false
 			return fm, nil
 		case tea.KeyEnter:
@@ -428,6 +443,9 @@ func (fm *formModel) updateIdentityPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.Type {
 		case tea.KeyEsc:
+			if filterActive(fm.identityList) {
+				break
+			}
 			fm.showIdentityList = false
 			return fm, nil
 		case tea.KeyEnter:
@@ -447,6 +465,9 @@ func (fm *formModel) updateTagPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.Type {
 		case tea.KeyEsc:
+			if filterActive(fm.tagList) {
+				break
+			}
 			fm.showTagList = false
 			return fm, nil
 		case tea.KeySpace, tea.KeyEnter:
@@ -515,6 +536,11 @@ func (fm *formModel) updateRouteEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return fm, cmd
 		}
 		return fm, nil
+	}
+	if key.Type == tea.KeyEsc && fm.routePane == 1 && filterActive(fm.routeList) {
+		var cmd tea.Cmd
+		fm.routeList, cmd = fm.routeList.Update(msg)
+		return fm, cmd
 	}
 	if key.Type == tea.KeyEsc {
 		fm.showRouteList = false
@@ -651,6 +677,9 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch msg.Type {
 			case tea.KeyEsc:
+				if filterActive(fm.groupList) {
+					break
+				}
 				fm.showGroupList = false
 				return fm, nil
 			case tea.KeyEnter:
@@ -671,6 +700,9 @@ func (fm *formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyMsg:
 			switch msg.Type {
 			case tea.KeyEsc:
+				if filterActive(fm.authList) {
+					break
+				}
 				fm.showAuthList = false
 				return fm, nil
 			case tea.KeyEnter:
