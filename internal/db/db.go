@@ -116,7 +116,7 @@ func (db *DB) ensureSchema() error {
 	if err != nil {
 		return fmt.Errorf("copy legacy templates: %w", err)
 	}
-	return nil
+	return db.ensureSyncSchema()
 }
 
 func (db *DB) hasColumn(tableName, columnName string) (bool, error) {
