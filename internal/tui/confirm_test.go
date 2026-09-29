@@ -96,8 +96,8 @@ func TestServerDeletePartialSuccessRemovesLocalRow(t *testing.T) {
 	m = updated.(*tuiModel)
 	updated, _ = m.Update(cmd())
 	m = updated.(*tuiModel)
-	if len(m.servers) != 0 || len(m.list.Items()) != 0 {
-		t.Fatalf("deleted server remained visible: servers=%d items=%d", len(m.servers), len(m.list.Items()))
+	if len(m.servers) != 0 || len(m.rows) != 0 {
+		t.Fatalf("deleted server remained visible: servers=%d items=%d", len(m.servers), len(m.rows))
 	}
 	if m.err != nil || !strings.Contains(m.success, "refresh failed") {
 		t.Fatalf("partial success was misreported: err=%v success=%q", m.err, m.success)
