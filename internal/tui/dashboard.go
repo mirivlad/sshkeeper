@@ -113,6 +113,10 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 	case rowCapacity > 0:
 		start, end := visibleServerRange(len(m.rows), m.cursor, rowCapacity)
 		for index, row := range m.rows[start:end] {
+			if row.isHeader() {
+				lines = append(lines, m.renderGroupHeader(innerWidth, row, start+index == m.cursor))
+				continue
+			}
 			lines = append(lines, m.renderServerColumns(innerWidth, showTarget, row.server, start+index == m.cursor))
 		}
 		if showRange {
@@ -126,6 +130,26 @@ func (m *tuiModel) renderServerPanel(width, height int, showTarget bool) string 
 		lines = lines[:innerHeight]
 	}
 	return renderPanel(width, height, lines)
+}
+
+// renderGroupHeader draws a foldable group heading: "▾ Production  3".
+func (m *tuiModel) renderGroupHeader(width int, row serverRow, selected bool) string {
+	fold := glyphs.expanded
+	if m.collapsed[row.group] {
+		fold = glyphs.collapsed
+	}
+	name := row.group
+	if name == "" {
+		name = i18n.T("No group", "Без группы")
+	}
+	marker := "  "
+	style := groupHeaderStyle
+	if selected {
+		marker = "> "
+		style = selectedRowStyle.Copy().Bold(true)
+	}
+	line := marker + fold + " " + name + "  " + fmt.Sprint(row.count)
+	return style.Render(padCells(line, width))
 }
 
 // renderServerPanelTitle shows the profile count, or the live filter prompt

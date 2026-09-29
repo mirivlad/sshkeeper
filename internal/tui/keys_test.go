@@ -77,3 +77,21 @@ func TestLettersStayTextInsideFilter(t *testing.T) {
 		t.Fatalf("letters must be filter text: screen=%v value=%q", m.screen, m.searchInput.Value())
 	}
 }
+
+func TestCoalescedRunesActAsSeparateKeys(t *testing.T) {
+	m := New([]*model.Server{
+		{Alias: "a1", Host: "a", Port: 22, User: "u"},
+		{Alias: "a2", Host: "b", Port: 22, User: "u"},
+		{Alias: "a3", Host: "c", Port: 22, User: "u"},
+	})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("jj")})
+	m = updated.(*tuiModel)
+	if m.selectedServer().Alias != "a3" {
+		t.Fatalf("jj should move twice, got %s", m.selectedServer().Alias)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("mx")})
+	m = updated.(*tuiModel)
+	if m.screen != screenManageMenu {
+		t.Fatalf("m should open Manage and x should go to that screen, got %v", m.screen)
+	}
+}
