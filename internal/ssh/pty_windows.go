@@ -90,6 +90,9 @@ func startConPTY(sshBinary string, args []string, width, height int) (*conPTY, e
 
 	startup := windows.StartupInfoEx{ProcThreadAttributeList: attributes.List()}
 	startup.Cb = uint32(unsafe.Sizeof(startup))
+	// Empty standard handles make ssh open the pseudo console. Without the
+	// flag it gets sshkeeper's own stdio and bypasses the pseudo console.
+	startup.Flags = windows.STARTF_USESTDHANDLES
 	var info windows.ProcessInformation
 	if err := windows.CreateProcess(appName, commandLine, nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &info); err != nil {
 		p.close()
