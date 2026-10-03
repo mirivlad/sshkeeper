@@ -77,7 +77,7 @@ go build -o ~/.local/bin/sshkeeper .
 |-----------|--------|------------|
 | Linux | Основная релизная платформа | Архивы `amd64`/`arm64`, а также `.deb` и `.rpm`. Пакеты рекомендуют, но не требуют `tmux` для Sessions. |
 | macOS | Основная релизная платформа | Архивы `darwin/amd64` и `darwin/arm64`, нужен системный `ssh`; `brew install tmux` включает Sessions. Homebrew formula sshkeeper запланирована. |
-| Windows | Experimental | Нужен OpenSSH Client как `ssh.exe` в `PATH`. В native Windows сборке Sessions скрыты; Linux-сборка внутри WSL может использовать `tmux`. |
+| Windows | Experimental | Нужны Windows 10 1809+ и OpenSSH Client как `ssh.exe` в `PATH`. Запускается двойным щелчком из Проводника или из любой консоли; вход по паролю и по ключу с фразой вводит сохранённый секрет через псевдоконсоль Windows (ConPTY). В native Windows сборке Sessions скрыты; Linux-сборка внутри WSL может использовать `tmux`. |
 
 На Windows OpenSSH Client можно установить через Windows Optional Features или PowerShell:
 

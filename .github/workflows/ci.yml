@@ -50,6 +50,22 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: ./packaging/scripts/test-legacy-migration.sh
 
+  # Windows builds are experimental, so only the code that differs there runs
+  # natively: the pseudo console that types stored passwords into ssh.exe.
+  windows-pty:
+    name: windows pseudo console
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go test
+        run: go test ./internal/ssh -run ConPTY -count=1 -v
+
   cross-build:
     name: cross-build
     runs-on: ubuntu-latest
