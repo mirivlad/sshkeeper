@@ -95,8 +95,8 @@ type SecretData struct {
 }
 
 // KeyData is a private key file referenced by a profile, and its public half
-// when present. Path is the path as written in the profile, e.g.
-// "~/.ssh/id_ed25519".
+// when present. New bundles store Path in portable home-relative form, e.g.
+// "~/.ssh/id_ed25519". Apply also accepts legacy absolute Linux/Windows paths.
 type KeyData struct {
 	Path    string `json:"path"`
 	Private []byte `json:"private"`

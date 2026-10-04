@@ -2,13 +2,11 @@ package tunnel
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/mirivlad/sshkeeper/internal/config"
@@ -140,6 +138,7 @@ func StartResolved(cfg *config.Config, server *model.Server, forwards []*model.F
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
+	prepareBackgroundCommand(cmd)
 
 	if err := cmd.Start(); err != nil {
 		invocation.Cleanup()
@@ -235,11 +234,5 @@ func IsRunning(id int64) bool {
 	if state.PID <= 0 {
 		return false
 	}
-	proc, err := os.FindProcess(state.PID)
-	if err != nil {
-		return false
-	}
-	// Signal 0 just checks if process exists
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil || errors.Is(err, syscall.EPERM)
+	return processRunning(state.PID)
 }

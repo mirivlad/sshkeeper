@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"syscall"
+
+	"github.com/inconshreveable/mousetrap"
 
 	"github.com/mirivlad/sshkeeper/internal/config"
 	"github.com/mirivlad/sshkeeper/internal/db"
@@ -40,16 +43,30 @@ func Execute() {
 		_ = i18n.SetPreference(language)
 	} else {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitFailure()
 	}
 	localizeCLIHelp()
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitFailure()
 	}
 }
 
+// exitFailure ends sshkeeper with status 1. A console window opened by
+// Windows Explorer closes on exit, so wait for Enter to keep the error
+// readable.
+func exitFailure() {
+	if mousetrap.StartedByExplorer() {
+		fmt.Fprint(os.Stderr, tr("Press Enter to close.", "Нажмите Enter, чтобы закрыть окно."))
+		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+	}
+	os.Exit(1)
+}
+
 func init() {
+	// sshkeeper is a TUI: started from Explorer it runs in the console window
+	// Windows opens for it, so cobra must not refuse with "run from cmd.exe".
+	cobra.MousetrapHelpText = ""
 	rootCmd.SetVersionTemplate("sshkeeper {{.Version}}\n")
 	cobra.OnInitialize(initApp)
 	rootCmd.AddCommand(versionCmd)
@@ -87,24 +104,24 @@ func initApp() {
 	cfg, err = config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, trf("Error loading config: %v", "Ошибка загрузки конфигурации: %v", err))
-		os.Exit(1)
+		exitFailure()
 	}
 	if err := i18n.SetPreference(cfg.UI.Language); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		exitFailure()
 	}
 	localizeCLIHelp()
 
 	appDB, err = db.Open(cfg.DataDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, trf("Error opening database: %v", "Ошибка открытия базы данных: %v", err))
-		os.Exit(1)
+		exitFailure()
 	}
 
 	// Initialize tunnel state manager
 	if err := tunnelpkg.Init(cfg.DataDir); err != nil {
 		fmt.Fprintln(os.Stderr, trf("Error initializing tunnel manager: %v", "Ошибка инициализации менеджера туннелей: %v", err))
-		os.Exit(1)
+		exitFailure()
 	}
 
 	// Handle vault: create on first run, unlock on subsequent runs
@@ -123,7 +140,7 @@ func initApp() {
 			fmt.Println()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, trf("Error reading password: %v", "Ошибка чтения пароля: %v", err))
-				os.Exit(1)
+				exitFailure()
 			}
 
 			if len(pw1) == 0 {
@@ -136,7 +153,7 @@ func initApp() {
 			fmt.Println()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, trf("Error reading password: %v", "Ошибка чтения пароля: %v", err))
-				os.Exit(1)
+				exitFailure()
 			}
 
 			if string(pw1) != string(pw2) {
@@ -146,13 +163,13 @@ func initApp() {
 
 			if err := vault.Create(vaultPath, string(pw1)); err != nil {
 				fmt.Fprintln(os.Stderr, trf("Error creating vault: %v", "Ошибка создания хранилища: %v", err))
-				os.Exit(1)
+				exitFailure()
 			}
 
 			// Unlock immediately after creation
 			if err := v.Unlock(string(pw1)); err != nil {
 				fmt.Fprintln(os.Stderr, trf("Error unlocking vault: %v", "Ошибка разблокировки хранилища: %v", err))
-				os.Exit(1)
+				exitFailure()
 			}
 
 			vaultInstance = v
@@ -174,7 +191,7 @@ func initApp() {
 			fmt.Println()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, trf("Error reading password: %v", "Ошибка чтения пароля: %v", err))
-				os.Exit(1)
+				exitFailure()
 			}
 
 			if err := v.Unlock(string(pw)); err != nil {
@@ -184,7 +201,7 @@ func initApp() {
 					continue
 				}
 				fmt.Fprintln(os.Stderr, tr("Too many failed attempts. Start the command again to retry.", "Слишком много неудачных попыток. Запустите команду снова."))
-				os.Exit(1)
+				exitFailure()
 			}
 
 			vaultInstance = v

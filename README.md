@@ -60,7 +60,7 @@ Platform status:
 |----------|--------|-------|
 | Linux | Primary release target | `amd64`/`arm64` tarballs plus native `.deb` and `.rpm` packages. Native packages recommend (but do not require) `tmux` for persistent Sessions. |
 | macOS | Primary release target | `darwin/amd64` and `darwin/arm64` release tarballs are available. Requires system `ssh`; install optional `tmux` with `brew install tmux` to enable Sessions. Homebrew formula planned. |
-| Windows | Experimental | Requires OpenSSH Client as `ssh.exe` in `PATH`. Native Windows builds do not expose tmux Sessions; running the Linux build inside WSL can use them when `tmux` is installed there. |
+| Windows | Experimental | Requires Windows 10 1809+ and OpenSSH Client as `ssh.exe` in `PATH`. Runs from Explorer (double-click) or any console; password and key-passphrase auth type the stored secret through a Windows pseudo console (ConPTY). Native Windows builds do not expose tmux Sessions; running the Linux build inside WSL can use them when `tmux` is installed there. |
 
 On Windows, install OpenSSH Client via Windows Optional Features or PowerShell:
 
@@ -466,9 +466,12 @@ sshkeeper sync status | recovery-key | leave
   is removed afterwards, so it never enters the sync history.
 - Sync refuses to run while the vault is locked, so missing secrets are never
   mistaken for deletions.
+- Referenced SSH keys use portable paths in the sync bundle. For example,
+  `/home/alice/.ssh/id_ed25519` is received on Windows as the local
+  `%USERPROFILE%\.ssh\id_ed25519`, not as a Linux path.
 - An existing key file is never overwritten. If a device already has a
-  different key at the same path, it keeps its own, reports it, and never
-  sends it to other devices.
+  different key at the same local path, it keeps its own, reports it, and
+  never sends it to other devices.
 - Changes merge per item by the latest edit; deletions travel too.
 
 ## Vault

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,8 +17,6 @@ import (
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
-
-var passwordPromptRe = regexp.MustCompile(`(?i)(password|passphrase).*:\s*$`)
 
 func ConnectWithPassword(sshBinary string, args []string, password string) error {
 	cmd := exec.Command(sshBinary, args...)

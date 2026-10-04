@@ -50,6 +50,28 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: ./packaging/scripts/test-legacy-migration.sh
 
+  # Windows-specific behavior must run natively: ConPTY, detached background
+  # processes, and local key-path translation cannot be validated by cross-build.
+  windows-pty:
+    name: windows native
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: ConPTY tests
+        run: go test ./internal/ssh -run ConPTY -count=1 -v
+
+      - name: background tunnel process tests
+        run: go test ./internal/tunnel -run BackgroundCommand -count=1 -v
+
+      - name: synchronized key path tests
+        run: go test ./internal/syncer -run "SyncMakesAbsoluteIdentityPathPortableAcrossHomes|PortableKeyPath" -count=1 -v
+
   cross-build:
     name: cross-build
     runs-on: ubuntu-latest
