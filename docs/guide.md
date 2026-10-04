@@ -90,21 +90,21 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 Для Debian/Ubuntu (amd64):
 
 ```bash
-sudo apt install ./sshkeeper_0.4.0-1_amd64.deb
+sudo apt install ./sshkeeper_0.8.0-1_amd64.deb
 ```
 
 Для Fedora/RHEL-подобных систем (x86_64):
 
 ```bash
-sudo dnf install ./sshkeeper-0.4.0-1.x86_64.rpm
+sudo dnf install ./sshkeeper-0.8.0-1.x86_64.rpm
 ```
 
-Для ARM64 публикуются `sshkeeper_0.4.0-1_arm64.deb` и
-`sshkeeper-0.4.0-1.aarch64.rpm`. Архивный вариант остаётся доступен:
+Для ARM64 публикуются `sshkeeper_0.8.0-1_arm64.deb` и
+`sshkeeper-0.8.0-1.aarch64.rpm`. Архивный вариант остаётся доступен:
 
 ```bash
-tar -xzf sshkeeper_v0.4.0_linux_amd64.tar.gz
-sudo install -m 0755 sshkeeper_v0.4.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
+tar -xzf sshkeeper_v0.8.0_linux_amd64.tar.gz
+sudo install -m 0755 sshkeeper_v0.8.0_linux_amd64/sshkeeper /usr/local/bin/sshkeeper
 ```
 
 ---
@@ -614,8 +614,9 @@ SSH-вкладка при этом не закрывается.
 
 На Unix workspace использует PTY, на Windows — ConPTY. Эмуляция терминала
 внутри TUI выполняется `charmbracelet/x/vt`. Мышь включена для самого
-sshkeeper: колесо листает серверы, можно выбирать строки и переключать вкладки
-кликом в терминалах, которые передают mouse events.
+sshkeeper: колесо листает серверы, кликом можно выбирать строки, выполнять
+действия в правой панели и переключать вкладки в терминалах, которые передают
+mouse events.
 
 Мёртвые фоновые туннели больше не копятся в `tunnels.json`: при загрузке и
 обновлении списка записи процессов, которых уже нет, автоматически удаляются.

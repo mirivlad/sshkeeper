@@ -139,3 +139,24 @@ func TestSessionCloseTerminatesProcessAndSignalsDone(t *testing.T) {
 		t.Fatalf("Exited = %v, %v; want true, nil", exited, err)
 	}
 }
+
+func TestSessionKeepsFinalScreenAfterProcessExit(t *testing.T) {
+	proc := newFakeProcess()
+	session := New("final", proc, 40, 10)
+
+	proc.feed("final screen stays\r\n")
+	waitUntil(t, func() bool {
+		return strings.Contains(ansi.Strip(session.Render()), "final screen stays")
+	})
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-session.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("session did not exit")
+	}
+	if got := ansi.Strip(session.Render()); !strings.Contains(got, "final screen stays") {
+		t.Fatalf("final terminal screen was lost after exit: %q", got)
+	}
+}

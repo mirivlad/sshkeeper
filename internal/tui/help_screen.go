@@ -378,7 +378,7 @@ func (m *actionMenuModel) unavailableReason(action string) string {
 	if m.serverAlias == "" {
 		return ""
 	}
-	if action != "tunnel" && action != "tunnel_n" && action != "tunnel_bg" {
+	if action != "tunnel" && action != "tunnel_n" && action != "tunnel_bg" && action != "tunnel_connect" {
 		return ""
 	}
 	if m.loadingForwards {
@@ -390,7 +390,7 @@ func (m *actionMenuModel) unavailableReason(action string) string {
 	if m.enabledForwards == 0 {
 		return i18n.T("No enabled port forwards. Add or enable a rule first.", "Нет включённых правил проброса. Добавьте или включите правило.")
 	}
-	if action == "tunnel_bg" && (m.authMethod == model.AuthPassword || m.authMethod == model.AuthKeyPassphrase) {
+	if (action == "tunnel_bg" || action == "tunnel_connect") && (m.authMethod == model.AuthPassword || m.authMethod == model.AuthKeyPassphrase) {
 		return i18n.T("Background mode needs key or agent authentication; use a foreground mode.", "Для фонового режима нужен ключ или SSH-агент; используйте активный режим.")
 	}
 	return ""
@@ -406,7 +406,8 @@ func newActionMenuModel(w, h int, availability ...bool) *actionMenuModel {
 	}
 	items = append(items,
 		actionMenuItem{label: i18n.T("Port-forward rules", "Правила проброса портов"), action: "forwards", description: i18n.T("Add, edit, enable, or remove saved forwarding rules for this server; no process starts.", "Добавить, изменить, включить или удалить сохранённые правила; процесс не запускается.")},
-		actionMenuItem{label: i18n.T("Connect with forwards", "Подключиться с пробросом"), action: "tunnel", description: i18n.T("Open an SSH session and activate enabled forwarding rules.", "Открыть SSH-сессию и активировать включённые правила проброса.")},
+		actionMenuItem{label: i18n.T("Tunnel + Connect", "Туннель + подключение"), action: "tunnel_connect", description: i18n.T("Start enabled forwards in the background and open an embedded SSH tab.", "Запустить включённые пробросы в фоне и открыть встроенную SSH-вкладку.")},
+		actionMenuItem{label: i18n.T("Connect with forwards (foreground)", "Подключиться с пробросом (активно)"), action: "tunnel", description: i18n.T("Open a traditional foreground SSH session with enabled forwarding rules.", "Открыть традиционную активную SSH-сессию с включёнными правилами проброса.")},
 		actionMenuItem{label: i18n.T("Start tunnel process (no shell)", "Запустить туннель без оболочки"), action: "tunnel_n", description: i18n.T("Run enabled forwarding rules in the foreground without a shell.", "Запустить включённые правила в активном процессе без оболочки.")},
 		actionMenuItem{label: i18n.T("Start background tunnel process", "Запустить фоновый туннель"), action: "tunnel_bg", description: i18n.T("Run enabled forwarding rules as a background SSH process.", "Запустить включённые правила в фоновом процессе SSH.")},
 		actionMenuItem{label: i18n.T("SSH route", "SSH-маршрут"), action: "route", description: i18n.T("Configure the direct or bastion route used to reach this server; no tunnel starts.", "Настроить прямой маршрут или путь через промежуточные узлы; туннель не запускается.")},

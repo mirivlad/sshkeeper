@@ -1078,7 +1078,7 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlC, tea.KeyCtrlQ:
-		return m, tea.Quit
+		return m.requestQuit()
 
 	case tea.KeyCtrlA:
 		m.form = newFormModel(m.width, m.height)
@@ -1139,7 +1139,7 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.updateList(tea.KeyMsg{Type: alias})
 		}
 		if msg.String() == "q" {
-			return m, tea.Quit
+			return m.requestQuit()
 		}
 		if msg.String() == "i" && len(m.servers) == 0 {
 			return m, importServersCmd()
@@ -1961,6 +1961,16 @@ func (m *tuiModel) updateActionMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.actionMenu = nil
 				m.result = &TUIResult{Server: item.server, Action: "session_open"}
 				return m, tea.Quit
+			}
+		case "tunnel_connect":
+			if item, ok := m.selectedServerItem(); ok {
+				m.actionMenu = nil
+				m.screen = screenList
+				if m.runtime.tunnels[item.server.Alias] > 0 {
+					return m.openWorkspaceSession(item.server.Alias)
+				}
+				m.pendingTunnelConnect = item.server.Alias
+				return m.beginBackgroundTunnel(item.server, screenList)
 			}
 		case "tunnel":
 			if item, ok := m.selectedServerItem(); ok {

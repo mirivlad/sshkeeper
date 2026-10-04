@@ -341,7 +341,7 @@ func (m *tuiModel) workspaceTabAtX(x int) int {
 	}
 	pos := 0
 	for index, label := range m.workspaceTabPlainLabels() {
-		width := len([]rune("[" + label + "]"))
+		width := lineWidth("[" + label + "]")
 		if x >= pos && x < pos+width {
 			return index
 		}
@@ -399,6 +399,14 @@ func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *tuiModel) dashboardBodyTop(width int) int {
+	header := m.renderDashboardHeader(width)
+	if len(m.workspaceSessions) > 0 {
+		header = m.renderWorkspaceTabs(width) + "\n" + header
+	}
+	return displayLineCount(header) + displayLineCount(m.renderDashboardNotification(width))
+}
+
 func (m *tuiModel) updateDashboardMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	event := tea.MouseEvent(msg)
 	if m.screen != screenList && m.screen != screenSearch {
@@ -424,10 +432,24 @@ func (m *tuiModel) updateDashboardMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if classifyTerminal(m.width, m.height) == sizeWide {
 		contentWidth := max(1, m.width-1)
 		leftWidth := contentWidth * 62 / 100
+		rightWidth := contentWidth - leftWidth - 1
 		if event.X > leftWidth {
-			if m.selectedServer() != nil {
-				m.dashboardFocus = 1
-				m.detailAction = 0
+			server := m.selectedServer()
+			if server == nil {
+				return m, nil
+			}
+			m.dashboardFocus = 1
+			m.detailAction = 0
+
+			// The right panel starts at dashboardBodyTop; its first inner row is
+			// one line below the panel title. Clicking an action executes it
+			// immediately, while other clicks simply focus the actions panel.
+			line := event.Y - m.dashboardBodyTop(contentWidth) - 1
+			innerWidth := max(1, rightWidth-2)
+			if actionIndex := m.detailActionIndexAtLine(server, innerWidth, line); actionIndex >= 0 {
+				actions := m.profileActions(server)
+				m.detailAction = actionIndex
+				return m.runDetailAction(server, actions[actionIndex])
 			}
 			return m, nil
 		}

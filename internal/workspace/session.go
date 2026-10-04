@@ -32,14 +32,16 @@ type Session struct {
 	proc Process
 	emu  *vt.Emulator
 
-	screenMu sync.Mutex
-	stateMu  sync.RWMutex
-	exited   bool
-	exitErr  error
-	width    int
-	height   int
-	done     chan struct{}
-	once     sync.Once
+	screenMu       sync.Mutex
+	stateMu        sync.RWMutex
+	exited         bool
+	exitErr        error
+	width          int
+	height         int
+	done           chan struct{}
+	outputDone     chan struct{}
+	once           sync.Once
+	inputCloseOnce sync.Once
 }
 
 func New(alias string, proc Process, width, height int) *Session {
@@ -50,14 +52,15 @@ func New(alias string, proc Process, width, height int) *Session {
 		height = 1
 	}
 	s := &Session{
-		id:      fmt.Sprintf("session-%d", nextID.Add(1)),
-		alias:   alias,
-		started: time.Now(),
-		proc:    proc,
-		emu:     vt.NewEmulator(width, height),
-		width:   width,
-		height:  height,
-		done:    make(chan struct{}),
+		id:         fmt.Sprintf("session-%d", nextID.Add(1)),
+		alias:      alias,
+		started:    time.Now(),
+		proc:       proc,
+		emu:        vt.NewEmulator(width, height),
+		width:      width,
+		height:     height,
+		done:       make(chan struct{}),
+		outputDone: make(chan struct{}),
 	}
 	go s.forwardTerminalInput()
 	go s.readProcessOutput()
@@ -144,6 +147,7 @@ func (s *Session) forwardTerminalInput() {
 }
 
 func (s *Session) readProcessOutput() {
+	defer close(s.outputDone)
 	buf := make([]byte, 16384)
 	for {
 		n, err := s.proc.Read(buf)
@@ -162,15 +166,40 @@ func (s *Session) readProcessOutput() {
 	}
 }
 
+func (s *Session) closeTerminalInput() {
+	s.inputCloseOnce.Do(func() {
+		if closer, ok := s.emu.InputPipe().(io.Closer); ok {
+			_ = closer.Close()
+		}
+	})
+}
+
 func (s *Session) waitProcess() {
 	err := s.proc.Wait()
 	s.stateMu.Lock()
 	s.exited = true
 	s.exitErr = err
 	s.stateMu.Unlock()
+	// Stop accepting terminal input now that the child is gone, but keep the
+	// emulator screen itself alive for the exited tab.
+	s.closeTerminalInput()
+
+	// Unix PTYs normally report EOF/EIO as soon as the child exits, so let the
+	// reader drain the final frame before closing the descriptor. ConPTY keeps
+	// its output pipe open until the pseudo console is closed; cap the drain
+	// window there (and for unusual Unix descendants that inherit the PTY).
+	select {
+	case <-s.outputDone:
+	case <-time.After(150 * time.Millisecond):
+	}
 	_ = s.proc.Close()
-	s.screenMu.Lock()
-	_ = s.emu.Close()
-	s.screenMu.Unlock()
+	select {
+	case <-s.outputDone:
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// Do not call Emulator.Close here: x/vt's Read and Close touch its closed
+	// flag without synchronization. The closed input pipe already wakes
+	// forwardTerminalInput, while the final terminal screen remains renderable.
 	s.once.Do(func() { close(s.done) })
 }

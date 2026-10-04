@@ -37,3 +37,22 @@ func TestInteractiveProcessSendsStoredSecretOnlyAtPasswordPrompt(t *testing.T) {
 		t.Fatal("secret bytes were not cleared after use")
 	}
 }
+
+func TestInteractiveProcessCleanupRunsOnceAcrossWaitAndClose(t *testing.T) {
+	platform := &promptFakePlatform{}
+	cleanupCalls := 0
+	p := &InteractiveProcess{
+		platform: platform,
+		cleanup:  func() { cleanupCalls++ },
+	}
+
+	if err := p.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if cleanupCalls != 1 {
+		t.Fatalf("cleanup calls = %d, want 1", cleanupCalls)
+	}
+}

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mirivlad/sshkeeper/internal/i18n"
@@ -50,6 +51,30 @@ func (m *tuiModel) profileActions(server *model.Server) []profileAction {
 		hint:  i18n.T("add, edit, enable or disable forwards", "добавить, изменить, включить или выключить пробросы"),
 	})
 	return actions
+}
+
+// detailActionIndexAtLine maps an inner right-panel row to a profile action.
+// It derives the hit row from the same rendered detail lines used by the
+// dashboard so mouse hit-testing follows layout changes automatically.
+func (m *tuiModel) detailActionIndexAtLine(server *model.Server, width, line int) int {
+	if server == nil || line < 0 {
+		return -1
+	}
+	actions := m.profileActions(server)
+	if len(actions) == 0 {
+		return -1
+	}
+	lines := m.serverDetailLines(server, width)
+	if line >= len(lines) {
+		return -1
+	}
+	text := lines[line]
+	for index, action := range actions {
+		if strings.Contains(text, action.label) {
+			return index
+		}
+	}
+	return -1
 }
 
 func (m *tuiModel) clampDetailAction(server *model.Server) {

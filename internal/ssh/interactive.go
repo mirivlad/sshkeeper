@@ -37,6 +37,7 @@ type InteractiveProcess struct {
 	secretSent  bool
 	accumulated strings.Builder
 	closeOnce   sync.Once
+	cleanupOnce sync.Once
 }
 
 func StartInteractiveResolved(cfg *config.Config, server *model.Server, resolve ProfileResolver, getVault VaultFunc, width, height int) (*InteractiveProcess, error) {
@@ -137,10 +138,16 @@ func (p *InteractiveProcess) Resize(width, height int) error {
 
 func (p *InteractiveProcess) Wait() error {
 	err := p.platform.Wait()
-	if p.cleanup != nil {
-		p.cleanup()
-	}
+	p.runCleanup()
 	return err
+}
+
+func (p *InteractiveProcess) runCleanup() {
+	p.cleanupOnce.Do(func() {
+		if p.cleanup != nil {
+			p.cleanup()
+		}
+	})
 }
 
 func (p *InteractiveProcess) Kill() error {
@@ -157,9 +164,7 @@ func (p *InteractiveProcess) Close() error {
 		p.secret = nil
 		p.mu.Unlock()
 		err = p.platform.Close()
-		if p.cleanup != nil {
-			p.cleanup()
-		}
+		p.runCleanup()
 	})
 	return err
 }

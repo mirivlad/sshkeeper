@@ -75,19 +75,19 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 
 ### Install from release
 
-The packages below are v0.7.0. This release adds encrypted sync between
-devices on top of the v0.6 dashboard described later in this README.
+The packages below are v0.8.0. This release adds the embedded Session Workspace
+while retaining encrypted synchronization and the v0.6+ dashboard.
 
 Debian/Ubuntu (amd64):
 
 ```bash
-sudo apt install ./sshkeeper_0.7.0-1_amd64.deb
+sudo apt install ./sshkeeper_0.8.0-1_amd64.deb
 ```
 
 Fedora/RHEL-family (x86_64):
 
 ```bash
-sudo dnf install ./sshkeeper-0.7.0-1.x86_64.rpm
+sudo dnf install ./sshkeeper-0.8.0-1.x86_64.rpm
 ```
 
 `arm64`/`aarch64` packages are published alongside the x86_64 builds. Native
@@ -273,8 +273,8 @@ you return to the server dashboard or switch to another SSH tab.
   panel. From there you can connect, **Tunnel + Connect**, start/stop the
   background tunnel, or open the full port-forward editor.
 - Mouse input is enabled for sshkeeper itself: wheel navigation, clickable
-  server rows, and clickable workspace tabs work in terminals that expose
-  mouse events, including native Windows consoles supported by Bubble Tea.
+  server rows, right-panel actions, and workspace tabs work in terminals that
+  expose mouse events, including native Windows consoles supported by Bubble Tea.
 - Quitting sshkeeper with live workspace tabs asks for confirmation.
 
 Workspace terminal emulation is provided by `charmbracelet/x/vt`. Unix uses a
