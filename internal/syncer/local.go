@@ -1,10 +1,12 @@
 package syncer
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	slashpath "path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -56,6 +58,98 @@ func (l *Local) expand(path string) string {
 	}
 }
 
+// portableKeyPath converts a device-local identity path into a path that is
+// meaningful on every OS. Keys under .ssh keep their relative name; arbitrary
+// external paths are copied into a deterministic sshkeeper-managed location.
+//
+// The text checks intentionally understand both slash styles so a v0.7.0/0.7.1
+// bundle made on Linux can be adopted on Windows and vice versa.
+func (l *Local) portableKeyPath(source string) string {
+	raw := strings.TrimSpace(source)
+	slash := strings.ReplaceAll(raw, "\\", "/")
+	if portable, ok := portableHomePath(slash); ok {
+		return portable
+	}
+
+	// A foreign absolute path may still clearly identify a key below .ssh.
+	lower := strings.ToLower(slash)
+	if index := strings.LastIndex(lower, "/.ssh/"); index >= 0 {
+		relative := slash[index+len("/.ssh/"):]
+		if clean, ok := safeSlashRelative(relative); ok {
+			return "~/.ssh/" + clean
+		}
+	}
+
+	// For a path native to this OS, preserve anything below the user's home.
+	full := l.expand(raw)
+	homeAbs, homeErr := filepath.Abs(l.Home)
+	fullAbs, fullErr := filepath.Abs(full)
+	if homeErr == nil && fullErr == nil {
+		if relative, err := filepath.Rel(homeAbs, fullAbs); err == nil && relative != "." &&
+			relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return "~/" + filepath.ToSlash(relative)
+		}
+	}
+
+	// An arbitrary external path has no portable equivalent. Give it a stable,
+	// collision-resistant managed name without exposing the original directory.
+	base := slashpath.Base(slash)
+	base = sanitizeKeyName(base)
+	sum := sha256.Sum256([]byte(slash))
+	return fmt.Sprintf("~/.ssh/sshkeeper/%s-%x", base, sum[:8])
+}
+
+func portableHomePath(slash string) (string, bool) {
+	if slash == "~" {
+		return "", false
+	}
+	if !strings.HasPrefix(slash, "~/") {
+		return "", false
+	}
+	relative, ok := safeSlashRelative(strings.TrimPrefix(slash, "~/"))
+	if !ok {
+		return "", false
+	}
+	return "~/" + relative, true
+}
+
+func safeSlashRelative(value string) (string, bool) {
+	clean := slashpath.Clean(strings.TrimSpace(value))
+	if clean == "" || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || slashpath.IsAbs(clean) {
+		return "", false
+	}
+	return clean, true
+}
+
+func sanitizeKeyName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "." || value == "/" {
+		return "key"
+	}
+	var out strings.Builder
+	for _, char := range value {
+		switch {
+		case char >= 'a' && char <= 'z',
+			char >= 'A' && char <= 'Z',
+			char >= '0' && char <= '9',
+			char == '.', char == '_', char == '-':
+			out.WriteRune(char)
+		default:
+			out.WriteByte('_')
+		}
+	}
+	if out.Len() == 0 {
+		return "key"
+	}
+	return out.String()
+}
+
+func (l *Local) localIdentityPath(portable string) string {
+	// Keep the portable ~/ prefix intact until expand sees it. filepath.Join
+	// will translate the remaining separators for the local OS.
+	return l.expand(portable)
+}
+
 // Export returns every local item as a record without a timestamp. Warnings
 // name items that could not be read (for example an unreadable key file).
 func (l *Local) Export() ([]Record, []string, error) {
@@ -81,12 +175,47 @@ func (l *Local) Export() ([]Record, []string, error) {
 	}
 
 	l.unreadable = map[string]bool{}
-	keyPaths := map[string]bool{}
+
+	// Identity paths are device-local. Export keys under portable home-relative
+	// names so the same encrypted bundle can move between Linux, macOS, and
+	// Windows without carrying /home/... or C:\Users\... into another OS.
+	keyPaths := map[string]string{} // local source path -> portable sync path
+	for _, server := range servers {
+		if source := strings.TrimSpace(server.IdentityFile); source != "" {
+			keyPaths[source] = l.portableKeyPath(source)
+		}
+	}
+	emittedKeys := map[string]bool{}
+	for source, portable := range keyPaths {
+		data, err := l.readKey(source)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				warnings = append(warnings, fmt.Sprintf("key %s: %v", source, err))
+			}
+			// Preserve an existing synced key instead of turning a temporary local
+			// read failure into a deletion.
+			l.unreadable[KindKey+":"+portable] = true
+			continue
+		}
+		if emittedKeys[portable] {
+			continue
+		}
+		data.Path = portable
+		if err := add(KindKey, portable, data); err != nil {
+			return nil, nil, err
+		}
+		emittedKeys[portable] = true
+	}
+
 	for _, server := range servers {
 		uuid := serverIDs[server.ID]
+		identity := server.IdentityFile
+		if portable, ok := keyPaths[strings.TrimSpace(identity)]; ok {
+			identity = portable
+		}
 		data := ServerData{
 			Alias: server.Alias, DisplayName: server.DisplayName, Host: server.Host, Port: server.Port,
-			User: server.User, AuthMethod: string(server.AuthMethod), IdentityFile: server.IdentityFile,
+			User: server.User, AuthMethod: string(server.AuthMethod), IdentityFile: identity,
 			Group: server.GroupName, Notes: server.Notes, StartupCommand: server.StartupCommand,
 			Tags: append([]string(nil), server.Tags...),
 		}
@@ -112,23 +241,6 @@ func (l *Local) Export() ([]Record, []string, error) {
 			if err := add(KindSecret, uuid+":"+secretType, SecretData{Server: uuid, Type: secretType, Value: value}); err != nil {
 				return nil, nil, err
 			}
-		}
-		if path := strings.TrimSpace(server.IdentityFile); path != "" {
-			keyPaths[path] = true
-		}
-	}
-
-	for path := range keyPaths {
-		data, err := l.readKey(path)
-		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				warnings = append(warnings, fmt.Sprintf("key %s: %v", path, err))
-				l.unreadable[KindKey+":"+path] = true
-			}
-			continue
-		}
-		if err := add(KindKey, path, data); err != nil {
-			return nil, nil, err
 		}
 	}
 
@@ -311,6 +423,24 @@ func (l *Local) Apply(incoming []Record) (int, []string, error) {
 		return list
 	}
 
+	// Decode key records before profiles. Their source path may come from a
+	// different operating system; profiles must point to the local destination
+	// rather than retaining that foreign path.
+	keyData := map[string]KeyData{}
+	keyDestinations := map[string]string{} // path stored in bundle -> portable path
+	for _, record := range upserts(KindKey) {
+		var data KeyData
+		if err := decode(record, &data); err != nil {
+			warn(record, err)
+			continue
+		}
+		source := strings.TrimSpace(data.Path)
+		portable := l.portableKeyPath(source)
+		keyDestinations[source] = portable
+		data.Path = portable
+		keyData[record.ID] = data
+	}
+
 	for _, record := range upserts(KindGroup) {
 		var data NameData
 		if err := decode(record, &data); err != nil || l.DB.EnsureGroup(data.Name) != nil {
@@ -356,6 +486,14 @@ func (l *Local) Apply(incoming []Record) (int, []string, error) {
 		if err := decode(record, &decoded[index]); err != nil {
 			warn(record, err)
 			continue
+		}
+		identity := strings.TrimSpace(decoded[index].IdentityFile)
+		if portable, ok := keyDestinations[identity]; ok {
+			decoded[index].IdentityFile = l.localIdentityPath(portable)
+		} else if portable, ok := portableHomePath(strings.ReplaceAll(identity, "\\", "/")); ok {
+			// New-format bundles keep portable paths even if the key record itself
+			// did not change in this merge.
+			decoded[index].IdentityFile = l.localIdentityPath(portable)
 		}
 		uuid := strings.TrimPrefix(record.ID, KindServer+":")
 		if _, ok := l.DB.ServerIDBySyncID(uuid); ok {
@@ -457,9 +595,8 @@ func (l *Local) Apply(incoming []Record) (int, []string, error) {
 		applied++
 	}
 	for _, record := range upserts(KindKey) {
-		var data KeyData
-		if err := decode(record, &data); err != nil {
-			warn(record, err)
+		data, ok := keyData[record.ID]
+		if !ok {
 			continue
 		}
 		written, err := l.writeKey(data)

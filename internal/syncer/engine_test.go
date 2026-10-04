@@ -106,6 +106,95 @@ func seedDeviceA(t *testing.T, a *device) {
 	}
 }
 
+func TestSyncMakesAbsoluteIdentityPathPortableAcrossHomes(t *testing.T) {
+	storage := &Folder{Dir: t.TempDir()}
+	a := newDevice(t, storage)
+	b := newDevice(t, storage)
+
+	keyPath := filepath.Join(a.home, ".ssh", "id_cross_os")
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	private := []byte("-----BEGIN OPENSSH PRIVATE KEY-----\ncross-os\n")
+	if err := os.WriteFile(keyPath, private, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath+".pub", []byte("ssh-ed25519 AAAA cross-os"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := &model.Server{
+		Alias: "cross-os", Host: "cross-os.example", Port: 22, User: "ops",
+		AuthMethod: model.AuthKey, IdentityFile: keyPath,
+	}
+	if err := a.db.CreateServer(server); err != nil {
+		t.Fatal(err)
+	}
+
+	recovery, _, err := a.engine.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.engine.Join(recovery, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := b.db.GetServer("cross-os")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(b.home, ".ssh", "id_cross_os")
+	if got.IdentityFile != wantPath {
+		t.Fatalf("received identity path = %q, want %q", got.IdentityFile, wantPath)
+	}
+	if gotKey, err := os.ReadFile(wantPath); err != nil || string(gotKey) != string(private) {
+		t.Fatalf("received private key = %q, %v", gotKey, err)
+	}
+
+	// The next export must stay portable rather than leaking B's local home
+	// back into the shared bundle.
+	local := &Local{DB: b.db, Vault: b.vault, Home: b.home}
+	records, warnings, err := local.Export()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("export warnings: %v", warnings)
+	}
+	var serverPath, keyPathInBundle string
+	for _, record := range records {
+		switch record.Kind {
+		case KindServer:
+			var data ServerData
+			if err := decode(record, &data); err == nil && data.Alias == "cross-os" {
+				serverPath = data.IdentityFile
+			}
+		case KindKey:
+			var data KeyData
+			if err := decode(record, &data); err == nil {
+				keyPathInBundle = data.Path
+			}
+		}
+	}
+	if serverPath != "~/.ssh/id_cross_os" || keyPathInBundle != "~/.ssh/id_cross_os" {
+		t.Fatalf("portable paths: server=%q key=%q", serverPath, keyPathInBundle)
+	}
+}
+
+func TestPortableKeyPathUnderstandsForeignWindowsAndLinuxHomes(t *testing.T) {
+	local := &Local{Home: filepath.Join(t.TempDir(), "home")}
+	cases := map[string]string{
+		"/home/alice/.ssh/id_ed25519":               "~/.ssh/id_ed25519",
+		"C:\\Users\\Alice\\.ssh\\id_ed25519":        "~/.ssh/id_ed25519",
+		"C:\\Users\\Alice\\.ssh\\company\\prod_key": "~/.ssh/company/prod_key",
+		"~/.ssh/id_rsa":                             "~/.ssh/id_rsa",
+	}
+	for input, want := range cases {
+		if got := local.portableKeyPath(input); got != want {
+			t.Errorf("portableKeyPath(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestTwoDevicesPairAndStayInStep(t *testing.T) {
 	storage := &Folder{Dir: t.TempDir()}
 	a := newDevice(t, storage)
