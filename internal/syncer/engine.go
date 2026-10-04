@@ -3,6 +3,7 @@ package syncer
 import (
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -302,8 +303,9 @@ func (e *Engine) syncOnce() (Report, error) {
 	stamped := Stamp(current, states, remoteByID, now.UnixNano())
 	stamped = keepUnreadable(stamped, local.unreadable, remoteByID)
 	result := Merge(stamped, remote)
+	incoming := retryUnreadableRecords(local, result.Incoming, result.Records)
 
-	applied, applyWarnings, err := local.Apply(result.Incoming)
+	applied, applyWarnings, err := local.Apply(incoming)
 	report.Received = applied
 	report.Warnings = append(report.Warnings, applyWarnings...)
 	if err != nil {
@@ -391,6 +393,68 @@ func keepUnreadable(stamped []Record, unreadable map[string]bool, remote map[str
 		kept = append(kept, record)
 	}
 	return kept
+}
+
+// retryUnreadableRecords re-applies remote key material that this device is
+// supposed to have but cannot currently read locally. This matters when
+// upgrading a device that previously synchronized an absolute key path from a
+// different OS: the record may be the same version as last time, so Merge
+// would normally omit it from Incoming even though the local file is missing.
+//
+// Profiles that reference a retried key are also re-applied so IdentityFile is
+// rewritten to the receiving OS's local path in the same sync.
+func retryUnreadableRecords(local *Local, incoming, merged []Record) []Record {
+	if local == nil || len(local.unreadable) == 0 {
+		return incoming
+	}
+
+	seen := make(map[string]bool, len(incoming))
+	for _, record := range incoming {
+		seen[record.ID] = true
+	}
+	retryPaths := map[string]bool{}
+
+	for _, record := range merged {
+		if record.Kind != KindKey || record.Deleted || !local.unreadable[record.ID] {
+			continue
+		}
+		if !seen[record.ID] {
+			incoming = append(incoming, record)
+			seen[record.ID] = true
+		}
+		var data KeyData
+		if decode(record, &data) == nil {
+			source := strings.TrimSpace(data.Path)
+			if source != "" {
+				retryPaths[source] = true
+				retryPaths[local.portableKeyPath(source)] = true
+			}
+		}
+	}
+
+	if len(retryPaths) == 0 {
+		SortRecords(incoming)
+		return incoming
+	}
+	for _, record := range merged {
+		if record.Kind != KindServer || record.Deleted || seen[record.ID] {
+			continue
+		}
+		var data ServerData
+		if decode(record, &data) != nil {
+			continue
+		}
+		identity := strings.TrimSpace(data.IdentityFile)
+		if identity == "" {
+			continue
+		}
+		if retryPaths[identity] || retryPaths[local.portableKeyPath(identity)] {
+			incoming = append(incoming, record)
+			seen[record.ID] = true
+		}
+	}
+	SortRecords(incoming)
+	return incoming
 }
 
 func sameRecords(a, b []Record) bool {
