@@ -180,6 +180,116 @@ func TestSyncMakesAbsoluteIdentityPathPortableAcrossHomes(t *testing.T) {
 	}
 }
 
+func TestUpgradeFromV071ReappliesMissingLegacyKeyAndRewritesProfilePath(t *testing.T) {
+	storage := &Folder{Dir: t.TempDir()}
+	d := newDevice(t, storage)
+
+	key, err := NewKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.engine.adoptKey(key); err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		uuid       = "legacy-profile"
+		legacyPath = "/home/alice/.ssh/id_legacy"
+	)
+	private := []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nlegacy-upgrade\n")
+	public := []byte("ssh-ed25519 AAAA legacy-upgrade")
+	serverData := ServerData{
+		Alias: "legacy", Host: "legacy.example", Port: 22, User: "ops",
+		AuthMethod: string(model.AuthKey), IdentityFile: legacyPath,
+	}
+	serverRecord, err := NewRecord(KindServer, uuid, serverData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyRecord, err := NewRecord(KindKey, legacyPath, KeyData{
+		Path: legacyPath, Private: private, Public: public,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverRecord.Updated = 100
+	keyRecord.Updated = 100
+	bundle, err := Seal(key, []Record{serverRecord, keyRecord})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Store(bundle); err != nil {
+		t.Fatal(err)
+	}
+
+	// This is the state left by v0.7.1 on Windows: the profile and sync state
+	// were accepted, but IdentityFile still contains the Linux path and no key
+	// exists at that path on this machine.
+	server := &model.Server{
+		Alias: "legacy", Host: "legacy.example", Port: 22, User: "ops",
+		AuthMethod: model.AuthKey, IdentityFile: legacyPath,
+	}
+	if err := d.db.CreateServer(server); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.db.SetServerSyncID(server.ID, uuid); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.db.ReplaceSyncStates([]db.SyncState{
+		{ID: serverRecord.ID, Hash: serverRecord.Hash, Updated: serverRecord.Updated},
+		{ID: keyRecord.ID, Hash: keyRecord.Hash, Updated: keyRecord.Updated},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	report := mustSync(t, d)
+	wantPath := filepath.Join(d.home, ".ssh", "id_legacy")
+	gotServer, err := d.db.GetServer("legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotServer.IdentityFile != wantPath {
+		t.Fatalf("identity after upgrade sync = %q, want %q; report=%+v", gotServer.IdentityFile, wantPath, report)
+	}
+	gotPrivate, err := os.ReadFile(wantPath)
+	if err != nil || string(gotPrivate) != string(private) {
+		t.Fatalf("private key after upgrade = %q, %v", gotPrivate, err)
+	}
+	gotPublic, err := os.ReadFile(wantPath + ".pub")
+	if err != nil || string(gotPublic) != string(public) {
+		t.Fatalf("public key after upgrade = %q, %v", gotPublic, err)
+	}
+
+	// A second sync converts the shared legacy key record into the portable
+	// record ID after the local file has become readable.
+	mustSync(t, d)
+	bundles, err := storage.Fetch()
+	if err != nil || len(bundles) != 1 {
+		t.Fatalf("fetch after migration: %d bundles, %v", len(bundles), err)
+	}
+	records, err := Open(key, bundles[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	portableKeyID := KindKey + ":~/.ssh/id_legacy"
+	foundPortableKey := false
+	foundPortableServer := false
+	for _, record := range records {
+		if record.ID == portableKeyID && !record.Deleted {
+			foundPortableKey = true
+		}
+		if record.ID == serverRecord.ID && !record.Deleted {
+			var data ServerData
+			if err := decode(record, &data); err == nil && data.IdentityFile == "~/.ssh/id_legacy" {
+				foundPortableServer = true
+			}
+		}
+	}
+	if !foundPortableKey || !foundPortableServer {
+		t.Fatalf("portable migration incomplete: key=%v server=%v records=%#v", foundPortableKey, foundPortableServer, records)
+	}
+}
+
 func TestUnreadableLegacyKeyProtectsOldAndPortableRecordIDs(t *testing.T) {
 	d := newDevice(t, &Folder{Dir: t.TempDir()})
 	legacyPath := "/home/alice/.ssh/id_missing_from_legacy"
