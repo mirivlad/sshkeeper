@@ -396,6 +396,105 @@ func (l *Local) Adopt(remote []Record, states map[string]Record) error {
 	return nil
 }
 
+// RepairPortableKeyPaths fixes device-local key material even when the
+// synchronized records themselves have not changed. Older clients could leave
+// a Windows profile pointing at a foreign Linux path while the shared bundle
+// had already been converted to the portable ~/.ssh/... representation.
+//
+// This is deliberately independent from Merge/Incoming: a quiet sync must
+// still repair local-only state. Only profiles already linked to a remote
+// server record are considered, and a different existing local key is never
+// overwritten or silently selected.
+func (l *Local) RepairPortableKeyPaths(remote []Record) (int, []string, error) {
+	remoteServers := map[string]ServerData{}
+	remoteKeys := map[string]KeyData{}
+
+	for _, record := range remote {
+		if record.Deleted {
+			continue
+		}
+		switch record.Kind {
+		case KindServer:
+			var data ServerData
+			if err := decode(record, &data); err != nil {
+				continue
+			}
+			remoteServers[strings.TrimPrefix(record.ID, KindServer+":")] = data
+		case KindKey:
+			var data KeyData
+			if err := decode(record, &data); err != nil {
+				continue
+			}
+			portable := l.portableKeyPath(data.Path)
+			if portable == "" {
+				continue
+			}
+			data.Path = portable
+			remoteKeys[portable] = data
+		}
+	}
+	if len(remoteServers) == 0 || len(remoteKeys) == 0 {
+		return 0, nil, nil
+	}
+
+	servers, err := l.DB.ListServers()
+	if err != nil {
+		return 0, nil, err
+	}
+	syncIDs, err := l.DB.ServerSyncIDs()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	applied := 0
+	var warnings []string
+	for _, server := range servers {
+		identity := strings.TrimSpace(server.IdentityFile)
+		if identity == "" {
+			continue
+		}
+		syncID := syncIDs[server.ID]
+		remoteServer, ok := remoteServers[syncID]
+		if !ok {
+			continue
+		}
+
+		portable := l.portableKeyPath(identity)
+		remoteIdentity := strings.TrimSpace(remoteServer.IdentityFile)
+		if remoteIdentity == "" || l.portableKeyPath(remoteIdentity) != portable {
+			continue
+		}
+		key, ok := remoteKeys[portable]
+		if !ok {
+			continue
+		}
+
+		localPath := l.localIdentityPath(portable)
+		key.Path = portable
+		written, err := l.writeKey(key)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("key %s: %v", portable, err))
+			// Most importantly, do not redirect a profile to a different key
+			// that already occupies the destination.
+			continue
+		}
+		if written {
+			applied++
+		}
+
+		if filepath.Clean(identity) == filepath.Clean(localPath) {
+			continue
+		}
+		server.IdentityFile = localPath
+		if err := l.DB.UpdateServerByAlias(server.Alias, server); err != nil {
+			warnings = append(warnings, fmt.Sprintf("profile %s: repair identity path: %v", server.Alias, err))
+			continue
+		}
+		applied++
+	}
+	return applied, warnings, nil
+}
+
 // Apply writes incoming records to this device. It returns the number of
 // items changed and warnings for items it could not apply; one failed item
 // does not stop the others.
