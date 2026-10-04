@@ -100,3 +100,27 @@ func TestPairingNeedsCodePasswordAndTime(t *testing.T) {
 		t.Fatal("PairingExpired is wrong")
 	}
 }
+
+func TestOfflinePairingCodeIsHighEntropyAndNeedsNoPassword(t *testing.T) {
+	key, _ := NewKey()
+	code, err := NewOfflinePairingCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(code, "SKP1-") || !LooksLikeOfflinePairingCode(code) || LooksLikeRecoveryKey(code) {
+		t.Fatalf("offline code classification failed: %q", code)
+	}
+	now := time.Unix(1_800_000_000, 0)
+	blob, err := SealPairing(key, code, "", now.Add(OfflinePairingLifetime))
+	if err != nil {
+		t.Fatal(err)
+	}
+	messy := strings.ToLower(strings.ReplaceAll(code, "-", " "))
+	got, err := OpenPairing(blob, messy, "", now.Add(23*time.Hour))
+	if err != nil || !bytes.Equal(got, key) {
+		t.Fatalf("offline pairing failed: %v", err)
+	}
+	if _, err := OpenPairing(blob, code, "", now.Add(OfflinePairingLifetime+time.Second)); !errors.Is(err, ErrPairingExpired) {
+		t.Fatalf("expired offline code error = %v", err)
+	}
+}

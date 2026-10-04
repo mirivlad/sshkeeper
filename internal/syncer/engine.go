@@ -135,15 +135,39 @@ func (e *Engine) Pair(password string) (string, time.Time, error) {
 	return code, expires, nil
 }
 
-// Join adds this device to the space in the storage. secret is either the
-// six-digit code shown by another device, used with that device's master
-// password, or a recovery key.
+// PairOffline publishes a high-entropy one-time code that remains valid long
+// enough to reboot into another OS. Unlike the six-digit code it does not need
+// the old device's master password because the code itself has 128 random bits.
+func (e *Engine) PairOffline() (string, time.Time, error) {
+	key, err := e.Key()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	code, err := NewOfflinePairingCode()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expires := e.now().Add(OfflinePairingLifetime)
+	blob, err := SealPairing(key, code, "", expires)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if err := e.Transport.WritePairing(blob); err != nil {
+		return "", time.Time{}, err
+	}
+	return code, expires, nil
+}
+
+// Join adds this device to the space in the storage. secret is a short
+// six-digit code plus the old device's master password, a long-lived SKP1
+// offline code, or a recovery key.
 func (e *Engine) Join(secret, password string) (Report, error) {
 	if !e.Vault.IsUnlocked() {
 		return Report{}, ErrVaultLocked
 	}
 	var key []byte
-	pairing := !LooksLikeRecoveryKey(secret)
+	offlinePairing := LooksLikeOfflinePairingCode(secret)
+	pairing := offlinePairing || !LooksLikeRecoveryKey(secret)
 	if pairing {
 		blob, err := e.Transport.ReadPairing()
 		if err != nil {
@@ -152,7 +176,11 @@ func (e *Engine) Join(secret, password string) (Report, error) {
 		if blob == nil {
 			return Report{}, ErrNoPairing
 		}
-		if key, err = OpenPairing(blob, secret, password, e.now()); err != nil {
+		pairingPassword := password
+		if offlinePairing {
+			pairingPassword = ""
+		}
+		if key, err = OpenPairing(blob, secret, pairingPassword, e.now()); err != nil {
 			return Report{}, err
 		}
 	} else {

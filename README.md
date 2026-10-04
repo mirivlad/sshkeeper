@@ -423,10 +423,17 @@ running tunnels, language and sort order — stay on each device.
 1. On the first device choose the storage and **Create sync space**.
    sshkeeper shows a recovery key: keep it offline. It is only needed if every
    device is lost.
-2. On that device choose **Add device** and confirm the master password.
-   It shows a six-digit code, valid for ten minutes.
-3. On the new device choose the same storage, then **Join with code**, and
-   enter the code and the master password of the first device.
+2. To add a device that is online at the same time, choose **Add device**
+   and confirm the master password. It shows a six-digit code, valid for ten
+   minutes.
+3. For dual-boot or a device that cannot be online at the same time, choose
+   **Add later (24h)**. sshkeeper shows a high-entropy one-time **SKP1-...**
+   code valid for 24 hours. If a separate app syncs the storage folder, let it
+   finish uploading first; then the old device can be shut down. Its master
+   password is not needed on the new device.
+4. On the new device choose the same storage, then **Connect this device**.
+   Enter the six-digit code plus the old device's master password, the
+   **SKP1-...** offline code by itself, or the recovery key.
 
 With **Auto sync** on, the TUI syncs when it starts and three seconds after
 each change; the header shows `⇅` with the time since the last sync. The same
@@ -435,8 +442,9 @@ works from the command line:
 ```bash
 sshkeeper sync setup folder ~/Sync/sshkeeper   # or: sync setup git <url> [--branch]
 sshkeeper sync init                            # first device
-sshkeeper sync add-device                      # prints the six-digit code
-sshkeeper sync join                            # new device
+sshkeeper sync add-device                      # six-digit code, valid 10 min
+sshkeeper sync add-device --offline            # SKP1 one-time code, valid 24 h
+sshkeeper sync join                            # connect a new device
 sshkeeper sync                                 # sync now
 sshkeeper sync status | recovery-key | leave
 ```
@@ -450,8 +458,12 @@ sshkeeper sync status | recovery-key | leave
   password to guess.
 - The six-digit code alone is worthless: it wraps the sync key together with
   the master password of the device that shows it (Argon2id), expires after
-  ten minutes, and is deleted once used. In git it uses a separate branch
-  that is removed afterwards, so it never enters the history.
+  ten minutes, and is deleted once used.
+- Offline pairing uses a random 128-bit **SKP1-...** one-time code instead of
+  the old device's master password. It remains valid for 24 hours so a
+  dual-boot machine can reboot into the other OS. The pending pairing data is
+  deleted after use. In git pairing lives on a separate temporary branch that
+  is removed afterwards, so it never enters the sync history.
 - Sync refuses to run while the vault is locked, so missing secrets are never
   mistaken for deletions.
 - An existing key file is never overwritten. If a device already has a

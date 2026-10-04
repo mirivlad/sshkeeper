@@ -254,7 +254,7 @@ func (m *fullHelpModel) View() string {
 			{"", i18n.T("Profiles, forwards, templates, secrets, and referenced private keys sync through one encrypted file.", "Профили, пробросы, шаблоны, секреты и нужные закрытые ключи синхронизируются через один зашифрованный файл.")},
 			{i18n.T("Storage", "Хранилище"), i18n.T("A shared folder (Syncthing, Nextcloud, …) or a git repository", "Общая папка (Syncthing, Nextcloud, …) или git-репозиторий")},
 			{i18n.T("First device", "Первое устройство"), i18n.T("Create sync space; keep the recovery key offline", "Создать синхронизацию; сохранить ключ восстановления офлайн")},
-			{i18n.T("Other devices", "Другие устройства"), i18n.T("Add device shows a 6-digit code; Join with code + that device's master password", "«Добавить устройство» показывает 6 цифр; «Подключиться по коду» + мастер-пароль того устройства")},
+			{i18n.T("Other devices", "Другие устройства"), i18n.T("Add device: 6-digit code + master password; Add later: 24h SKP1 code for dual-boot/offline devices", "«Добавить устройство»: 6 цифр + мастер-пароль; «Добавить позже»: SKP1-код на 24 ч для dual-boot/выключенных устройств")},
 			{glyphs.sync, i18n.T("Header badge: time since the last sync, or an error", "Значок в шапке: время последней синхронизации или ошибка")},
 		}},
 		{i18n.T("Server state column", "Колонка состояния"), [][2]string{

@@ -22,16 +22,17 @@ type fakeSync struct {
 func installFakeSync(t *testing.T, info SyncInfo) *fakeSync {
 	t.Helper()
 	fake := &fakeSync{info: info}
-	previous := []any{GetSyncInfo, SaveSyncSettings, RunSync, CreateSyncSpace, PairSyncDevice, JoinSyncSpace, SyncRecoveryKey, LeaveSync}
+	previous := []any{GetSyncInfo, SaveSyncSettings, RunSync, CreateSyncSpace, PairSyncDevice, PairSyncDeviceOffline, JoinSyncSpace, SyncRecoveryKey, LeaveSync}
 	t.Cleanup(func() {
 		GetSyncInfo = previous[0].(func() SyncInfo)
 		SaveSyncSettings = previous[1].(func(SyncSettings) error)
 		RunSync = previous[2].(func() (SyncResult, error))
 		CreateSyncSpace = previous[3].(func() (SyncResult, error))
 		PairSyncDevice = previous[4].(func(string) (string, time.Time, error))
-		JoinSyncSpace = previous[5].(func(string, string) (SyncResult, error))
-		SyncRecoveryKey = previous[6].(func() (string, error))
-		LeaveSync = previous[7].(func() error)
+		PairSyncDeviceOffline = previous[5].(func() (string, time.Time, error))
+		JoinSyncSpace = previous[6].(func(string, string) (SyncResult, error))
+		SyncRecoveryKey = previous[7].(func() (string, error))
+		LeaveSync = previous[8].(func() error)
 	})
 	GetSyncInfo = func() SyncInfo { return fake.info }
 	SaveSyncSettings = func(settings SyncSettings) error {
@@ -51,6 +52,9 @@ func installFakeSync(t *testing.T, info SyncInfo) *fakeSync {
 	PairSyncDevice = func(password string) (string, time.Time, error) {
 		fake.password = password
 		return "123456", time.Now().Add(10 * time.Minute), nil
+	}
+	PairSyncDeviceOffline = func() (string, time.Time, error) {
+		return "SKP1-ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ", time.Now().Add(24 * time.Hour), nil
 	}
 	JoinSyncSpace = func(secret, password string) (SyncResult, error) {
 		fake.joined = [2]string{secret, password}
@@ -228,6 +232,35 @@ func TestSyncAddDeviceShowsCode(t *testing.T) {
 	m, _ = press(m, key(tea.KeyEnter))
 	if m.syncScreen.view != syncViewForm {
 		t.Fatal("Enter should close the code")
+	}
+}
+
+func TestSyncOfflinePairingShowsLongLivedCodeAndNeedsNoPassword(t *testing.T) {
+	fake := installFakeSync(t, SyncInfo{Settings: SyncSettings{Mode: SyncModeGit, GitURL: "git@x:y.git", Auto: true}, Joined: true})
+	m := openSync(t)
+	focusAction(t, m, "pair-offline")
+	m, cmd := press(m, key(tea.KeyEnter))
+	m = runCmd(m, cmd)
+	if m.syncScreen.view != syncViewCode || !m.syncScreen.pairOffline || !strings.Contains(m.View(), "SKP1-") {
+		t.Fatalf("offline code view:\n%s", m.View())
+	}
+	if strings.Contains(m.View(), "master password of this device") {
+		t.Fatal("offline pairing must not ask for the old device master password")
+	}
+
+	fake.info.Joined = false
+	m.syncScreen.info.Joined = false
+	m.syncScreen.view = syncViewForm
+	focusAction(t, m, "join")
+	m, _ = press(m, key(tea.KeyEnter))
+	m = typeKeys(m, "SKP1-ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ")
+	if strings.Contains(m.View(), "Master password") {
+		t.Fatal("offline code must hide the master-password field")
+	}
+	_, cmd = press(m, key(tea.KeyEnter))
+	runCmd(m, cmd)
+	if fake.joined[0] == "" || fake.joined[1] != "" {
+		t.Fatalf("offline joined = %v", fake.joined)
 	}
 }
 
