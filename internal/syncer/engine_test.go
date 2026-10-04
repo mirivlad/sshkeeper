@@ -180,6 +180,35 @@ func TestSyncMakesAbsoluteIdentityPathPortableAcrossHomes(t *testing.T) {
 	}
 }
 
+func TestUnreadableLegacyKeyProtectsOldAndPortableRecordIDs(t *testing.T) {
+	d := newDevice(t, &Folder{Dir: t.TempDir()})
+	legacyPath := "/home/alice/.ssh/id_missing_from_legacy"
+	server := &model.Server{
+		Alias: "legacy-key", Host: "legacy.example", Port: 22, User: "ops",
+		AuthMethod: model.AuthKey, IdentityFile: legacyPath,
+	}
+	if err := d.db.CreateServer(server); err != nil {
+		t.Fatal(err)
+	}
+
+	local := &Local{DB: d.db, Vault: d.vault, Home: d.home}
+	if _, _, err := local.Export(); err != nil {
+		t.Fatal(err)
+	}
+	legacyID := KindKey + ":" + legacyPath
+	portableID := KindKey + ":~/.ssh/id_missing_from_legacy"
+	if !local.unreadable[legacyID] || !local.unreadable[portableID] {
+		t.Fatalf("unreadable IDs = %#v; want legacy %q and portable %q", local.unreadable, legacyID, portableID)
+	}
+
+	remoteCopy := Record{ID: legacyID, Kind: KindKey, Hash: "remote", Updated: 10}
+	stamped := []Record{{ID: legacyID, Kind: KindKey, Deleted: true, Updated: 20}}
+	kept := keepUnreadable(stamped, local.unreadable, map[string]Record{legacyID: remoteCopy})
+	if len(kept) != 1 || kept[0].Deleted || kept[0].Hash != remoteCopy.Hash {
+		t.Fatalf("legacy unreadable key was not preserved: %#v", kept)
+	}
+}
+
 func TestPortableKeyPathUnderstandsForeignWindowsAndLinuxHomes(t *testing.T) {
 	local := &Local{Home: filepath.Join(t.TempDir(), "home")}
 	cases := map[string]string{
