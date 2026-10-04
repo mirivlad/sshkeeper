@@ -1,5 +1,7 @@
 package tui
 
+import workspacepkg "github.com/mirivlad/sshkeeper/internal/workspace"
+
 // State is what the dashboard carries across a TUI restart. The caller leaves
 // the TUI to run ssh and starts a new program afterwards; restoring State puts
 // the user back where they were instead of at the top of the list.
@@ -13,6 +15,10 @@ type State struct {
 	NoticeIsError bool
 	// Collapsed lists the folded groups in group order.
 	Collapsed []string
+	// WorkspaceSessions are live in-process PTY/ConPTY sessions preserved while
+	// the caller temporarily leaves and restarts the Bubble Tea program.
+	WorkspaceSessions []*workspacepkg.Session
+	WorkspaceActive   int
 }
 
 // State returns the dashboard state to restore after the next restart.
@@ -24,6 +30,8 @@ func (m *tuiModel) State() State {
 	for group := range m.collapsed {
 		state.Collapsed = append(state.Collapsed, group)
 	}
+	state.WorkspaceSessions = append([]*workspacepkg.Session(nil), m.workspaceSessions...)
+	state.WorkspaceActive = m.workspaceActive
 	return state
 }
 
@@ -36,6 +44,11 @@ func (m *tuiModel) Restore(state State) {
 		}
 	}
 	m.rebuildServerRows(state.SelectedAlias)
+	m.workspaceSessions = append([]*workspacepkg.Session(nil), state.WorkspaceSessions...)
+	m.workspaceActive = state.WorkspaceActive
+	if m.workspaceActive < 0 || m.workspaceActive > len(m.workspaceSessions) {
+		m.workspaceActive = 0
+	}
 	if state.Notice != "" {
 		if state.NoticeIsError {
 			m.err = errorNotice(state.Notice)

@@ -21,6 +21,9 @@ func (m *tuiModel) renderServerDashboard() string {
 	width = max(1, width-1)
 
 	header := m.renderDashboardHeader(width)
+	if len(m.workspaceSessions) > 0 {
+		header = m.renderWorkspaceTabs(width) + "\n" + header
+	}
 	notification := m.renderDashboardNotification(width)
 	footer := m.renderListHelp(len(m.selectedServers()), len(m.bgResults) > 0)
 	headerHeight := displayLineCount(header)
@@ -273,7 +276,7 @@ func (m *tuiModel) renderServerState(server *model.Server, base lipgloss.Style) 
 		tunnel = layer(base, stateTunnelStyle).Render(glyphs.tunnel)
 	}
 	session := base.Render(" ")
-	if m.runtime.sessions[server.Alias] > 0 {
+	if m.runtime.sessions[server.Alias]+m.workspaceSessionCount(server.Alias) > 0 {
 		session = layer(base, stateSessionStyle).Render(glyphs.session)
 	}
 	gap := base.Render(" ")

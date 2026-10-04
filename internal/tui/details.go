@@ -61,8 +61,19 @@ func (m *tuiModel) serverDetailLines(server *model.Server, width int) []string {
 		detailRow(i18n.T("Last in", "Вход"), ageLong(server.LastConnectedAt)),
 		detailRow(i18n.T("Test", "Проверка"), m.testSummaryLine(server)),
 	)
-	if count := m.runtime.sessions[server.Alias]; count > 0 {
-		lines = append(lines, detailRow(i18n.T("Sessions", "Сессии"), stateSessionStyle.Render(glyphs.session)+" "+i18n.Tf("%d open in tmux", "открыто в tmux: %d", count)))
+	embedded := m.workspaceSessionCount(server.Alias)
+	tmuxCount := m.runtime.sessions[server.Alias]
+	if embedded+tmuxCount > 0 {
+		value := ""
+		switch {
+		case embedded == 0:
+			value = i18n.Tf("%d open in tmux", "открыто в tmux: %d", tmuxCount)
+		case tmuxCount == 0:
+			value = i18n.Tf("%d workspace tab(s)", "вкладок: %d", embedded)
+		default:
+			value = i18n.Tf("%d workspace · %d in tmux", "вкладок: %d · в tmux: %d", embedded, tmuxCount)
+		}
+		lines = append(lines, detailRow(i18n.T("Sessions", "Сессии"), stateSessionStyle.Render(glyphs.session)+" "+value))
 	}
 
 	if forwards := m.forwardIndex[server.ID]; len(forwards) > 0 {
@@ -75,16 +86,26 @@ func (m *tuiModel) serverDetailLines(server *model.Server, width int) []string {
 			lines = append(lines, forwardLine(fwd))
 		}
 	}
+	lines = append(lines, m.detailActionLines(server, width-2)...)
 	if notes := strings.TrimSpace(server.Notes); notes != "" {
 		lines = append(lines, "", dashboardSection(i18n.T("Notes", "Заметки")))
 		for _, line := range wrapCells(notes, max(1, width-2)) {
 			lines = append(lines, mutedStyle.Render(line))
 		}
 	}
-	lines = append(lines, "", renderHelpLine([]helpItem{
-		{Key: "Enter", Action: i18n.T("connect", "подключиться")},
-		{Key: "x", Action: i18n.T("actions", "действия")},
-	}))
+	if m.dashboardFocus == 1 {
+		lines = append(lines, "", renderHelpLine([]helpItem{
+			{Key: "↑/↓", Action: i18n.T("action", "действие")},
+			{Key: "Enter", Action: i18n.T("run", "выполнить")},
+			{Key: "Tab", Action: i18n.T("servers", "серверы")},
+		}))
+	} else {
+		lines = append(lines, "", renderHelpLine([]helpItem{
+			{Key: "Enter", Action: i18n.T("connect", "подключиться")},
+			{Key: "Tab", Action: i18n.T("profile actions", "действия профиля")},
+			{Key: "x", Action: i18n.T("more", "ещё")},
+		}))
+	}
 	return lines
 }
 
