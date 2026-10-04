@@ -66,8 +66,19 @@ func loadStates() error {
 	if err := json.Unmarshal(b, &list); err != nil {
 		return fmt.Errorf("unmarshal tunnel states: %w", err)
 	}
-	for _, s := range list {
-		states[s.ID] = s
+	dirty := false
+	for _, state := range list {
+		if state == nil || state.PID <= 0 || !processRunning(state.PID) {
+			if state != nil && state.ConfigPath != "" {
+				_ = os.Remove(state.ConfigPath)
+			}
+			dirty = true
+			continue
+		}
+		states[state.ID] = state
+	}
+	if dirty {
+		return saveStates()
 	}
 	return nil
 }

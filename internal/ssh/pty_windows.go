@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -93,14 +94,36 @@ func startConPTY(sshBinary string, args []string, width, height int) (*conPTY, e
 	// Empty standard handles make ssh open the pseudo console. Without the
 	// flag it gets sshkeeper's own stdio and bypasses the pseudo console.
 	startup.Flags = windows.STARTF_USESTDHANDLES
+	environment := conPTYEnvironment()
 	var info windows.ProcessInformation
-	if err := windows.CreateProcess(appName, commandLine, nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT, nil, nil, &startup.StartupInfo, &info); err != nil {
+	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_UNICODE_ENVIRONMENT)
+	if err := windows.CreateProcess(appName, commandLine, nil, nil, false, flags, &environment[0], nil, &startup.StartupInfo, &info); err != nil {
 		p.close()
 		return nil, fmt.Errorf("start %s: %w", path, err)
 	}
 	windows.CloseHandle(info.Thread)
 	p.process = info.Process
 	return p, nil
+}
+
+// conPTYEnvironment keeps the caller environment but guarantees a terminal
+// type for OpenSSH's PTY request. cmd.exe normally has no TERM variable; an
+// embedded xterm-256color emulator must not inherit that absence.
+func conPTYEnvironment() []uint16 {
+	env := os.Environ()
+	found := false
+	for index, value := range env {
+		if strings.HasPrefix(strings.ToUpper(value), "TERM=") {
+			env[index] = "TERM=xterm-256color"
+			found = true
+			break
+		}
+	}
+	if !found {
+		env = append(env, "TERM=xterm-256color")
+	}
+	sort.Slice(env, func(i, j int) bool { return strings.ToUpper(env[i]) < strings.ToUpper(env[j]) })
+	return utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
 }
 
 func (p *conPTY) Read(b []byte) (int, error) {

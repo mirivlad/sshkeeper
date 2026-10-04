@@ -68,10 +68,15 @@ func newTunnelScreenModel(w, h int) *tunnelScreenModel {
 
 func (m *tunnelScreenModel) loadTunnels() tea.Cmd {
 	return func() tea.Msg {
+		if err := tunnel.Reload(); err != nil {
+			return tunnelsLoadedMsg{err: err}
+		}
 		states := tunnel.List()
-		items := make([]list.Item, len(states))
-		for i, s := range states {
-			items[i] = tunnelItem{state: s}
+		items := make([]list.Item, 0, len(states))
+		for _, state := range states {
+			if state != nil && tunnel.IsRunning(state.ID) {
+				items = append(items, tunnelItem{state: state})
+			}
 		}
 		return tunnelsLoadedMsg{items: items}
 	}
@@ -151,6 +156,7 @@ func (m *tunnelScreenModel) View() string {
 
 type tunnelsLoadedMsg struct {
 	items []list.Item
+	err   error
 }
 
 type tunnelStoppedMsg struct {
