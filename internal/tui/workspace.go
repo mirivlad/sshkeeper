@@ -168,6 +168,19 @@ func (m *tuiModel) workspaceShortcut(msg tea.KeyMsg) bool {
 		m.workspaceNext(1)
 		return true
 	}
+	// Bubble Tea 1.3.x loses the Ctrl modifier for PageUp/PageDown when
+	// reading native Windows console input. Alt+Left/Right survives that path,
+	// so keep it as a cross-platform workspace-cycle shortcut as well.
+	if msg.Alt {
+		switch msg.Type {
+		case tea.KeyLeft:
+			m.workspaceNext(-1)
+			return true
+		case tea.KeyRight:
+			m.workspaceNext(1)
+			return true
+		}
+	}
 	if msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 {
 		switch r := msg.Runes[0]; {
 		case r == '0':
@@ -369,7 +382,7 @@ func (m *tuiModel) viewWorkspaceSession() string {
 		}
 	}
 	help := renderHelpLine([]helpItem{
-		{Key: "Ctrl+PgUp/PgDn", Action: i18n.T("switch tab", "сменить вкладку")},
+		{Key: "Ctrl+PgUp/PgDn · Alt+←/→", Action: i18n.T("switch tab", "сменить вкладку")},
 		{Key: "Alt+0", Action: i18n.T("servers", "серверы")},
 		{Key: "Alt+W", Action: i18n.T("close session", "закрыть сессию")},
 	})
@@ -454,17 +467,13 @@ func (m *tuiModel) updateDashboardMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	// Map a click in the visible server rows back to the current row. The
-	// dashboard header, optional notice, panel border, optional filter prompt,
-	// and column header sit above the first selectable row.
-	headerRows := 1
-	if len(m.workspaceSessions) > 0 {
-		headerRows++
-	}
-	if m.err != nil || m.warning != "" || m.success != "" {
-		headerRows++
-	}
-	rowY := headerRows + 2
+	// Map a click in the visible server rows back to the current row. Derive
+	// the body start from the renderer itself: renderAppHeader is two terminal
+	// rows (title + separator), which the old hand-written counter treated as
+	// one and therefore selected the row below the click.
+	contentWidth := max(1, m.width-1)
+	bodyTop := m.dashboardBodyTop(contentWidth)
+	rowY := bodyTop + 2 // panel top border + column header
 	if m.filtering() {
 		rowY++
 	}
@@ -472,7 +481,7 @@ func (m *tuiModel) updateDashboardMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	bodyHeight := m.height - headerRows - displayLineCount(m.renderListHelp(len(m.selectedServers()), len(m.bgResults) > 0))
+	bodyHeight := m.height - bodyTop - displayLineCount(m.renderListHelp(len(m.selectedServers()), len(m.bgResults) > 0))
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}

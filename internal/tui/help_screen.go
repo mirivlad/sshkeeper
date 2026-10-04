@@ -232,7 +232,7 @@ func (m *fullHelpModel) View() string {
 			{"q", i18n.T("Quit", "Выйти")},
 		}},
 		{i18n.T("Session Workspace", "Рабочее пространство сессий"), [][2]string{
-			{"Ctrl+PgUp/PgDn", i18n.T("Previous / next workspace tab", "Предыдущая / следующая вкладка")},
+			{"Ctrl+PgUp/PgDn · Alt+←/→", i18n.T("Previous / next workspace tab", "Предыдущая / следующая вкладка")},
 			{"Alt+0", i18n.T("Return to Servers", "Вернуться к серверам")},
 			{"Alt+1…9", i18n.T("Jump to SSH tab", "Перейти к SSH-вкладке")},
 			{"Alt+W", i18n.T("Close current SSH tab", "Закрыть текущую SSH-вкладку")},

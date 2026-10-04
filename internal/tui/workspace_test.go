@@ -80,7 +80,7 @@ func TestDashboardMouseClickSelectsServerAndRightPanelFocus(t *testing.T) {
 	})
 	m.width, m.height = 110, 30
 	_, _ = m.updateDashboardMouse(tea.MouseMsg(tea.MouseEvent{
-		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 10, Y: 4,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 10, Y: 5,
 	}))
 	if m.cursor != 1 || m.selectedServer().Alias != "b" {
 		t.Fatalf("click selected cursor=%d server=%v", m.cursor, m.selectedServer())
@@ -178,5 +178,56 @@ func TestDashboardMouseClickRunsRightPanelAction(t *testing.T) {
 	}))
 	if m.screen != screenForwardList || m.forwardScreen == nil {
 		t.Fatalf("right-panel action click did not open forwards: screen=%v", m.screen)
+	}
+}
+
+func TestDashboardMouseClickMatchesGroupedVisualRow(t *testing.T) {
+	m := New([]*model.Server{
+		{ID: 1, Alias: "lesbest_new", Host: "a", Port: 22, User: "root", GroupName: "Clients", AuthMethod: model.AuthKey},
+		{ID: 2, Alias: "test.lesbest", Host: "b", Port: 22, User: "root", GroupName: "Clients", AuthMethod: model.AuthKey},
+		{ID: 3, Alias: "KP_Backup1", Host: "c", Port: 22, User: "root", GroupName: "KP", AuthMethod: model.AuthKey},
+		{ID: 4, Alias: "kp_gate", Host: "d", Port: 22, User: "root", GroupName: "KP", AuthMethod: model.AuthKey},
+		{ID: 5, Alias: "KP_Mail", Host: "e", Port: 22, User: "root", GroupName: "KP", AuthMethod: model.AuthKey},
+	})
+	m.width, m.height = 140, 34
+	m.sortMode = sortByGroup
+	m.rebuildServerRows("")
+
+	target := -1
+	for index, row := range m.rows {
+		if row.server != nil && row.server.Alias == "kp_gate" {
+			target = index
+			break
+		}
+	}
+	if target < 0 {
+		t.Fatal("kp_gate row missing")
+	}
+	contentWidth := max(1, m.width-1)
+	visualY := m.dashboardBodyTop(contentWidth) + 2 + target
+	_, _ = m.updateDashboardMouse(tea.MouseMsg(tea.MouseEvent{
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+		X:      10,
+		Y:      visualY,
+	}))
+	if got := m.selectedServer(); got == nil || got.Alias != "kp_gate" {
+		t.Fatalf("click on kp_gate visual row selected %#v", got)
+	}
+}
+
+func TestWorkspaceAltArrowsCycleTabs(t *testing.T) {
+	m := New(nil)
+	m.workspaceSessions = []*workspacepkg.Session{nil, nil}
+	m.workspaceActive = 0
+
+	if !m.workspaceShortcut(tea.KeyMsg{Type: tea.KeyRight, Alt: true}) || m.workspaceActive != 1 {
+		t.Fatalf("Alt+Right active=%d, want 1", m.workspaceActive)
+	}
+	if !m.workspaceShortcut(tea.KeyMsg{Type: tea.KeyRight, Alt: true}) || m.workspaceActive != 2 {
+		t.Fatalf("second Alt+Right active=%d, want 2", m.workspaceActive)
+	}
+	if !m.workspaceShortcut(tea.KeyMsg{Type: tea.KeyLeft, Alt: true}) || m.workspaceActive != 1 {
+		t.Fatalf("Alt+Left active=%d, want 1", m.workspaceActive)
 	}
 }

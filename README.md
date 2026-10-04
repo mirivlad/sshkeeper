@@ -266,7 +266,7 @@ Normal **Connect** now opens SSH inside an sshkeeper workspace tab instead of
 handing the whole console to one `ssh.exe` process. Sessions keep running while
 you return to the server dashboard or switch to another SSH tab.
 
-- `Ctrl+PgUp` / `Ctrl+PgDn` switch workspace tabs.
+- `Ctrl+PgUp` / `Ctrl+PgDn` switch workspace tabs where the terminal reports those modifiers; `Alt+Left` / `Alt+Right` is the native-Windows-safe equivalent.
 - `Alt+0` returns to **Servers**; `Alt+1`…`Alt+9` jump directly to SSH tabs.
 - `Alt+W` closes the current SSH tab.
 - On a wide dashboard, `Tab` moves focus to the selected profile's **Actions**
