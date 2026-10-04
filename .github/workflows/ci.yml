@@ -70,7 +70,7 @@ jobs:
         run: go test ./internal/tunnel -run BackgroundCommand -count=1 -v
 
       - name: synchronized key path tests
-        run: go test ./internal/syncer -run "SyncMakesAbsoluteIdentityPathPortableAcrossHomes|PortableKeyPath|UnreadableLegacyKeyProtectsOldAndPortableRecordIDs|UpgradeFromV071ReappliesMissingLegacyKeyAndRewritesProfilePath" -count=1 -v
+        run: go test ./internal/syncer -run "SyncMakesAbsoluteIdentityPathPortableAcrossHomes|PortableKeyPath|UnreadableLegacyKeyProtectsOldAndPortableRecordIDs|UpgradeFromV071ReappliesMissingLegacyKeyAndRewritesProfilePath|UpgradeRepairsLegacyProfileWhenKeyRecordIsAlreadyPortable" -count=1 -v
 
   cross-build:
     name: cross-build

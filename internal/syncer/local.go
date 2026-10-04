@@ -442,6 +442,11 @@ func (l *Local) Apply(incoming []Record) (int, []string, error) {
 		source := strings.TrimSpace(data.Path)
 		portable := l.portableKeyPath(source)
 		keyDestinations[source] = portable
+		// A bundle can be partially migrated: the key record may already use
+		// ~/.ssh/... while an unchanged profile still contains the old absolute
+		// Linux/Windows path. Index the portable name too so that profile can be
+		// linked to this incoming key after normalizing its legacy path.
+		keyDestinations[portable] = portable
 		data.Path = portable
 		keyData[record.ID] = data
 	}
@@ -495,10 +500,17 @@ func (l *Local) Apply(incoming []Record) (int, []string, error) {
 		identity := strings.TrimSpace(decoded[index].IdentityFile)
 		if portable, ok := keyDestinations[identity]; ok {
 			decoded[index].IdentityFile = l.localIdentityPath(portable)
-		} else if portable, ok := portableHomePath(strings.ReplaceAll(identity, "\\", "/")); ok {
-			// New-format bundles keep portable paths even if the key record itself
-			// did not change in this merge.
-			decoded[index].IdentityFile = l.localIdentityPath(portable)
+		} else if identity != "" {
+			normalized := l.portableKeyPath(identity)
+			if portable, ok := keyDestinations[normalized]; ok {
+				// A half-migrated bundle can have a portable key record but a
+				// profile that still carries a foreign absolute path.
+				decoded[index].IdentityFile = l.localIdentityPath(portable)
+			} else if portable, ok := portableHomePath(strings.ReplaceAll(identity, "\\", "/")); ok {
+				// New-format bundles keep portable paths even if the key record itself
+				// did not change in this merge.
+				decoded[index].IdentityFile = l.localIdentityPath(portable)
+			}
 		}
 		uuid := strings.TrimPrefix(record.ID, KindServer+":")
 		if _, ok := l.DB.ServerIDBySyncID(uuid); ok {
