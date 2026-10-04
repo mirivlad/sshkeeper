@@ -81,12 +81,12 @@ func syncErrorText(err error) string {
 	case errors.Is(err, syncer.ErrVaultLocked):
 		return tr("Unlock the vault before syncing.", "Разблокируйте хранилище перед синхронизацией.")
 	case errors.Is(err, syncer.ErrNoPairing):
-		return tr("No pairing code is waiting. Choose \"Add device\" on a device that is already set up.",
-			"Код сопряжения не найден. Выберите «Добавить устройство» на уже подключённом устройстве.")
+		return tr("No pairing code is waiting. Choose \"Add device\" or \"Add later (24h)\" on a device that is already set up.",
+			"Код подключения не найден. Выберите «Добавить устройство» или «Добавить позже (24 ч)» на уже подключённом устройстве.")
 	case errors.Is(err, syncer.ErrPairingExpired):
 		return tr("The pairing code has expired. Create a new one.", "Срок действия кода истёк. Создайте новый.")
 	case errors.Is(err, syncer.ErrPairingInvalid):
-		return tr("Wrong pairing code or master password.", "Неверный код или мастер-пароль.")
+		return tr("Wrong pairing/offline code or master password.", "Неверный обычный/офлайн-код или мастер-пароль.")
 	case errors.Is(err, syncer.ErrWrongKey):
 		return tr("This storage belongs to a different sync space.", "Это хранилище принадлежит другому пространству синхронизации.")
 	}
@@ -132,7 +132,8 @@ bundle in a folder or a git repository.
   sshkeeper sync setup folder ~/Sync/sshkeeper   (or: setup git <url>)
   sshkeeper sync init                            first device: create the space
   sshkeeper sync add-device                      show a six-digit code
-  sshkeeper sync join                            new device: enter that code
+  sshkeeper sync add-device --offline            24-hour code for dual-boot/offline device
+  sshkeeper sync join                            new device: enter a code
   sshkeeper sync                                 sync now`,
 		`Синхронизирует профили, пробросы, шаблоны, секреты хранилища и закрытые
 ключи, на которые ссылаются профили, через пакет со сквозным шифрованием в
@@ -141,7 +142,8 @@ bundle in a folder or a git repository.
   sshkeeper sync setup folder ~/Sync/sshkeeper   (или: setup git <url>)
   sshkeeper sync init                            первое устройство: создать пространство
   sshkeeper sync add-device                      показать шестизначный код
-  sshkeeper sync join                            новое устройство: ввести этот код
+  sshkeeper sync add-device --offline            код на 24 часа для dual-boot/выключенного устройства
+  sshkeeper sync join                            новое устройство: ввести код
   sshkeeper sync                                 синхронизировать сейчас`),
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -160,6 +162,7 @@ bundle in a folder or a git repository.
 
 var syncSetupBranch string
 var syncSetupNoAuto bool
+var syncAddDeviceOffline bool
 
 var syncSetupCmd = &cobra.Command{
 	Use:   "setup folder <path> | git <url>",
@@ -212,12 +215,24 @@ var syncInitCmd = &cobra.Command{
 
 var syncAddDeviceCmd = &cobra.Command{
 	Use:   "add-device",
-	Short: tr("Show a six-digit code to add another device", "Показать шестизначный код для другого устройства"),
+	Short: tr("Create a code to add another device", "Создать код для добавления другого устройства"),
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		engine, err := newSyncEngine()
 		if err != nil {
 			return err
+		}
+		if syncAddDeviceOffline {
+			code, expires, err := engine.PairOffline()
+			if err != nil {
+				return fmt.Errorf("%s", syncErrorText(err))
+			}
+			fmt.Println(tr("Save this one-time code. If the storage is a folder synced by another app, let that app finish syncing it before rebooting. Then run \"sshkeeper sync join\" on the other device:", "Сохраните этот одноразовый код. Если хранилище — папка, которую синхронизирует другая программа, дождитесь окончания её синхронизации перед перезагрузкой. Затем выполните «sshkeeper sync join» на другом устройстве:"))
+			fmt.Println()
+			fmt.Println("    " + code)
+			fmt.Println()
+			fmt.Println(trf("No master password from this device is needed. Valid until %s.", "Мастер-пароль этого устройства не нужен. Код действует до %s.", expires.Format("2006-01-02 15:04")))
+			return nil
 		}
 		password, err := readSecretLine(tr("Confirm master password: ", "Подтвердите мастер-пароль: "))
 		if err != nil {
@@ -240,8 +255,8 @@ var syncAddDeviceCmd = &cobra.Command{
 }
 
 var syncJoinCmd = &cobra.Command{
-	Use:   "join [code | recovery-key]",
-	Short: tr("Join a sync space with a pairing code or recovery key", "Подключиться к синхронизации по коду или ключу восстановления"),
+	Use:   "join [code | offline-code | recovery-key]",
+	Short: tr("Join a sync space with a pairing, offline, or recovery code", "Подключиться к синхронизации по обычному, офлайн-коду или ключу восстановления"),
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		engine, err := newSyncEngine()
@@ -250,12 +265,12 @@ var syncJoinCmd = &cobra.Command{
 		}
 		secret := strings.Join(args, " ")
 		if secret == "" {
-			if secret, err = readSecretLine(tr("Pairing code (or recovery key): ", "Код сопряжения (или ключ восстановления): ")); err != nil {
+			if secret, err = readSecretLine(tr("Pairing, offline, or recovery code: ", "Код сопряжения, офлайн-код или ключ восстановления: ")); err != nil {
 				return err
 			}
 		}
 		password := ""
-		if !syncer.LooksLikeRecoveryKey(secret) {
+		if !syncer.LooksLikeRecoveryKey(secret) && !syncer.LooksLikeOfflinePairingCode(secret) {
 			if password, err = readSecretLine(tr("Master password of the device showing the code: ", "Мастер-пароль устройства, показавшего код: ")); err != nil {
 				return err
 			}
@@ -347,6 +362,7 @@ var syncLeaveCmd = &cobra.Command{
 func init() {
 	syncSetupCmd.Flags().StringVar(&syncSetupBranch, "branch", "", tr("git branch for the bundle (default \"sshkeeper\")", "ветка git для пакета (по умолчанию «sshkeeper»)"))
 	syncSetupCmd.Flags().BoolVar(&syncSetupNoAuto, "no-auto", false, tr("do not sync automatically from the TUI", "не синхронизировать автоматически из TUI"))
+	syncAddDeviceCmd.Flags().BoolVar(&syncAddDeviceOffline, "offline", false, tr("create a one-time 24-hour code for dual-boot or an offline device", "создать одноразовый код на 24 часа для dual-boot или выключенного устройства"))
 	syncCmd.AddCommand(syncSetupCmd, syncInitCmd, syncAddDeviceCmd, syncJoinCmd, syncStatusCmd, syncRecoveryKeyCmd, syncLeaveCmd)
 	// Sync errors are explained in words and printed once by Execute; the
 	// usage block would bury them.
@@ -364,8 +380,8 @@ func localizeSyncHelp() {
 		syncCmd:            {"Sync profiles, secrets, and keys between devices", "Синхронизация профилей, секретов и ключей между устройствами"},
 		syncSetupCmd:       {"Choose where the encrypted bundle is stored", "Выбрать, где хранится зашифрованный пакет"},
 		syncInitCmd:        {"Create a sync space from this device", "Создать пространство синхронизации с этого устройства"},
-		syncAddDeviceCmd:   {"Show a six-digit code to add another device", "Показать шестизначный код для другого устройства"},
-		syncJoinCmd:        {"Join a sync space with a pairing code or recovery key", "Подключиться к синхронизации по коду или ключу восстановления"},
+		syncAddDeviceCmd:   {"Create a code to add another device", "Создать код для добавления другого устройства"},
+		syncJoinCmd:        {"Join with a pairing, offline, or recovery code", "Подключиться по обычному, офлайн-коду или ключу восстановления"},
 		syncStatusCmd:      {"Show sync settings and the last result", "Показать настройки и последний результат синхронизации"},
 		syncRecoveryKeyCmd: {"Print the recovery key of this sync space", "Показать ключ восстановления пространства синхронизации"},
 		syncLeaveCmd:       {"Stop syncing this device; local data stays", "Отключить устройство от синхронизации; данные остаются"},
@@ -380,7 +396,8 @@ bundle in a folder or a git repository.
   sshkeeper sync setup folder ~/Sync/sshkeeper   (or: setup git <url>)
   sshkeeper sync init                            first device: create the space
   sshkeeper sync add-device                      show a six-digit code
-  sshkeeper sync join                            new device: enter that code
+  sshkeeper sync add-device --offline            24-hour code for dual-boot/offline device
+  sshkeeper sync join                            new device: enter a code
   sshkeeper sync                                 sync now`,
 		`Синхронизирует профили, пробросы, шаблоны, секреты хранилища и закрытые
 ключи, на которые ссылаются профили, через пакет со сквозным шифрованием в
@@ -389,13 +406,17 @@ bundle in a folder or a git repository.
   sshkeeper sync setup folder ~/Sync/sshkeeper   (или: setup git <url>)
   sshkeeper sync init                            первое устройство: создать пространство
   sshkeeper sync add-device                      показать шестизначный код
-  sshkeeper sync join                            новое устройство: ввести этот код
+  sshkeeper sync add-device --offline            код на 24 часа для dual-boot/выключенного устройства
+  sshkeeper sync join                            новое устройство: ввести код
   sshkeeper sync                                 синхронизировать сейчас`)
 	if flag := syncSetupCmd.Flags().Lookup("branch"); flag != nil {
 		flag.Usage = tr("git branch for the bundle (default \"sshkeeper\")", "ветка git для пакета (по умолчанию «sshkeeper»)")
 	}
 	if flag := syncSetupCmd.Flags().Lookup("no-auto"); flag != nil {
 		flag.Usage = tr("do not sync automatically from the TUI", "не синхронизировать автоматически из TUI")
+	}
+	if flag := syncAddDeviceCmd.Flags().Lookup("offline"); flag != nil {
+		flag.Usage = tr("create a one-time 24-hour code for dual-boot or an offline device", "создать одноразовый код на 24 часа для dual-boot или выключенного устройства")
 	}
 }
 
@@ -451,6 +472,14 @@ func wireTUISync() {
 			return "", time.Time{}, err
 		}
 		code, expires, err := engine.Pair(password)
+		return code, expires, explain(err)
+	}
+	tui.PairSyncDeviceOffline = func() (string, time.Time, error) {
+		engine, err := newSyncEngine()
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		code, expires, err := engine.PairOffline()
 		return code, expires, explain(err)
 	}
 	tui.JoinSyncSpace = func(secret, password string) (tui.SyncResult, error) {

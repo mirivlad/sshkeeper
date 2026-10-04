@@ -181,16 +181,25 @@ func ParseRecoveryKey(text string) ([]byte, error) {
 	return key, nil
 }
 
-// LooksLikeRecoveryKey tells a recovery key from a six-digit pairing code.
+// LooksLikeRecoveryKey tells a recovery key from a pairing code.
 func LooksLikeRecoveryKey(text string) bool {
-	return len(strings.TrimSpace(text)) > 12
+	return !LooksLikeOfflinePairingCode(text) && len(strings.TrimSpace(text)) > 12
 }
 
-// PairingLifetime is how long a pairing code stays valid.
-const PairingLifetime = 10 * time.Minute
+const (
+	// PairingLifetime is how long a short six-digit pairing code stays valid.
+	PairingLifetime = 10 * time.Minute
+	// OfflinePairingLifetime is long enough to reboot into another OS or power
+	// up a device that cannot be online at the same time as this one.
+	OfflinePairingLifetime = 24 * time.Hour
 
-// Pairing key derivation cost. The code adds only 20 bits, so the master
-// password carries the strength; Argon2id makes each guess expensive.
+	offlinePairingPrefix = "SKP1"
+	offlinePairingBytes  = 16 // 128 random bits; no master password is needed.
+)
+
+// Pairing key derivation cost. A short code adds only about 20 bits, so its
+// master password carries the strength; Argon2id makes each guess expensive.
+// An offline code carries 128 random bits and deliberately uses no password.
 const (
 	pairingTime    = 3
 	pairingMemory  = 64 * 1024
@@ -214,6 +223,23 @@ func NewPairingCode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
+// NewOfflinePairingCode returns a 128-bit one-time code suitable for delayed
+// pairing, for example when two operating systems share one dual-boot machine.
+func NewOfflinePairingCode() (string, error) {
+	random := make([]byte, offlinePairingBytes)
+	if _, err := rand.Read(random); err != nil {
+		return "", err
+	}
+	encoded := recoveryEncoding.EncodeToString(random)
+	groups := make([]string, 0, (len(encoded)+3)/4)
+	for len(encoded) > 4 {
+		groups = append(groups, encoded[:4])
+		encoded = encoded[4:]
+	}
+	groups = append(groups, encoded)
+	return offlinePairingPrefix + "-" + strings.Join(groups, "-"), nil
+}
+
 // NormalizePairingCode strips spaces and dashes: "123 456" → "123456".
 func NormalizePairingCode(code string) string {
 	return strings.Map(func(r rune) rune {
@@ -224,15 +250,43 @@ func NormalizePairingCode(code string) string {
 	}, code)
 }
 
-// SealPairing wraps the sync key for a new device. Opening it needs both the
-// six-digit code and the master password of the device that shows the code,
-// and it is refused after expires.
+// LooksLikeOfflinePairingCode recognizes the reserved SKP1 prefix. Recovery
+// keys use RFC 4648 Base32 and can never contain the digit 1, so the formats
+// are unambiguous.
+func LooksLikeOfflinePairingCode(text string) bool {
+	return strings.HasPrefix(NormalizeOfflinePairingCode(text), offlinePairingPrefix)
+}
+
+// NormalizeOfflinePairingCode ignores grouping and case while preserving the
+// full high-entropy secret.
+func NormalizeOfflinePairingCode(code string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '-' || r == ' ':
+			return -1
+		case r >= 'a' && r <= 'z':
+			return r - 'a' + 'A'
+		}
+		return r
+	}, strings.TrimSpace(code))
+}
+
+func normalizePairingSecret(code string) string {
+	if LooksLikeOfflinePairingCode(code) {
+		return NormalizeOfflinePairingCode(code)
+	}
+	return NormalizePairingCode(code)
+}
+
+// SealPairing wraps the sync key for a new device. Short pairing uses a
+// six-digit code plus the old device's master password; offline pairing uses
+// a 128-bit SKP1 code with an empty password. Both are refused after expires.
 func SealPairing(key []byte, code, password string, expires time.Time) ([]byte, error) {
 	env := pairingEnvelope{Format: pairingFormat, Expires: expires.Unix(), Salt: make([]byte, 16)}
 	if _, err := rand.Read(env.Salt); err != nil {
 		return nil, err
 	}
-	aead, err := chacha20poly1305.NewX(pairingKey(code, password, env.Salt))
+	aead, err := chacha20poly1305.NewX(pairingKey(normalizePairingSecret(code), password, env.Salt))
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +307,7 @@ func OpenPairing(blob []byte, code, password string, now time.Time) ([]byte, err
 	if now.Unix() > env.Expires {
 		return nil, ErrPairingExpired
 	}
-	aead, err := chacha20poly1305.NewX(pairingKey(NormalizePairingCode(code), password, env.Salt))
+	aead, err := chacha20poly1305.NewX(pairingKey(normalizePairingSecret(code), password, env.Salt))
 	if err != nil {
 		return nil, err
 	}

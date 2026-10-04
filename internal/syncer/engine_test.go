@@ -209,6 +209,37 @@ func TestTwoDevicesPairAndStayInStep(t *testing.T) {
 	}
 }
 
+func TestOfflinePairingJoinsWithoutOldMasterPassword(t *testing.T) {
+	storage := &Folder{Dir: t.TempDir()}
+	a := newDevice(t, storage)
+	b := newDevice(t, storage)
+	seedDeviceA(t, a)
+
+	if _, _, err := a.engine.Create(); err != nil {
+		t.Fatal(err)
+	}
+	code, expires, err := a.engine.PairOffline()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !LooksLikeOfflinePairingCode(code) || expires.Sub(clock) < 23*time.Hour {
+		t.Fatalf("offline pair = %q, expires %v", code, expires)
+	}
+	report, err := b.engine.Join(code, "definitely not the old master password")
+	if err != nil {
+		t.Fatalf("offline join: %v", err)
+	}
+	if report.Received == 0 {
+		t.Fatal("offline join should bring the synced data")
+	}
+	if _, err := b.db.GetServer("web"); err != nil {
+		t.Fatal("web missing after offline join")
+	}
+	if blob, _ := storage.ReadPairing(); blob != nil {
+		t.Fatal("offline code must be removed after use")
+	}
+}
+
 func TestJoinAdoptsSameAliasInsteadOfDuplicating(t *testing.T) {
 	storage := &Folder{Dir: t.TempDir()}
 	a := newDevice(t, storage)
