@@ -15,6 +15,7 @@ import (
 	"github.com/mirivlad/sshkeeper/internal/tui"
 	tunnelpkg "github.com/mirivlad/sshkeeper/internal/tunnel"
 	"github.com/mirivlad/sshkeeper/internal/vault"
+	workspacepkg "github.com/mirivlad/sshkeeper/internal/workspace"
 )
 
 func runTUI() error {
@@ -173,6 +174,31 @@ func runTUI() error {
 	tui.DeleteForward = func(forwardID int64) error {
 		return appDB.DeleteForward(forwardID)
 	}
+	tui.OpenWorkspaceSession = func(alias string, width, height int) (*workspacepkg.Session, error) {
+		server, err := appDB.GetServer(alias)
+		if err != nil {
+			return nil, fmt.Errorf("%s", trf("server not found: %s", "сервер не найден: %s", alias))
+		}
+		proc, err := ssh.StartInteractiveResolved(cfg, server, dbProfileResolver, serverVaultFunc(server), width, height)
+		if err != nil {
+			return nil, err
+		}
+		return workspacepkg.New(server.Alias, proc, width, height), nil
+	}
+	tui.StopBackgroundTunnels = func(alias string) error {
+		if err := tunnelpkg.Reload(); err != nil {
+			return err
+		}
+		for _, state := range tunnelpkg.List() {
+			if state == nil || state.ServerAlias != alias || !tunnelpkg.IsRunning(state.ID) {
+				continue
+			}
+			if err := tunnelpkg.Stop(state.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	tui.StartBackgroundTunnel = func(alias string) (*model.TunnelState, error) {
 		server, err := appDB.GetServer(alias)
 		if err != nil {
@@ -222,12 +248,13 @@ func runTUI() error {
 		m := tui.New(servers)
 		m.Restore(state)
 		state = tui.State{}
-		p := tea.NewProgram(m, tea.WithAltScreen())
+		p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 		// Background work (sync saves the vault) must not print over the TUI.
 		vault.Progress = io.Discard
 		_, err := p.Run()
 		vault.Progress = os.Stdout
 		if err != nil {
+			m.CloseWorkspaceSessions()
 			return fmt.Errorf("%s: %w", tr("TUI error", "ошибка интерфейса"), err)
 		}
 
@@ -385,7 +412,10 @@ func runTUI() error {
 			continue
 		}
 
-		// Normal quit (q or Esc)
+		// Normal quit (q or Esc). Embedded sessions belong to this sshkeeper
+		// process, so a real application exit closes them. Temporary TUI
+		// restarts above keep them through tui.State.
+		m.CloseWorkspaceSessions()
 		return nil
 	}
 }

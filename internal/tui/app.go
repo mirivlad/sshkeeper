@@ -11,6 +11,7 @@ import (
 	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
+	workspacepkg "github.com/mirivlad/sshkeeper/internal/workspace"
 )
 
 // --- Messages ---
@@ -80,6 +81,11 @@ type backgroundTunnelStartedMsg struct {
 	origin screen
 	state  *model.TunnelState
 	err    error
+}
+
+type backgroundTunnelStoppedMsg struct {
+	alias string
+	err   error
 }
 
 type forwardDeletedMsg struct {
@@ -214,6 +220,8 @@ var (
 	UpdateForward              func(fwd *model.Forward) error
 	DeleteForward              func(forwardID int64) error
 	StartBackgroundTunnel      func(alias string) (*model.TunnelState, error)
+	StopBackgroundTunnels      func(alias string) error
+	OpenWorkspaceSession       func(alias string, width, height int) (*workspacepkg.Session, error)
 	ImportServers              func() (int, error)
 	LockVault                  func() error
 	VaultUnlocked              func() bool
@@ -288,65 +296,70 @@ type TUIResult struct {
 // --- Main TUI model ---
 
 type tuiModel struct {
-	screen            screen
-	servers           []*model.Server
-	rows              []serverRow
-	cursor            int
-	matches           map[string]serverMatch
-	forwardIndex      map[int64][]*model.Forward
-	sortMode          string
-	collapsed         map[string]bool
-	managerParent     screen
-	settingsMenu      *actionMenuModel
-	syncScreen        *syncScreenModel
-	syncInfo          SyncInfo
-	syncing           bool
-	syncGeneration    int
-	seenChanges       int64
-	runtime           runtimeStatus
-	testing           map[string]bool
-	testTotal         int
-	testPassed        int
-	noticeGeneration  int
-	searchInput       textinput.Model
-	form              *formModel
-	templateForm      *templateFormModel
-	templates         []*model.CommandTemplate
-	templateList      list.Model
-	pendingTemplate   *model.CommandTemplate
-	tagList           list.Model
-	tags              []string
-	tagInput          textinput.Model
-	tagMode           string
-	tagOldName        string
-	groups            []*model.Group
-	groupList         list.Model
-	groupInput        textinput.Model
-	groupMode         string
-	groupOldName      string
-	selected          map[string]bool
-	sessionsAvailable bool
-	sessionScreen     *sessionScreenModel
-	tunnelScreen      *tunnelScreenModel
-	bgResults         []templateRunResult
-	err               error
-	success           string
-	warning           string
-	width             int
-	height            int
-	result            *TUIResult
-	helpScreen        *helpScreenModel
-	actionMenu        *actionMenuModel
-	manageMenu        *actionMenuModel
-	forwardScreen     *forwardScreenModel
-	forwardForm       *forwardFormModel
-	actionMenuParent  screen
-	tunnelStarting    bool
-	confirm           *confirmState
-	fullHelp          *fullHelpModel
-	settingsScreen    *settingsModel
-	helpParent        screen
-	vaultUnlocked     bool
+	screen               screen
+	servers              []*model.Server
+	rows                 []serverRow
+	cursor               int
+	matches              map[string]serverMatch
+	forwardIndex         map[int64][]*model.Forward
+	sortMode             string
+	collapsed            map[string]bool
+	managerParent        screen
+	settingsMenu         *actionMenuModel
+	syncScreen           *syncScreenModel
+	syncInfo             SyncInfo
+	syncing              bool
+	syncGeneration       int
+	seenChanges          int64
+	runtime              runtimeStatus
+	workspaceSessions    []*workspacepkg.Session
+	workspaceActive      int // 0 = dashboard, 1..n = embedded SSH session
+	dashboardFocus       int // 0 = server list, 1 = selected-profile actions
+	detailAction         int
+	pendingTunnelConnect string
+	testing              map[string]bool
+	testTotal            int
+	testPassed           int
+	noticeGeneration     int
+	searchInput          textinput.Model
+	form                 *formModel
+	templateForm         *templateFormModel
+	templates            []*model.CommandTemplate
+	templateList         list.Model
+	pendingTemplate      *model.CommandTemplate
+	tagList              list.Model
+	tags                 []string
+	tagInput             textinput.Model
+	tagMode              string
+	tagOldName           string
+	groups               []*model.Group
+	groupList            list.Model
+	groupInput           textinput.Model
+	groupMode            string
+	groupOldName         string
+	selected             map[string]bool
+	sessionsAvailable    bool
+	sessionScreen        *sessionScreenModel
+	tunnelScreen         *tunnelScreenModel
+	bgResults            []templateRunResult
+	err                  error
+	success              string
+	warning              string
+	width                int
+	height               int
+	result               *TUIResult
+	helpScreen           *helpScreenModel
+	actionMenu           *actionMenuModel
+	manageMenu           *actionMenuModel
+	forwardScreen        *forwardScreenModel
+	forwardForm          *forwardFormModel
+	actionMenuParent     screen
+	tunnelStarting       bool
+	confirm              *confirmState
+	fullHelp             *fullHelpModel
+	settingsScreen       *settingsModel
+	helpParent           screen
+	vaultUnlocked        bool
 }
 
 func New(servers []*model.Server) *tuiModel {
@@ -415,6 +428,9 @@ func (m *tuiModel) Init() tea.Cmd {
 	if m.success != "" {
 		// A notice restored from the previous run fades like any other.
 		cmds = append(cmds, m.expireNoticeCmd())
+	}
+	if len(m.workspaceSessions) > 0 {
+		cmds = append(cmds, workspaceTickCmd())
 	}
 	return tea.Batch(cmds...)
 }
@@ -510,6 +526,13 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.templateList.SetSize(msg.Width, managerListHeight(msg.Height))
 		m.tagList.SetSize(msg.Width, managerListHeight(msg.Height))
 		m.groupList.SetSize(msg.Width, managerListHeight(msg.Height))
+		if classifyTerminal(msg.Width, msg.Height) != sizeWide && m.dashboardFocus == 1 {
+			m.dashboardFocus = 0
+		}
+		if session := m.activeWorkspaceSession(); session != nil {
+			width, height := m.workspaceTerminalSize()
+			_ = session.Resize(width, height)
+		}
 		return m, nil
 
 	case serversLoadedMsg:
@@ -539,6 +562,15 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runtimeTickMsg:
 		return m, tea.Batch(m.loadRuntimeCmd(), runtimeTickCmd())
+
+	case workspaceOpenedMsg:
+		return m, m.handleWorkspaceOpened(msg)
+
+	case workspaceTickMsg:
+		if len(m.workspaceSessions) == 0 {
+			return m, nil
+		}
+		return m, workspaceTickCmd()
 
 	case serverTestedMsg:
 		m.applyServerTest(msg)
@@ -605,6 +637,9 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case connectRequestMsg:
+		if msg.server != nil && OpenWorkspaceSession != nil {
+			return m.openWorkspaceSession(msg.server.Alias)
+		}
 		m.result = &TUIResult{
 			Server: msg.server,
 			Action: "connect",
@@ -670,6 +705,9 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.err = fmt.Errorf("%s", i18n.T("tunnel launcher returned no process", "запуск туннеля не вернул процесс"))
 		}
 		if msg.err != nil {
+			if m.pendingTunnelConnect == msg.alias {
+				m.pendingTunnelConnect = ""
+			}
 			if msg.origin == screenForwardList && m.forwardScreen != nil && m.forwardScreen.serverAlias == msg.alias {
 				m.forwardScreen.err = msg.err
 				m.forwardScreen.notice = ""
@@ -687,6 +725,20 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.success = notice
 		}
+		if m.pendingTunnelConnect == msg.alias {
+			m.pendingTunnelConnect = ""
+			_, openCmd := m.openWorkspaceSession(msg.alias)
+			return m, tea.Batch(m.loadRuntimeCmd(), openCmd)
+		}
+		return m, m.loadRuntimeCmd()
+
+	case backgroundTunnelStoppedMsg:
+		if msg.err != nil {
+			m.err = fmt.Errorf("%s: %w", i18n.Tf("Stop tunnel for %s", "Остановка туннеля для %s", msg.alias), msg.err)
+			return m, nil
+		}
+		m.err = nil
+		m.success = i18n.Tf("Tunnel stopped for %s.", "Туннель для %s остановлен.", msg.alias)
 		return m, m.loadRuntimeCmd()
 
 	case forwardDeletedMsg:
@@ -793,6 +845,10 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tunnelsLoadedMsg:
 		if m.tunnelScreen != nil {
+			m.tunnelScreen.err = msg.err
+			if msg.err != nil {
+				return m, nil
+			}
 			m.tunnelScreen.tunnels = nil
 			for _, item := range msg.items {
 				if ti, ok := item.(tunnelItem); ok {
@@ -879,7 +935,19 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		if m.workspaceActive > 0 {
+			return m.updateWorkspaceMouse(msg)
+		}
+		return m.updateDashboardMouse(msg)
+
 	case tea.KeyMsg:
+		if m.workspaceActive > 0 {
+			return m.updateWorkspaceKey(msg)
+		}
+		if m.workspaceShortcut(msg) {
+			return m, workspaceTickCmd()
+		}
 		if m.err != nil || m.success != "" || m.warning != "" {
 			m.err = nil
 			m.success = ""
@@ -956,6 +1024,9 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.dashboardFocus == 1 {
+		return m.updateDetailActions(msg)
+	}
 	// Key repeat or fast typing can deliver several runes in one event
 	// ("jjj"). Replay them one by one so each acts as its own key; a rune
 	// that opens another screen hands the rest to that screen.
@@ -980,6 +1051,13 @@ func (m *tuiModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearFilter()
 			return m, nil
 		}
+
+	case tea.KeyTab:
+		if classifyTerminal(m.width, m.height) == sizeWide && m.selectedServer() != nil {
+			m.dashboardFocus = 1
+			m.detailAction = 0
+		}
+		return m, nil
 
 	case tea.KeyEnter:
 		if item, ok := m.selectedServerItem(); ok {
@@ -1199,14 +1277,34 @@ func (m *tuiModel) requestQuit() (tea.Model, tea.Cmd) {
 	case screenTemplateForm:
 		dirty = m.templateForm != nil && m.templateForm.Dirty()
 	}
-	if !dirty {
+	liveSessions := 0
+	for _, session := range m.workspaceSessions {
+		if session == nil {
+			continue
+		}
+		if exited, _ := session.Exited(); !exited {
+			liveSessions++
+		}
+	}
+	if !dirty && liveSessions == 0 {
 		return m, tea.Quit
 	}
 	origin := m.screen
+	title := i18n.T("Quit sshkeeper?", "Выйти из sshkeeper?")
+	target := i18n.Tf("%d live SSH session(s)", "Активных SSH-сессий: %d", liveSessions)
+	consequence := i18n.T("Live workspace sessions will be closed.", "Активные сессии рабочего пространства будут закрыты.")
+	if dirty {
+		target = i18n.T("Unsaved form changes", "Несохранённые изменения формы")
+		consequence = i18n.T("Your edits will be lost.", "Несохранённые изменения будут потеряны.")
+		if liveSessions > 0 {
+			target += i18n.Tf(" · %d live SSH session(s)", " · активных SSH-сессий: %d", liveSessions)
+			consequence += " " + i18n.T("Live workspace sessions will also be closed.", "Активные SSH-сессии также будут закрыты.")
+		}
+	}
 	m.beginConfirm(confirmState{
-		title:       i18n.T("Discard changes and quit?", "Отменить изменения и выйти?"),
-		target:      i18n.T("Unsaved form changes", "Несохранённые изменения формы"),
-		consequence: i18n.T("Your edits will be lost before sshkeeper exits.", "Изменения будут потеряны при выходе из sshkeeper."),
+		title:       title,
+		target:      target,
+		consequence: consequence,
 		verb:        i18n.T("Quit", "Выйти"),
 		parent:      origin,
 		action: func() tea.Cmd {
@@ -1667,6 +1765,9 @@ func (m *tuiModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) View() string {
 	if classifyTerminal(m.width, m.height) == sizeBelowFloor {
 		return minimumSizeView(m.width)
+	}
+	if m.workspaceActive > 0 {
+		return m.viewWorkspaceSession()
 	}
 	var b strings.Builder
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 )
 
 // writeFakeSSH writes a batch script that stands in for ssh.exe.
@@ -57,5 +58,49 @@ func TestConPTYTimesOutWithoutHanging(t *testing.T) {
 	}
 	if ok || output != "connection timeout" {
 		t.Fatalf("expected a timeout, got ok=%v output=%q", ok, output)
+	}
+}
+
+func TestConPTYEnvironmentDefinesTerminalType(t *testing.T) {
+	block := conPTYEnvironment()
+	decoded := string(utf16.Decode(block))
+	if !strings.Contains(strings.ToUpper(decoded), "TERM=XTERM-256COLOR\x00") {
+		t.Fatalf("TERM missing from ConPTY environment: %q", decoded)
+	}
+}
+
+func TestWorkspaceConPTYStartsAndCapturesOutput(t *testing.T) {
+	proc, err := startInteractivePlatform("cmd.exe", []string{"/d", "/c", "echo WORKSPACE_OK"}, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := proc.Read(buf)
+			if n > 0 {
+				output.Write(buf[:n])
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if err := proc.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	select {
+	case <-readDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ConPTY reader did not finish")
+	}
+	if !strings.Contains(output.String(), "WORKSPACE_OK") {
+		t.Fatalf("workspace output = %q", output.String())
 	}
 }

@@ -213,7 +213,8 @@ func (m *fullHelpModel) View() string {
 			{"Ctrl+Q", i18n.T("Quit", "Выйти")},
 		}},
 		{i18n.T("Server list", "Список серверов"), [][2]string{
-			{"Enter", i18n.T("Connect to server", "Подключиться к серверу")},
+			{"Enter", i18n.T("Open server in a workspace SSH tab", "Открыть сервер в SSH-вкладке workspace")},
+			{"Tab", i18n.T("Focus selected-profile actions on a wide dashboard", "Перейти к действиям выбранного профиля на широком экране")},
 			{"/ Ctrl+F", i18n.T("Live filter by name, host, group, tags, route, or forward port", "Живой фильтр по имени, хосту, группе, тегам, маршруту или порту")},
 			{"j k g G", i18n.T("Move down / up, jump to first / last", "Вниз / вверх, к первому / последнему")},
 			{"a  Ctrl+A", i18n.T("Add server", "Добавить сервер")},
@@ -230,8 +231,16 @@ func (m *fullHelpModel) View() string {
 			{"m", i18n.T("Manage global entities", "Управление общими разделами")},
 			{"q", i18n.T("Quit", "Выйти")},
 		}},
+		{i18n.T("Session Workspace", "Рабочее пространство сессий"), [][2]string{
+			{"Ctrl+PgUp/PgDn", i18n.T("Previous / next workspace tab", "Предыдущая / следующая вкладка")},
+			{"Alt+0", i18n.T("Return to Servers", "Вернуться к серверам")},
+			{"Alt+1…9", i18n.T("Jump to SSH tab", "Перейти к SSH-вкладке")},
+			{"Alt+W", i18n.T("Close current SSH tab", "Закрыть текущую SSH-вкладку")},
+			{"Tab", i18n.T("Dashboard: focus right-side profile actions", "Главный экран: фокус правой панели действий")},
+			{"Mouse", i18n.T("Wheel navigation and clickable server/tab selection", "Колесо и выбор серверов/вкладок кликом")},
+		}},
 		{i18n.T("Server actions (Ctrl+X)", "Действия с сервером (Ctrl+X)"), [][2]string{
-			{i18n.T("Connect", "Подключиться"), i18n.T("Standard SSH session", "Обычная SSH-сессия")},
+			{i18n.T("Connect", "Подключиться"), i18n.T("Open an embedded workspace SSH tab", "Открыть встроенную SSH-вкладку workspace")},
 			{i18n.T("Port-forward rules", "Правила проброса портов"), i18n.T("Add / edit / enable / delete saved rules", "Добавить / изменить / включить / удалить сохранённые правила")},
 			{i18n.T("Connect with forwards", "Подключиться с пробросом"), i18n.T("SSH session + enabled forwarding rules", "SSH-сессия и включённые правила проброса")},
 			{i18n.T("Start tunnel process (no shell)", "Запустить туннель без оболочки"), i18n.T("Run enabled forwards in foreground", "Запустить включённые правила в активном процессе")},
@@ -263,7 +272,7 @@ func (m *fullHelpModel) View() string {
 			{glyphs.unknown, i18n.T("Not tested yet", "Ещё не проверялся")},
 			{glyphs.testing, i18n.T("Test in progress", "Идёт проверка")},
 			{glyphs.tunnel, i18n.T("A background tunnel is running", "Работает фоновый туннель")},
-			{glyphs.session, i18n.T("A tmux session is open", "Открыта tmux-сессия")},
+			{glyphs.session, i18n.T("An embedded or persistent SSH session is open", "Открыта SSH-сессия workspace или tmux")},
 		}},
 		{i18n.T("Routes / ProxyJump", "Маршруты / ProxyJump"), [][2]string{
 			{"", i18n.T("Routes define how to reach a server through jump hosts.", "Маршрут определяет путь к серверу через промежуточные узлы.")},
@@ -390,10 +399,10 @@ func (m *actionMenuModel) unavailableReason(action string) string {
 func newActionMenuModel(w, h int, availability ...bool) *actionMenuModel {
 	sessionsAvailable := len(availability) > 0 && availability[0]
 	items := []list.Item{
-		actionMenuItem{label: i18n.T("Connect", "Подключиться"), action: "connect", description: i18n.T("Open an interactive SSH session.", "Открыть интерактивную SSH-сессию.")},
+		actionMenuItem{label: i18n.T("Connect", "Подключиться"), action: "connect", description: i18n.T("Open SSH in an embedded workspace tab.", "Открыть SSH во встроенной вкладке рабочего пространства.")},
 	}
 	if sessionsAvailable {
-		items = append(items, actionMenuItem{label: i18n.T("Open in session", "Открыть в сессии"), action: "session_open", description: i18n.T("Open this server in a persistent tmux-backed SSH tab.", "Открыть сервер в постоянной SSH-вкладке tmux.")})
+		items = append(items, actionMenuItem{label: i18n.T("Open persistent tmux session", "Открыть постоянную tmux-сессию"), action: "session_open", description: i18n.T("Open a Unix tmux-backed SSH session that can outlive sshkeeper.", "Открыть SSH-сессию tmux, которая может пережить сам sshkeeper.")})
 	}
 	items = append(items,
 		actionMenuItem{label: i18n.T("Port-forward rules", "Правила проброса портов"), action: "forwards", description: i18n.T("Add, edit, enable, or remove saved forwarding rules for this server; no process starts.", "Добавить, изменить, включить или удалить сохранённые правила; процесс не запускается.")},
@@ -416,7 +425,7 @@ func newManageMenuModel(w, h int, availability ...bool) *actionMenuModel {
 		actionMenuItem{label: i18n.T("Command templates", "Шаблоны команд"), action: "templates", description: i18n.T("Manage reusable commands.", "Управлять повторно используемыми командами.")},
 	}
 	if sessionsAvailable {
-		items = append(items, actionMenuItem{label: i18n.T("Sessions", "Сессии"), action: "sessions", description: i18n.T("Attach to or close tmux-backed SSH sessions.", "Подключиться к SSH-сессиям tmux или закрыть их.")})
+		items = append(items, actionMenuItem{label: i18n.T("Persistent tmux sessions", "Постоянные tmux-сессии"), action: "sessions", description: i18n.T("Attach to or close Unix tmux-backed SSH sessions.", "Подключиться к постоянным SSH-сессиям tmux или закрыть их.")})
 	}
 	items = append(items,
 		actionMenuItem{label: i18n.T("Running tunnels", "Работающие туннели"), action: "tunnels", description: i18n.T("Inspect and stop tracked background tunnel processes.", "Просматривать и останавливать фоновые процессы туннелей.")},

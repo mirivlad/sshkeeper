@@ -27,7 +27,8 @@ port forwarding management.
 - **Routes / ProxyJump** — ordered bastion chains with stable references to sshkeeper profiles; profile renames do not break routes.
 - **Port forwarding** — named local/remote/SOCKS forwards with type selector, validation, and OpenSSH preview.
 - **Tunnel management** — start/stop/list background tunnels, PID tracking, runtime state.
-- **Persistent sessions** — optional tmux-backed SSH tabs that stay alive while you switch between servers.
+- **Session workspace** — embedded SSH tabs stay alive while you switch between servers, tunnels, and the dashboard; PTY on Unix and ConPTY on Windows.
+- **Persistent tmux sessions** — optional Unix-only sessions can outlive the sshkeeper process itself.
 - **Tunnel vs Forward** — clear separation: forward = saved rule, tunnel = running SSH process.
 - First-class groups, multi-select tags, command templates, search by metadata/routes/forward ports, and OpenSSH config generation.
 - Import from `~/.ssh/config` and simple tab-separated export.
@@ -52,15 +53,15 @@ Or use the build scripts:
 ./release.sh        # Build release archives to dist/
 ```
 
-Requirements: Go 1.25+ and system OpenSSH. `tmux` is optional and recommended for persistent multi-session tabs; without it, all Sessions UI is hidden.
+Requirements: Go 1.25+ and system OpenSSH. The embedded Session Workspace needs no external multiplexer. `tmux` is optional on Linux/macOS for sessions that should survive sshkeeper itself.
 
 Platform status:
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| Linux | Primary release target | `amd64`/`arm64` tarballs plus native `.deb` and `.rpm` packages. Native packages recommend (but do not require) `tmux` for persistent Sessions. |
-| macOS | Primary release target | `darwin/amd64` and `darwin/arm64` release tarballs are available. Requires system `ssh`; install optional `tmux` with `brew install tmux` to enable Sessions. Homebrew formula planned. |
-| Windows | Experimental | Requires Windows 10 1809+ and OpenSSH Client as `ssh.exe` in `PATH`. Runs from Explorer (double-click) or any console; password and key-passphrase auth type the stored secret through a Windows pseudo console (ConPTY). Native Windows builds do not expose tmux Sessions; running the Linux build inside WSL can use them when `tmux` is installed there. |
+| Linux | Primary release target | `amd64`/`arm64` tarballs plus native `.deb` and `.rpm` packages. Embedded workspace sessions use a PTY; native packages recommend (but do not require) `tmux` for extra persistent sessions. |
+| macOS | Primary release target | `darwin/amd64` and `darwin/arm64` release tarballs are available. Requires system `ssh`; embedded workspace sessions use a PTY. Optional `tmux` adds sessions that survive sshkeeper. |
+| Windows | Experimental | Requires Windows 10 1809+ and OpenSSH Client as `ssh.exe` in `PATH`. Runs from Explorer or any console. The embedded Session Workspace uses ConPTY, including password/key-passphrase prompts. Optional persistent tmux sessions remain Unix-only. |
 
 On Windows, install OpenSSH Client via Windows Optional Features or PowerShell:
 
@@ -163,7 +164,7 @@ reason, saved forwards with their state, open tmux sessions, and notes.
 | `●` / `✗` | Last connection test passed / failed |
 | `·` / `◌` | Not tested yet / test in progress |
 | `⇄` | A background tunnel for this server is running |
-| `▣` | A tmux session for this server is open |
+| `▣` | An embedded or persistent SSH session is open |
 
 Tunnels and sessions are re-read every 10 seconds, so tunnels started by
 another sshkeeper process show up too.
@@ -259,18 +260,48 @@ In add/edit forms:
 | Enter | Move to action / activate |
 | Esc | Back |
 
-## Persistent Sessions (optional tmux)
+## Session Workspace
 
-When `tmux` is available in `PATH`, sshkeeper exposes a persistent Sessions workflow.
-If `tmux` is missing, the feature is completely hidden: there is no disabled Sessions menu or broken action, and ordinary `Connect` behaves exactly as before.
+Normal **Connect** now opens SSH inside an sshkeeper workspace tab instead of
+handing the whole console to one `ssh.exe` process. Sessions keep running while
+you return to the server dashboard or switch to another SSH tab.
 
-- **Server Actions → Open in session** creates a tmux window named after the server alias and attaches to it.
-- **Manage → Sessions** lists the SSH windows created by sshkeeper; `Enter` attaches, `Ctrl+D` closes with confirmation, and `Ctrl+R` refreshes.
-- If sshkeeper itself is already running inside tmux, new SSH windows are created in the current tmux session. Otherwise sshkeeper uses a dedicated `sshkeeper` tmux workspace.
-- Leaving a tmux client with the normal tmux detach key (`Ctrl+B`, then `D`) returns to sshkeeper while the SSH windows keep running. Standard tmux window switching (`Ctrl+B`, then `N`/`P` or a window number) provides the tab workflow.
-- Key and SSH-agent sessions start without unlocking the vault. Password and key-passphrase sessions ask for the vault master password inside their own tmux window, so secrets are never copied through command-line arguments or environment variables.
+- `Ctrl+PgUp` / `Ctrl+PgDn` switch workspace tabs.
+- `Alt+0` returns to **Servers**; `Alt+1`…`Alt+9` jump directly to SSH tabs.
+- `Alt+W` closes the current SSH tab.
+- On a wide dashboard, `Tab` moves focus to the selected profile's **Actions**
+  panel. From there you can connect, **Tunnel + Connect**, start/stop the
+  background tunnel, or open the full port-forward editor.
+- Mouse input is enabled for sshkeeper itself: wheel navigation, clickable
+  server rows, and clickable workspace tabs work in terminals that expose
+  mouse events, including native Windows consoles supported by Bubble Tea.
+- Quitting sshkeeper with live workspace tabs asks for confirmation.
 
-`tmux` is intentionally optional. Debian/RPM packages mark it as a recommendation rather than a hard dependency. On macOS install it with `brew install tmux`. Native Windows builds do not expose Sessions; use the Linux build inside WSL if this workflow is needed on Windows.
+Workspace terminal emulation is provided by `charmbracelet/x/vt`. Unix uses a
+PTY and Windows uses ConPTY, so programs such as shells, `vim`, `htop`, and
+other full-screen terminal applications can remain alive while another
+sshkeeper tab is selected.
+
+Background tunnels are independent runtime objects. **Tunnel + Connect** starts
+the enabled forwards as a detached tunnel and then opens an SSH workspace tab.
+Returning to **Servers** lets you stop the tunnel without closing the SSH
+session. Stale tunnel records from dead processes are removed automatically.
+
+### Persistent sessions (optional tmux)
+
+The older tmux-backed workflow remains available on Linux/macOS for a different
+use case: SSH sessions that should survive the sshkeeper process itself.
+
+- **Server Actions → Open persistent tmux session** creates a tmux window.
+- **Manage → Persistent tmux sessions** lists, attaches to, and closes those
+  windows.
+- If sshkeeper already runs inside tmux, it reuses that tmux session; otherwise
+  it uses the dedicated `sshkeeper` tmux workspace.
+- Password/key-passphrase sessions unlock the vault inside their tmux window;
+  secrets are never placed in command-line arguments or environment variables.
+
+`tmux` is optional. Native Windows uses the embedded ConPTY workspace; the
+persistent tmux backend is available through the Linux build in WSL if desired.
 
 ## Routes, Tunnels, and Port Forwards
 

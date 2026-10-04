@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,5 +70,42 @@ func TestReloadPicksUpStatesWrittenByAnotherProcess(t *testing.T) {
 	}
 	if Get(7) == nil {
 		t.Fatal("a failed reload must keep the previous states")
+	}
+}
+
+func TestInitPrunesStoppedTunnelStates(t *testing.T) {
+	dir := t.TempDir()
+	staleConfig := filepath.Join(dir, "stale-ssh.conf")
+	if err := os.WriteFile(staleConfig, []byte("temporary"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal([]*model.TunnelState{{
+		ID: 42, ServerAlias: "old", PID: 0, ConfigPath: staleConfig, StartedAt: time.Now().Add(-time.Hour),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tunnels.json"), payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Init(dir); err != nil {
+		t.Fatal(err)
+	}
+	if got := List(); len(got) != 0 {
+		t.Fatalf("stale tunnel survived reload: %#v", got)
+	}
+	if _, err := os.Stat(staleConfig); !os.IsNotExist(err) {
+		t.Fatalf("stale temporary config still exists: %v", err)
+	}
+	stored, err := os.ReadFile(StateFilePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var states []*model.TunnelState
+	if err := json.Unmarshal(stored, &states); err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 0 {
+		t.Fatalf("state file still contains stale tunnels: %#v", states)
 	}
 }
