@@ -290,6 +290,84 @@ func TestUpgradeFromV071ReappliesMissingLegacyKeyAndRewritesProfilePath(t *testi
 	}
 }
 
+func TestUpgradeRepairsLegacyProfileWhenKeyRecordIsAlreadyPortable(t *testing.T) {
+	storage := &Folder{Dir: t.TempDir()}
+	d := newDevice(t, storage)
+
+	key, err := NewKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.engine.adoptKey(key); err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		uuid       = "partial-migration-profile"
+		legacyPath = "/home/mirivlad/.ssh/id_rsa"
+		portable   = "~/.ssh/id_rsa"
+	)
+	private := []byte("-----BEGIN OPENSSH PRIVATE KEY-----\npartial-migration\n")
+	public := []byte("ssh-rsa AAAA partial-migration")
+
+	serverData := ServerData{
+		Alias: "partial", Host: "partial.example", Port: 22, User: "mirivlad",
+		AuthMethod: string(model.AuthKey), IdentityFile: legacyPath,
+	}
+	serverRecord, err := NewRecord(KindServer, uuid, serverData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyRecord, err := NewRecord(KindKey, portable, KeyData{
+		Path: portable, Private: private, Public: public,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverRecord.Updated = 100
+	keyRecord.Updated = 101
+	bundle, err := Seal(key, []Record{serverRecord, keyRecord})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Store(bundle); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &model.Server{
+		Alias: "partial", Host: "partial.example", Port: 22, User: "mirivlad",
+		AuthMethod: model.AuthKey, IdentityFile: legacyPath,
+	}
+	if err := d.db.CreateServer(server); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.db.SetServerSyncID(server.ID, uuid); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.db.ReplaceSyncStates([]db.SyncState{
+		{ID: serverRecord.ID, Hash: serverRecord.Hash, Updated: serverRecord.Updated},
+		{ID: keyRecord.ID, Hash: keyRecord.Hash, Updated: keyRecord.Updated},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	report := mustSync(t, d)
+	wantPath := filepath.Join(d.home, ".ssh", "id_rsa")
+	gotServer, err := d.db.GetServer("partial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotServer.IdentityFile != wantPath {
+		t.Fatalf("identity after partial migration = %q, want %q; report=%+v", gotServer.IdentityFile, wantPath, report)
+	}
+	if gotPrivate, err := os.ReadFile(wantPath); err != nil || string(gotPrivate) != string(private) {
+		t.Fatalf("private key after partial migration = %q, %v", gotPrivate, err)
+	}
+	if gotPublic, err := os.ReadFile(wantPath + ".pub"); err != nil || string(gotPublic) != string(public) {
+		t.Fatalf("public key after partial migration = %q, %v", gotPublic, err)
+	}
+}
+
 func TestUnreadableLegacyKeyProtectsOldAndPortableRecordIDs(t *testing.T) {
 	d := newDevice(t, &Folder{Dir: t.TempDir()})
 	legacyPath := "/home/alice/.ssh/id_missing_from_legacy"
