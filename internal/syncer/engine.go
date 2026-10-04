@@ -294,6 +294,15 @@ func (e *Engine) syncOnce() (Report, error) {
 	if err := local.Adopt(remote, states); err != nil {
 		return report, err
 	}
+	// Repair local-only cross-platform key paths before Export/Merge. This must
+	// run even on a completely quiet sync where no remote record is Incoming.
+	repaired, repairWarnings, err := local.RepairPortableKeyPaths(remote)
+	if err != nil {
+		return report, err
+	}
+	report.Received += repaired
+	report.Warnings = append(report.Warnings, repairWarnings...)
+
 	current, warnings, err := local.Export()
 	if err != nil {
 		return report, err
@@ -306,7 +315,7 @@ func (e *Engine) syncOnce() (Report, error) {
 	incoming := retryUnreadableRecords(local, result.Incoming, result.Records)
 
 	applied, applyWarnings, err := local.Apply(incoming)
-	report.Received = applied
+	report.Received += applied
 	report.Warnings = append(report.Warnings, applyWarnings...)
 	if err != nil {
 		return report, err

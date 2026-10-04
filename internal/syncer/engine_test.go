@@ -290,6 +290,102 @@ func TestUpgradeFromV071ReappliesMissingLegacyKeyAndRewritesProfilePath(t *testi
 	}
 }
 
+func TestQuietSyncRepairsLegacyLocalPathWithoutChangingBundle(t *testing.T) {
+	storage := &Folder{Dir: t.TempDir()}
+	d := newDevice(t, storage)
+
+	key, err := NewKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.engine.adoptKey(key); err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		uuid       = "quiet-repair-profile"
+		legacyPath = "/home/mirivlad/.ssh/id_rsa"
+		portable   = "~/.ssh/id_rsa"
+	)
+	private := []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nquiet-repair\n")
+	public := []byte("ssh-rsa AAAA quiet-repair")
+
+	// The shared state is already completely portable. Nothing in the sync
+	// folder needs to change.
+	serverRecord, err := NewRecord(KindServer, uuid, ServerData{
+		Alias: "quiet-repair", Host: "quiet.example", Port: 22, User: "mirivlad",
+		AuthMethod: string(model.AuthKey), IdentityFile: portable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyRecord, err := NewRecord(KindKey, portable, KeyData{
+		Path: portable, Private: private, Public: public,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverRecord.Updated = 100
+	keyRecord.Updated = 100
+	bundle, err := Seal(key, []Record{serverRecord, keyRecord})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Store(bundle); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(storage.Dir, BundleFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the actual broken Windows state: sync bookkeeping already says
+	// both records were accepted, but the local DB still contains Linux's
+	// absolute IdentityFile and the key has never been materialized locally.
+	server := &model.Server{
+		Alias: "quiet-repair", Host: "quiet.example", Port: 22, User: "mirivlad",
+		AuthMethod: model.AuthKey, IdentityFile: legacyPath,
+	}
+	if err := d.db.CreateServer(server); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.db.SetServerSyncID(server.ID, uuid); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.db.ReplaceSyncStates([]db.SyncState{
+		{ID: serverRecord.ID, Hash: serverRecord.Hash, Updated: serverRecord.Updated},
+		{ID: keyRecord.ID, Hash: keyRecord.Hash, Updated: keyRecord.Updated},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	report := mustSync(t, d)
+	wantPath := filepath.Join(d.home, ".ssh", "id_rsa")
+	got, err := d.db.GetServer("quiet-repair")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.IdentityFile != wantPath {
+		t.Fatalf("quiet repair IdentityFile = %q, want %q; report=%+v", got.IdentityFile, wantPath, report)
+	}
+	if gotPrivate, err := os.ReadFile(wantPath); err != nil || string(gotPrivate) != string(private) {
+		t.Fatalf("quiet repair private key = %q, %v", gotPrivate, err)
+	}
+	if gotPublic, err := os.ReadFile(wantPath + ".pub"); err != nil || string(gotPublic) != string(public) {
+		t.Fatalf("quiet repair public key = %q, %v", gotPublic, err)
+	}
+	if report.Stored {
+		t.Fatalf("quiet local repair unexpectedly rewrote shared storage: %+v", report)
+	}
+	after, err := os.ReadFile(filepath.Join(storage.Dir, BundleFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("sshkeeper.sync changed during a local-only repair")
+	}
+}
+
 func TestUpgradeRepairsLegacyProfileWhenKeyRecordIsAlreadyPortable(t *testing.T) {
 	storage := &Folder{Dir: t.TempDir()}
 	d := newDevice(t, storage)
