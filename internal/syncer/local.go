@@ -193,8 +193,13 @@ func (l *Local) Export() ([]Record, []string, error) {
 				warnings = append(warnings, fmt.Sprintf("key %s: %v", source, err))
 			}
 			// Preserve an existing synced key instead of turning a temporary local
-			// read failure into a deletion.
+			// read failure into a deletion. During migration from v0.7.0/v0.7.1
+			// the state may still use the old absolute-path record ID, so protect
+			// both the new portable ID and the legacy source ID.
 			l.unreadable[KindKey+":"+portable] = true
+			if source != portable {
+				l.unreadable[KindKey+":"+source] = true
+			}
 			continue
 		}
 		if emittedKeys[portable] {
