@@ -133,3 +133,13 @@ func TestResizePropagatesToActiveChildren(t *testing.T) {
 		t.Fatalf("resize did not reach every child: %#v", m)
 	}
 }
+
+func TestQuickHelpListsWorkspaceNavigation(t *testing.T) {
+	help := newHelpScreenModel(140, 80)
+	view := help.View()
+	for _, want := range []string{"Alt+←/→", "Alt+0", "Alt+1…9", "Alt+W"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("quick help missing workspace key %q:\n%s", want, view)
+		}
+	}
+}

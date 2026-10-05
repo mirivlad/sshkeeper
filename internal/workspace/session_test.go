@@ -160,3 +160,55 @@ func TestSessionKeepsFinalScreenAfterProcessExit(t *testing.T) {
 		t.Fatalf("final terminal screen was lost after exit: %q", got)
 	}
 }
+
+func TestSessionUpdateNotificationsAreEventDriven(t *testing.T) {
+	proc := newFakeProcess()
+	session := New("events", proc, 40, 10)
+	t.Cleanup(func() { _ = session.Close() })
+
+	first := session.Updates()
+	select {
+	case <-first:
+		t.Fatal("idle session emitted an update without PTY output")
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	proc.feed("hello\r\n")
+	select {
+	case <-first:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PTY output did not wake session update subscribers")
+	}
+
+	second := session.Updates()
+	if first == second {
+		t.Fatal("update generation was not advanced after output")
+	}
+	proc.feed("again\r\n")
+	select {
+	case <-second:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second PTY output did not wake the next update generation")
+	}
+}
+
+func TestSessionUpdateNotificationBroadcastsToMultipleWaiters(t *testing.T) {
+	proc := newFakeProcess()
+	session := New("broadcast", proc, 40, 10)
+	t.Cleanup(func() { _ = session.Close() })
+
+	update := session.Updates()
+	waiter1 := make(chan struct{})
+	waiter2 := make(chan struct{})
+	go func() { <-update; close(waiter1) }()
+	go func() { <-update; close(waiter2) }()
+
+	proc.feed("broadcast\r\n")
+	for name, waiter := range map[string]<-chan struct{}{"first": waiter1, "second": waiter2} {
+		select {
+		case <-waiter:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s update waiter was not notified", name)
+		}
+	}
+}

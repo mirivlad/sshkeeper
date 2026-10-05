@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mirivlad/sshkeeper/internal/model"
@@ -229,5 +230,57 @@ func TestWorkspaceAltArrowsCycleTabs(t *testing.T) {
 	}
 	if !m.workspaceShortcut(tea.KeyMsg{Type: tea.KeyLeft, Alt: true}) || m.workspaceActive != 1 {
 		t.Fatalf("Alt+Left active=%d, want 1", m.workspaceActive)
+	}
+}
+
+func TestWorkspaceSessionUpdateCmdWaitsForRealSessionEvent(t *testing.T) {
+	proc := newTUIWorkspaceFakeProcess()
+	session := workspacepkg.New("idle", proc, 80, 24)
+	t.Cleanup(func() { _ = session.Close() })
+
+	cmd := workspaceSessionUpdateCmd(session)
+	result := make(chan tea.Msg, 1)
+	go func() { result <- cmd() }()
+
+	select {
+	case msg := <-result:
+		t.Fatalf("idle workspace produced a synthetic refresh: %#v", msg)
+	case <-time.After(120 * time.Millisecond):
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case msg := <-result:
+		update, ok := msg.(workspaceSessionUpdateMsg)
+		if !ok || update.id != session.ID() || !update.done {
+			t.Fatalf("exit update = %#v", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("workspace watcher did not wake when session exited")
+	}
+}
+
+func TestThreeIdleWorkspaceWatchersStaySilent(t *testing.T) {
+	result := make(chan tea.Msg, 3)
+	var sessions []*workspacepkg.Session
+	for _, alias := range []string{"one", "two", "three"} {
+		proc := newTUIWorkspaceFakeProcess()
+		session := workspacepkg.New(alias, proc, 80, 24)
+		sessions = append(sessions, session)
+		cmd := workspaceSessionUpdateCmd(session)
+		go func() { result <- cmd() }()
+	}
+	t.Cleanup(func() {
+		for _, session := range sessions {
+			_ = session.Close()
+		}
+	})
+
+	select {
+	case msg := <-result:
+		t.Fatalf("idle workspace watcher produced a refresh: %#v", msg)
+	case <-time.After(200 * time.Millisecond):
 	}
 }

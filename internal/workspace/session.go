@@ -34,12 +34,14 @@ type Session struct {
 
 	screenMu       sync.Mutex
 	stateMu        sync.RWMutex
+	updateMu       sync.Mutex
 	exited         bool
 	exitErr        error
 	width          int
 	height         int
 	done           chan struct{}
 	outputDone     chan struct{}
+	updates        chan struct{}
 	once           sync.Once
 	inputCloseOnce sync.Once
 }
@@ -61,6 +63,7 @@ func New(alias string, proc Process, width, height int) *Session {
 		height:     height,
 		done:       make(chan struct{}),
 		outputDone: make(chan struct{}),
+		updates:    make(chan struct{}),
 	}
 	go s.forwardTerminalInput()
 	go s.readProcessOutput()
@@ -72,6 +75,12 @@ func (s *Session) ID() string            { return s.id }
 func (s *Session) Alias() string         { return s.alias }
 func (s *Session) StartedAt() time.Time  { return s.started }
 func (s *Session) Done() <-chan struct{} { return s.done }
+
+func (s *Session) Updates() <-chan struct{} {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+	return s.updates
+}
 
 func (s *Session) Render() string {
 	s.screenMu.Lock()
@@ -123,6 +132,17 @@ func (s *Session) Exited() (bool, error) {
 	return s.exited, s.exitErr
 }
 
+func (s *Session) signalUpdate() {
+	// Closing the current generation broadcasts the update to every waiter.
+	// This is robust across temporary Bubble Tea restarts: an old waiter cannot
+	// steal the only notification from the new program. Bursts are naturally
+	// coalesced because the next View reads the emulator's latest state.
+	s.updateMu.Lock()
+	close(s.updates)
+	s.updates = make(chan struct{})
+	s.updateMu.Unlock()
+}
+
 func (s *Session) Close() error {
 	exited, _ := s.Exited()
 	if !exited {
@@ -155,6 +175,7 @@ func (s *Session) readProcessOutput() {
 			s.screenMu.Lock()
 			_, _ = s.emu.Write(buf[:n])
 			s.screenMu.Unlock()
+			s.signalUpdate()
 		}
 		if err != nil {
 			if err != io.EOF {
@@ -180,6 +201,7 @@ func (s *Session) waitProcess() {
 	s.exited = true
 	s.exitErr = err
 	s.stateMu.Unlock()
+	s.signalUpdate()
 	// Stop accepting terminal input now that the child is gone, but keep the
 	// emulator screen itself alive for the exited tab.
 	s.closeTerminalInput()
