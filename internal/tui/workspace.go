@@ -254,6 +254,16 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.workspaceActive = 0
 		return m, nil
 	}
+	if msg.Type == tea.KeyPgUp || msg.Type == tea.KeyPgDown {
+		_, pageHeight := m.workspaceTerminalSize()
+		delta := max(1, pageHeight-1)
+		if msg.Type == tea.KeyPgDown {
+			delta = -delta
+		}
+		if session.Scroll(delta) {
+			return m, nil
+		}
+	}
 	if msg.Paste && msg.Type == tea.KeyRunes {
 		session.Paste(string(msg.Runes))
 		return m, nil
@@ -414,6 +424,9 @@ func (m *tuiModel) viewWorkspaceSession() string {
 
 	exited, exitErr := session.Exited()
 	status := i18n.Tf("%s · connected", "%s · подключено", session.Alias())
+	if offset := session.ScrollOffset(); offset > 0 {
+		status = i18n.Tf("%s · scrollback: %d lines above live", "%s · история: на %d строк выше", session.Alias(), offset)
+	}
 	if exited {
 		status = i18n.Tf("%s · session ended", "%s · сессия завершена", session.Alias())
 		if exitErr != nil {
@@ -421,6 +434,7 @@ func (m *tuiModel) viewWorkspaceSession() string {
 		}
 	}
 	help := renderHelpLine([]helpItem{
+		{Key: "Wheel · PgUp/PgDn", Action: i18n.T("scroll output", "листать вывод")},
 		{Key: "Ctrl+PgUp/PgDn · Alt+←/→", Action: i18n.T("switch tab", "сменить вкладку")},
 		{Key: "Alt+0", Action: i18n.T("servers", "серверы")},
 		{Key: "Alt+W", Action: i18n.T("close session", "закрыть сессию")},
@@ -445,6 +459,16 @@ func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft && event.Y == 0 {
 		if tab := m.workspaceTabAtX(event.X); tab >= 0 {
 			m.workspaceActive = tab
+			return m, nil
+		}
+	}
+	if session := m.activeWorkspaceSession(); session != nil {
+		switch event.Button {
+		case tea.MouseButtonWheelUp:
+			session.Scroll(3)
+			return m, nil
+		case tea.MouseButtonWheelDown:
+			session.Scroll(-3)
 			return m, nil
 		}
 	}

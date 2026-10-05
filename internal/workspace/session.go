@@ -3,10 +3,12 @@ package workspace
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vt"
 )
 
@@ -39,6 +41,7 @@ type Session struct {
 	exitErr        error
 	width          int
 	height         int
+	scrollOffset   int
 	done           chan struct{}
 	outputDone     chan struct{}
 	updates        chan struct{}
@@ -83,9 +86,113 @@ func (s *Session) Updates() <-chan struct{} {
 }
 
 func (s *Session) Render() string {
+	s.stateMu.RLock()
+	offset := s.scrollOffset
+	s.stateMu.RUnlock()
+
 	s.screenMu.Lock()
 	defer s.screenMu.Unlock()
-	return s.emu.Render()
+	return s.renderLocked(offset)
+}
+
+func (s *Session) renderLocked(offset int) string {
+	height := s.emu.Height()
+	if height < 1 {
+		return ""
+	}
+	if s.emu.IsAltScreen() {
+		offset = 0
+	}
+	sbLen := s.emu.ScrollbackLen()
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > sbLen {
+		offset = sbLen
+	}
+
+	end := sbLen + height - offset
+	start := max(0, end-height)
+	lines := make([]string, 0, height)
+	cursor := s.emu.CursorPosition()
+	for row := start; row < end; row++ {
+		if row < sbLen {
+			line := s.emu.Scrollback().Line(row)
+			if line == nil {
+				lines = append(lines, "")
+			} else {
+				lines = append(lines, line.Render())
+			}
+			continue
+		}
+
+		y := row - sbLen
+		line := make(uv.Line, s.emu.Width())
+		for x := range s.emu.Width() {
+			if cell := s.emu.CellAt(x, y); cell != nil {
+				line[x] = *cell.Clone()
+			}
+		}
+		// The VT emulator tracks the remote cursor but Render() only returns
+		// cells. Overlay a reverse-video cell while viewing the live screen so
+		// full-screen applications such as nano/vim have a visible cursor.
+		if offset == 0 && y == cursor.Y && cursor.X >= 0 && cursor.X < len(line) {
+			if line[cursor.X].IsZero() {
+				line[cursor.X] = uv.EmptyCell
+			}
+			line[cursor.X].Style.Attrs ^= uv.AttrReverse
+		}
+		lines = append(lines, line.Render())
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (s *Session) IsAltScreen() bool {
+	s.screenMu.Lock()
+	defer s.screenMu.Unlock()
+	return s.emu.IsAltScreen()
+}
+
+func (s *Session) ScrollOffset() int {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.scrollOffset
+}
+
+// Scroll moves the local viewport through the main-screen scrollback. Positive
+// delta moves toward older output, negative delta moves back toward live output.
+// Alternate-screen applications own PageUp/PageDown themselves and are never
+// intercepted here.
+func (s *Session) Scroll(delta int) bool {
+	if delta == 0 {
+		return false
+	}
+	s.screenMu.Lock()
+	if s.emu.IsAltScreen() {
+		s.screenMu.Unlock()
+		return false
+	}
+	maxOffset := s.emu.ScrollbackLen()
+	s.screenMu.Unlock()
+	if maxOffset == 0 {
+		return false
+	}
+
+	s.stateMu.Lock()
+	before := s.scrollOffset
+	s.scrollOffset = min(maxOffset, max(0, s.scrollOffset+delta))
+	changed := before != s.scrollOffset
+	s.stateMu.Unlock()
+	return changed
+}
+
+func (s *Session) ScrollToBottom() {
+	s.stateMu.Lock()
+	s.scrollOffset = 0
+	s.stateMu.Unlock()
 }
 
 func (s *Session) Resize(width, height int) error {
@@ -104,23 +211,32 @@ func (s *Session) Resize(width, height int) error {
 	s.stateMu.Unlock()
 	s.screenMu.Lock()
 	s.emu.Resize(width, height)
+	maxOffset := s.emu.ScrollbackLen()
 	s.screenMu.Unlock()
+	s.stateMu.Lock()
+	if s.scrollOffset > maxOffset {
+		s.scrollOffset = maxOffset
+	}
+	s.stateMu.Unlock()
 	return s.proc.Resize(width, height)
 }
 
 func (s *Session) SendKey(key vt.KeyPressEvent) {
+	s.ScrollToBottom()
 	s.screenMu.Lock()
 	s.emu.SendKey(key)
 	s.screenMu.Unlock()
 }
 
 func (s *Session) SendText(text string) {
+	s.ScrollToBottom()
 	s.screenMu.Lock()
 	s.emu.SendText(text)
 	s.screenMu.Unlock()
 }
 
 func (s *Session) Paste(text string) {
+	s.ScrollToBottom()
 	s.screenMu.Lock()
 	s.emu.Paste(text)
 	s.screenMu.Unlock()
@@ -173,8 +289,17 @@ func (s *Session) readProcessOutput() {
 		n, err := s.proc.Read(buf)
 		if n > 0 {
 			s.screenMu.Lock()
+			beforeScrollback := s.emu.ScrollbackLen()
 			_, _ = s.emu.Write(buf[:n])
+			afterScrollback := s.emu.ScrollbackLen()
 			s.screenMu.Unlock()
+			if delta := afterScrollback - beforeScrollback; delta > 0 {
+				s.stateMu.Lock()
+				if s.scrollOffset > 0 {
+					s.scrollOffset = min(afterScrollback, s.scrollOffset+delta)
+				}
+				s.stateMu.Unlock()
+			}
 			s.signalUpdate()
 		}
 		if err != nil {
