@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -210,5 +211,66 @@ func TestSessionUpdateNotificationBroadcastsToMultipleWaiters(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("%s update waiter was not notified", name)
 		}
+	}
+}
+
+func TestSessionRendersVisibleCursor(t *testing.T) {
+	proc := newFakeProcess()
+	session := New("cursor", proc, 20, 5)
+	t.Cleanup(func() { _ = session.Close() })
+
+	proc.feed("\x1b[2J\x1b[Habc\x1b[3;5H")
+	waitUntil(t, func() bool {
+		return strings.Contains(session.Render(), "\x1b[7m")
+	})
+	if got := session.Render(); !strings.Contains(got, "\x1b[7m") {
+		t.Fatalf("rendered terminal does not contain reverse-video cursor: %q", got)
+	}
+}
+
+func TestSessionScrollbackCanBeViewedAndInputReturnsLive(t *testing.T) {
+	proc := newFakeProcess()
+	session := New("scroll", proc, 20, 4)
+	t.Cleanup(func() { _ = session.Close() })
+
+	for i := 1; i <= 12; i++ {
+		proc.feed(fmt.Sprintf("line%02d\r\n", i))
+	}
+	waitUntil(t, func() bool {
+		return strings.Contains(ansi.Strip(session.Render()), "line12")
+	})
+
+	if !session.Scroll(3) {
+		t.Fatal("scroll up did not move viewport")
+	}
+	if session.ScrollOffset() == 0 {
+		t.Fatal("scroll offset stayed at live view")
+	}
+	scrolled := ansi.Strip(session.Render())
+	if strings.Contains(scrolled, "line12") {
+		t.Fatalf("scrollback still shows newest line instead of older output: %q", scrolled)
+	}
+
+	session.SendText("x")
+	if got := session.ScrollOffset(); got != 0 {
+		t.Fatalf("typing did not return viewport to live output: offset=%d", got)
+	}
+	if live := ansi.Strip(session.Render()); !strings.Contains(live, "line12") {
+		t.Fatalf("live viewport was not restored: %q", live)
+	}
+}
+
+func TestSessionDoesNotInterceptScrollInAltScreen(t *testing.T) {
+	proc := newFakeProcess()
+	session := New("alt", proc, 20, 4)
+	t.Cleanup(func() { _ = session.Close() })
+
+	proc.feed("\x1b[?1049h\x1b[2Jnano-like")
+	waitUntil(t, func() bool { return strings.Contains(ansi.Strip(session.Render()), "nano-like") })
+	if !session.IsAltScreen() {
+		t.Fatal("alternate screen was not detected")
+	}
+	if session.Scroll(3) {
+		t.Fatal("local scrollback intercepted alternate-screen application")
 	}
 }

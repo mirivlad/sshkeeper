@@ -27,6 +27,7 @@ func newHelpScreenModel(w, h int) *helpScreenModel {
 		helpScreenItem{key: "Alt+0", action: i18n.T("Return to Servers tab", "Вернуться на вкладку Серверы")},
 		helpScreenItem{key: "Alt+1…9", action: i18n.T("Jump to SSH tab", "Перейти к SSH-вкладке")},
 		helpScreenItem{key: "Alt+W", action: i18n.T("Close current SSH tab", "Закрыть текущую SSH-вкладку")},
+		helpScreenItem{key: "Wheel Pg↑/↓", action: i18n.T("Scroll SSH output history; full-screen apps keep PageUp/PageDown", "Листать историю вывода SSH; полноэкранные программы получают PageUp/PageDown сами")},
 		helpScreenItem{key: "a  Ctrl+A", action: i18n.T("Add server", "Добавить сервер")},
 		helpScreenItem{key: "e  Ctrl+E", action: i18n.T("Edit server", "Изменить сервер")},
 		helpScreenItem{key: "d  Ctrl+D", action: i18n.T("Delete server", "Удалить сервер")},
