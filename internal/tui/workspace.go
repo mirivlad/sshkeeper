@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/vt"
@@ -11,17 +10,34 @@ import (
 	workspacepkg "github.com/mirivlad/sshkeeper/internal/workspace"
 )
 
-const workspaceRefreshInterval = 50 * time.Millisecond
-
 type workspaceOpenedMsg struct {
 	session *workspacepkg.Session
 	err     error
 }
 
-type workspaceTickMsg struct{}
+type workspaceSessionUpdateMsg struct {
+	id   string
+	done bool
+}
 
-func workspaceTickCmd() tea.Cmd {
-	return tea.Tick(workspaceRefreshInterval, func(time.Time) tea.Msg { return workspaceTickMsg{} })
+func workspaceSessionUpdateCmd(session *workspacepkg.Session) tea.Cmd {
+	if session == nil {
+		return nil
+	}
+	// Capture the current update generation before Bubble Tea schedules the
+	// command. Otherwise output arriving between Update() and command execution
+	// could advance the generation and leave the screen stale until later data.
+	updates := session.Updates()
+	done := session.Done()
+	return func() tea.Msg {
+		select {
+		case <-updates:
+			exited, _ := session.Exited()
+			return workspaceSessionUpdateMsg{id: session.ID(), done: exited}
+		case <-done:
+			return workspaceSessionUpdateMsg{id: session.ID(), done: true}
+		}
+	}
 }
 
 func (m *tuiModel) workspaceTerminalSize() (int, int) {
@@ -37,6 +53,29 @@ func (m *tuiModel) activeWorkspaceSession() *workspacepkg.Session {
 		return nil
 	}
 	return m.workspaceSessions[index]
+}
+
+func (m *tuiModel) workspaceSessionByID(id string) *workspacepkg.Session {
+	for _, session := range m.workspaceSessions {
+		if session != nil && session.ID() == id {
+			return session
+		}
+	}
+	return nil
+}
+
+func (m *tuiModel) workspaceWatchCmds() []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.workspaceSessions))
+	for _, session := range m.workspaceSessions {
+		if session == nil {
+			continue
+		}
+		if exited, _ := session.Exited(); exited {
+			continue
+		}
+		cmds = append(cmds, workspaceSessionUpdateCmd(session))
+	}
+	return cmds
 }
 
 func (m *tuiModel) workspaceSessionCount(alias string) int {
@@ -72,7 +111,7 @@ func (m *tuiModel) openWorkspaceSession(serverAlias string) (tea.Model, tea.Cmd)
 			width, height := m.workspaceTerminalSize()
 			_ = session.Resize(width, height)
 		}
-		return m, workspaceTickCmd()
+		return m, nil
 	}
 	if OpenWorkspaceSession == nil {
 		return m, func() tea.Msg {
@@ -100,7 +139,7 @@ func (m *tuiModel) handleWorkspaceOpened(msg workspaceOpenedMsg) tea.Cmd {
 	m.workspaceSessions = append(m.workspaceSessions, msg.session)
 	m.workspaceActive = len(m.workspaceSessions)
 	m.err = nil
-	return workspaceTickCmd()
+	return workspaceSessionUpdateCmd(msg.session)
 }
 
 func (m *tuiModel) closeActiveWorkspaceSession() {
@@ -208,7 +247,7 @@ func (m *tuiModel) workspaceShortcut(msg tea.KeyMsg) bool {
 
 func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.workspaceShortcut(msg) {
-		return m, workspaceTickCmd()
+		return m, nil
 	}
 	session := m.activeWorkspaceSession()
 	if session == nil {
@@ -217,7 +256,7 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.Paste && msg.Type == tea.KeyRunes {
 		session.Paste(string(msg.Runes))
-		return m, workspaceTickCmd()
+		return m, nil
 	}
 	if msg.Type == tea.KeyRunes {
 		mod := vt.KeyMod(0)
@@ -227,12 +266,12 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		for _, r := range msg.Runes {
 			session.SendKey(vt.KeyPressEvent{Code: r, Mod: mod})
 		}
-		return m, workspaceTickCmd()
+		return m, nil
 	}
 	if event, ok := workspaceVTKey(msg); ok {
 		session.SendKey(event)
 	}
-	return m, workspaceTickCmd()
+	return m, nil
 }
 
 func workspaceVTKey(msg tea.KeyMsg) (vt.KeyPressEvent, bool) {
@@ -374,7 +413,7 @@ func (m *tuiModel) viewWorkspaceSession() string {
 	tabs := m.renderWorkspaceTabs(width)
 
 	exited, exitErr := session.Exited()
-	status := i18n.Tf("%s · running %s", "%s · работает %s", session.Alias(), time.Since(session.StartedAt()).Round(time.Second))
+	status := i18n.Tf("%s · connected", "%s · подключено", session.Alias())
 	if exited {
 		status = i18n.Tf("%s · session ended", "%s · сессия завершена", session.Alias())
 		if exitErr != nil {
@@ -406,7 +445,7 @@ func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft && event.Y == 0 {
 		if tab := m.workspaceTabAtX(event.X); tab >= 0 {
 			m.workspaceActive = tab
-			return m, workspaceTickCmd()
+			return m, nil
 		}
 	}
 	return m, nil
@@ -428,7 +467,7 @@ func (m *tuiModel) updateDashboardMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if event.Y == 0 && event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft {
 		if tab := m.workspaceTabAtX(event.X); tab >= 0 {
 			m.workspaceActive = tab
-			return m, workspaceTickCmd()
+			return m, nil
 		}
 	}
 	switch event.Button {

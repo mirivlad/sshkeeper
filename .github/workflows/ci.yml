@@ -67,7 +67,7 @@ jobs:
         run: go test ./internal/ssh -run "ConPTY|InteractiveProcess" -count=1 -v
 
       - name: workspace TUI tests
-        run: go test ./internal/workspace ./internal/tui -run "Workspace|DashboardTab|DashboardMouse|ProfileActions" -count=1 -v
+        run: go test ./internal/workspace ./internal/tui -run "Workspace|SessionUpdate|DashboardTab|DashboardMouse|ProfileActions" -count=1 -v
 
       - name: background tunnel process tests
         run: go test ./internal/tunnel -run BackgroundCommand -count=1 -v

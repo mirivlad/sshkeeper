@@ -429,9 +429,7 @@ func (m *tuiModel) Init() tea.Cmd {
 		// A notice restored from the previous run fades like any other.
 		cmds = append(cmds, m.expireNoticeCmd())
 	}
-	if len(m.workspaceSessions) > 0 {
-		cmds = append(cmds, workspaceTickCmd())
-	}
+	cmds = append(cmds, m.workspaceWatchCmds()...)
 	return tea.Batch(cmds...)
 }
 
@@ -566,11 +564,15 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspaceOpenedMsg:
 		return m, m.handleWorkspaceOpened(msg)
 
-	case workspaceTickMsg:
-		if len(m.workspaceSessions) == 0 {
+	case workspaceSessionUpdateMsg:
+		session := m.workspaceSessionByID(msg.id)
+		if session == nil || msg.done {
 			return m, nil
 		}
-		return m, workspaceTickCmd()
+		if exited, _ := session.Exited(); exited {
+			return m, nil
+		}
+		return m, workspaceSessionUpdateCmd(session)
 
 	case serverTestedMsg:
 		m.applyServerTest(msg)
@@ -946,7 +948,7 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateWorkspaceKey(msg)
 		}
 		if m.workspaceShortcut(msg) {
-			return m, workspaceTickCmd()
+			return m, nil
 		}
 		if m.err != nil || m.success != "" || m.warning != "" {
 			m.err = nil
