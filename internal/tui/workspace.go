@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 
@@ -513,43 +514,138 @@ func (m *tuiModel) viewWorkspaceSession() string {
 	return tabs + "\n" + strings.Join(lines, "\n") + "\n" + statusLine
 }
 
-func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	event := tea.MouseEvent(msg)
-	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft && event.Y == 0 {
-		if tab := m.workspaceTabAtX(event.X); tab >= 0 {
-			m.workspaceActive = tab
-			return m, nil
+// A repeating event is scheduled only while the pointer is being dragged
+// beyond the SSH viewport. Generation tokens invalidate stale timer events.
+type workspaceAutoScrollMsg struct {
+	id    string
+	epoch uint64
+}
+
+var workspaceMouseNow = time.Now
+
+func (m *tuiModel) cancelWorkspaceAutoScroll() {
+	m.workspaceScrollEpoch++
+	m.workspaceScrollDir = 0
+}
+func (m *tuiModel) workspaceScrollTick(session *workspacepkg.Session) tea.Cmd {
+	epoch := m.workspaceScrollEpoch
+	id := session.ID()
+	return tea.Tick(65*time.Millisecond, func(time.Time) tea.Msg {
+		return workspaceAutoScrollMsg{id: id, epoch: epoch}
+	})
+}
+func (m *tuiModel) workspaceEdgeDirection(y int) int {
+	if y <= 0 {
+		return 1
+	}
+	if y >= m.height-1 {
+		return -1
+	}
+	return 0
+}
+func (m *tuiModel) workspaceDragTo(session *workspacepkg.Session, x, y int) tea.Cmd {
+	m.workspaceDragMoved = m.workspaceDragMoved || x != m.workspaceStartX || y != m.workspaceStartY
+	m.workspaceDragX, m.workspaceDragY = x, y
+	dir := m.workspaceEdgeDirection(y)
+	session.MoveSelection(x, y-1)
+	if dir != m.workspaceScrollDir {
+		m.cancelWorkspaceAutoScroll()
+		m.workspaceScrollDir = dir
+		if dir != 0 {
+			session.Scroll(dir)
+			session.MoveSelection(x, y-1)
+			return m.workspaceScrollTick(session)
+		}
+	} else if dir != 0 {
+		if session.Scroll(dir) {
+			session.MoveSelection(x, y-1)
 		}
 	}
-	if session := m.activeWorkspaceSession(); session != nil {
-		if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft && event.Y >= 1 && event.Y < m.height-1 {
-			session.StartSelection(event.X, event.Y-1)
-			m.workspaceSelecting = true
-			m.workspaceCopyNotice = ""
-			return m, nil
-		}
-		if event.Action == tea.MouseActionMotion && m.workspaceSelecting {
-			session.MoveSelection(event.X, event.Y-1)
-			return m, nil
-		}
-		if event.Action == tea.MouseActionRelease && m.workspaceSelecting {
+	return nil
+}
+func (m *tuiModel) handleWorkspaceAutoScroll(msg workspaceAutoScrollMsg) (tea.Model, tea.Cmd) {
+	session := m.activeWorkspaceSession()
+	if session == nil || session.ID() != msg.id || !m.workspaceSelecting ||
+		m.workspaceScrollDir == 0 || m.workspaceScrollEpoch != msg.epoch {
+		return m, nil
+	}
+	if !session.Scroll(m.workspaceScrollDir) {
+		return m, nil
+	}
+	session.MoveSelection(m.workspaceDragX, m.workspaceDragY-1)
+	return m, m.workspaceScrollTick(session)
+}
+
+func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	event := tea.MouseEvent(msg)
+	session := m.activeWorkspaceSession()
+	if session != nil && m.workspaceSelecting {
+		switch event.Action {
+		case tea.MouseActionMotion:
+			return m, m.workspaceDragTo(session, event.X, event.Y)
+		case tea.MouseActionRelease:
 			m.workspaceSelecting = false
+			m.cancelWorkspaceAutoScroll()
+			// Wheel events do not release the selection.
 			text := session.FinishSelection(event.X, event.Y-1)
+			if m.workspaceDragMoved {
+				m.workspaceClickCount = 0
+			}
 			if text != "" {
 				return m, workspaceCopyCmd(text)
 			}
 			return m, nil
 		}
-		switch event.Button {
-		case tea.MouseButtonWheelUp:
-			session.ClearSelection()
-			session.Scroll(3)
-			return m, nil
-		case tea.MouseButtonWheelDown:
-			session.ClearSelection()
-			session.Scroll(-3)
+	}
+	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft && event.Y == 0 {
+		if tab := m.workspaceTabAtX(event.X); tab >= 0 {
+			m.workspaceActive = tab
+			m.cancelWorkspaceAutoScroll()
+			m.workspaceSelecting = false
+			m.workspaceClickCount = 0
 			return m, nil
 		}
+	}
+	if session == nil {
+		return m, nil
+	}
+	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft && event.Y >= 1 && event.Y < m.height-1 {
+		now := workspaceMouseNow()
+		if now.Sub(m.workspaceLastClick) > 0 && now.Sub(m.workspaceLastClick) <= 450*time.Millisecond &&
+			m.workspaceLastClickID == session.ID() &&
+			event.X >= m.workspaceLastClickX-1 && event.X <= m.workspaceLastClickX+1 && event.Y == m.workspaceLastClickY {
+			m.workspaceClickCount++
+			if m.workspaceClickCount > 3 {
+				m.workspaceClickCount = 1
+			}
+		} else {
+			m.workspaceClickCount = 1
+		}
+		m.workspaceLastClick = now
+		m.workspaceLastClickX, m.workspaceLastClickY = event.X, event.Y
+		m.workspaceLastClickID = session.ID()
+		m.workspaceStartX, m.workspaceStartY = event.X, event.Y
+		m.workspaceDragX, m.workspaceDragY = event.X, event.Y
+		m.workspaceDragMoved = false
+		m.cancelWorkspaceAutoScroll()
+		session.StartSelectionWithClicks(event.X, event.Y-1, m.workspaceClickCount)
+		m.workspaceSelecting = true
+		m.workspaceCopyNotice = ""
+		return m, nil
+	}
+	switch event.Button {
+	case tea.MouseButtonWheelUp:
+		session.Scroll(3)
+		if m.workspaceSelecting {
+			session.MoveSelection(m.workspaceDragX, m.workspaceDragY-1)
+		}
+		return m, nil
+	case tea.MouseButtonWheelDown:
+		session.Scroll(-3)
+		if m.workspaceSelecting {
+			session.MoveSelection(m.workspaceDragX, m.workspaceDragY-1)
+		}
+		return m, nil
 	}
 	return m, nil
 }

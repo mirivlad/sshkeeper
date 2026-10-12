@@ -316,6 +316,18 @@ type tuiModel struct {
 	workspaceActive      int // 0 = dashboard, 1..n = embedded SSH session
 	workspaceSelecting   bool
 	workspaceCopyNotice  string
+	workspaceDragX       int
+	workspaceDragY       int
+	workspaceStartX      int
+	workspaceStartY      int
+	workspaceDragMoved   bool
+	workspaceScrollDir   int
+	workspaceScrollEpoch uint64
+	workspaceLastClick   time.Time
+	workspaceLastClickX  int
+	workspaceLastClickY  int
+	workspaceLastClickID string
+	workspaceClickCount  int
 	dashboardFocus       int // 0 = server list, 1 = selected-profile actions
 	detailAction         int
 	pendingTunnelConnect string
@@ -581,6 +593,8 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, workspaceSessionUpdateCmd(session)
+	case workspaceAutoScrollMsg:
+		return m.handleWorkspaceAutoScroll(msg)
 	case workspaceCopiedMsg:
 		if msg.err != nil {
 			m.workspaceCopyNotice = i18n.Tf("Copy failed: %v", "Не удалось скопировать: %v", msg.err)

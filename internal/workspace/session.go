@@ -34,23 +34,26 @@ type Session struct {
 	proc Process
 	emu  *vt.Emulator
 
-	screenMu       sync.Mutex
-	stateMu        sync.RWMutex
-	updateMu       sync.Mutex
-	exited         bool
-	exitErr        error
-	width          int
-	height         int
-	scrollOffset   int
-	done           chan struct{}
-	outputDone     chan struct{}
-	updates        chan struct{}
-	once           sync.Once
-	inputCloseOnce sync.Once
-	selectionStart selectionPoint // Protected by screenMu.
-	selectionEnd   selectionPoint
-	selectionSet   bool
-	selectionDrag  bool
+	screenMu             sync.Mutex
+	stateMu              sync.RWMutex
+	updateMu             sync.Mutex
+	exited               bool
+	exitErr              error
+	width                int
+	height               int
+	scrollOffset         int
+	done                 chan struct{}
+	outputDone           chan struct{}
+	updates              chan struct{}
+	once                 sync.Once
+	inputCloseOnce       sync.Once
+	selectionStart       selectionPoint // Protected by screenMu.
+	selectionEnd         selectionPoint
+	selectionSet         bool
+	selectionDrag        bool
+	selectionUnit        selectionUnit
+	selectionAnchorStart selectionPoint
+	selectionAnchorEnd   selectionPoint
 }
 
 func New(alias string, proc Process, width, height int) *Session {
