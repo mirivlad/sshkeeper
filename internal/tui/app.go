@@ -314,6 +314,8 @@ type tuiModel struct {
 	runtime              runtimeStatus
 	workspaceSessions    []*workspacepkg.Session
 	workspaceActive      int // 0 = dashboard, 1..n = embedded SSH session
+	workspaceSelecting   bool
+	workspaceCopyNotice  string
 	dashboardFocus       int // 0 = server list, 1 = selected-profile actions
 	detailAction         int
 	pendingTunnelConnect string
@@ -566,13 +568,26 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case workspaceSessionUpdateMsg:
 		session := m.workspaceSessionByID(msg.id)
-		if session == nil || msg.done {
+		if session == nil {
 			return m, nil
 		}
-		if exited, _ := session.Exited(); exited {
+		if exited, exitErr := session.Exited(); exited {
+			if exitErr == nil {
+				m.closeWorkspaceSessionByID(msg.id)
+			}
+			return m, nil
+		}
+		if msg.done {
 			return m, nil
 		}
 		return m, workspaceSessionUpdateCmd(session)
+	case workspaceCopiedMsg:
+		if msg.err != nil {
+			m.workspaceCopyNotice = i18n.Tf("Copy failed: %v", "Не удалось скопировать: %v", msg.err)
+		} else {
+			m.workspaceCopyNotice = i18n.T("Selection copied", "Выделенное скопировано")
+		}
+		return m, nil
 
 	case serverTestedMsg:
 		m.applyServerTest(msg)

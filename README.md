@@ -270,6 +270,11 @@ you return to the server dashboard or switch to another SSH tab.
 - `Alt+0` returns to **Servers**; `Alt+1`…`Alt+9` jump directly to SSH tabs.
 - `Alt+W` closes the current SSH tab.
 - Mouse wheel and `PgUp` / `PgDn` scroll the SSH output history on the normal shell screen; typing returns to live output. Full-screen alternate-screen applications keep their own PageUp/PageDown handling.
+- Drag with the left mouse button in an SSH tab to select text **without Shift**.
+  Releasing the button copies the highlighted text to the system clipboard (using
+  a native clipboard helper or OSC 52 fallback when supported by the terminal).
+- A clean remote `exit` (exit status 0) automatically closes its SSH tab.
+  Unsuccessful connections keep their output and error visible until explicitly closed.
 - The embedded terminal renders the remote cursor position, so editors such as `nano` and `vim` have a visible cursor.
 - On a wide dashboard, `Tab` moves focus to the selected profile's **Actions**
   panel. From there you can connect, **Tunnel + Connect**, start/stop the
