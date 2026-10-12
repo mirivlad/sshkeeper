@@ -47,6 +47,10 @@ type Session struct {
 	updates        chan struct{}
 	once           sync.Once
 	inputCloseOnce sync.Once
+	selectionStart selectionPoint // Protected by screenMu.
+	selectionEnd   selectionPoint
+	selectionSet   bool
+	selectionDrag  bool
 }
 
 func New(alias string, proc Process, width, height int) *Session {
@@ -116,32 +120,18 @@ func (s *Session) renderLocked(offset int) string {
 	lines := make([]string, 0, height)
 	cursor := s.emu.CursorPosition()
 	for row := start; row < end; row++ {
-		if row < sbLen {
-			line := s.emu.Scrollback().Line(row)
-			if line == nil {
-				lines = append(lines, "")
-			} else {
-				lines = append(lines, line.Render())
-			}
-			continue
-		}
-
+		line := s.selectionLineLocked(row, sbLen)
 		y := row - sbLen
-		line := make(uv.Line, s.emu.Width())
-		for x := range s.emu.Width() {
-			if cell := s.emu.CellAt(x, y); cell != nil {
-				line[x] = *cell.Clone()
-			}
-		}
 		// The VT emulator tracks the remote cursor but Render() only returns
 		// cells. Overlay a reverse-video cell while viewing the live screen so
 		// full-screen applications such as nano/vim have a visible cursor.
-		if offset == 0 && y == cursor.Y && cursor.X >= 0 && cursor.X < len(line) {
+		if row >= sbLen && offset == 0 && y == cursor.Y && cursor.X >= 0 && cursor.X < len(line) {
 			if line[cursor.X].IsZero() {
 				line[cursor.X] = uv.EmptyCell
 			}
 			line[cursor.X].Style.Attrs ^= uv.AttrReverse
 		}
+		s.selectionHighlightLocked(line, row)
 		lines = append(lines, line.Render())
 	}
 	for len(lines) < height {

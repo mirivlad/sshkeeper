@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -95,8 +96,9 @@ func TestDashboardMouseClickSelectsServerAndRightPanelFocus(t *testing.T) {
 }
 
 type tuiWorkspaceFakeProcess struct {
-	done chan struct{}
-	once sync.Once
+	done    chan struct{}
+	waitErr error
+	once    sync.Once
 }
 
 func newTUIWorkspaceFakeProcess() *tuiWorkspaceFakeProcess {
@@ -111,7 +113,7 @@ func (p *tuiWorkspaceFakeProcess) Write(b []byte) (int, error)    { return len(b
 func (p *tuiWorkspaceFakeProcess) Resize(width, height int) error { return nil }
 func (p *tuiWorkspaceFakeProcess) Wait() error {
 	<-p.done
-	return nil
+	return p.waitErr
 }
 func (p *tuiWorkspaceFakeProcess) Kill() error {
 	p.once.Do(func() { close(p.done) })
@@ -282,5 +284,47 @@ func TestThreeIdleWorkspaceWatchersStaySilent(t *testing.T) {
 	case msg := <-result:
 		t.Fatalf("idle workspace watcher produced a refresh: %#v", msg)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestWorkspaceExitZeroAutoClosesTabAndPreservesFocus(t *testing.T) {
+	m := New(nil)
+	a := newTUIWorkspaceFakeProcess()
+	b := newTUIWorkspaceFakeProcess()
+	sa := workspacepkg.New("a", a, 80, 24)
+	sb := workspacepkg.New("b", b, 80, 24)
+	t.Cleanup(func() { _ = sa.Close(); _ = sb.Close() })
+	m.workspaceSessions = []*workspacepkg.Session{sa, sb}
+	m.workspaceActive = 2
+	a.once.Do(func() { close(a.done) })
+	select {
+	case <-sa.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("session did not exit")
+	}
+	m.Update(workspaceSessionUpdateMsg{id: sa.ID(), done: true})
+	if len(m.workspaceSessions) != 1 || m.workspaceSessions[0] != sb || m.workspaceActive != 1 {
+		t.Fatalf("successful background tab exit left tabs=%d active=%d", len(m.workspaceSessions), m.workspaceActive)
+	}
+	b.once.Do(func() { close(b.done) })
+	<-sb.Done()
+	m.Update(workspaceSessionUpdateMsg{id: sb.ID(), done: true})
+	if len(m.workspaceSessions) != 0 || m.workspaceActive != 0 {
+		t.Fatalf("last successful exit left active=%d tabs=%d", m.workspaceActive, len(m.workspaceSessions))
+	}
+}
+func TestWorkspaceExitErrorKeepsOutputForInspection(t *testing.T) {
+	m := New(nil)
+	proc := newTUIWorkspaceFakeProcess()
+	proc.waitErr = fmt.Errorf("connection lost")
+	session := workspacepkg.New("bad", proc, 80, 24)
+	t.Cleanup(func() { _ = session.Close() })
+	m.workspaceSessions = []*workspacepkg.Session{session}
+	m.workspaceActive = 1
+	proc.once.Do(func() { close(proc.done) })
+	<-session.Done()
+	m.Update(workspaceSessionUpdateMsg{id: session.ID(), done: true})
+	if len(m.workspaceSessions) != 1 || m.workspaceActive != 1 {
+		t.Fatal("failed session was closed instead of keeping output")
 	}
 }

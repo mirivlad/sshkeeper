@@ -1,8 +1,13 @@
 package tui
 
 import (
+	"encoding/base64"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
+
+	"github.com/atotto/clipboard"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/vt"
@@ -18,6 +23,36 @@ type workspaceOpenedMsg struct {
 type workspaceSessionUpdateMsg struct {
 	id   string
 	done bool
+}
+
+type workspaceCopiedMsg struct{ err error }
+
+var workspaceClipboardWrite = func(text string) error {
+	if os.Getenv("WAYLAND_DISPLAY") != "" {
+		if _, err := exec.LookPath("wl-copy"); err == nil {
+			if err := exec.Command("wl-copy", "--", text).Run(); err == nil {
+				return nil
+			}
+		}
+	}
+	if err := clipboard.WriteAll(text); err == nil {
+		return nil
+	} else if tty, openErr := os.OpenFile("/dev/tty", os.O_WRONLY, 0); openErr == nil {
+		defer tty.Close()
+		// OSC 52 is supported by many terminal emulators, and works even
+		// without xclip/xsel. Keep the payload bounded for terminal safety.
+		if len(text) <= 100*1024 {
+			_, writeErr := fmt.Fprintf(tty, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(text)))
+			return writeErr
+		}
+		return err
+	} else {
+		return err
+	}
+}
+
+func workspaceCopyCmd(text string) tea.Cmd {
+	return func() tea.Msg { return workspaceCopiedMsg{err: workspaceClipboardWrite(text)} }
 }
 
 func workspaceSessionUpdateCmd(session *workspacepkg.Session) tea.Cmd {
@@ -144,23 +179,41 @@ func (m *tuiModel) handleWorkspaceOpened(msg workspaceOpenedMsg) tea.Cmd {
 
 func (m *tuiModel) closeActiveWorkspaceSession() {
 	index := m.workspaceActive - 1
+	m.closeWorkspaceSessionAt(index)
+}
+
+func (m *tuiModel) closeWorkspaceSessionByID(id string) {
+	for i, session := range m.workspaceSessions {
+		if session != nil && session.ID() == id {
+			m.closeWorkspaceSessionAt(i)
+			return
+		}
+	}
+}
+
+func (m *tuiModel) closeWorkspaceSessionAt(index int) {
 	if index < 0 || index >= len(m.workspaceSessions) {
-		m.workspaceActive = 0
 		return
+	}
+	if m.workspaceActive == index+1 {
+		m.workspaceSelecting = false
 	}
 	session := m.workspaceSessions[index]
 	if session != nil {
 		_ = session.Close()
 	}
 	m.workspaceSessions = append(m.workspaceSessions[:index], m.workspaceSessions[index+1:]...)
+	// Keep focus stable if a background tab exits.
+	if m.workspaceActive > index+1 {
+		m.workspaceActive--
+	}
 	if len(m.workspaceSessions) == 0 {
 		m.workspaceActive = 0
 		return
 	}
-	if index >= len(m.workspaceSessions) {
-		index = len(m.workspaceSessions) - 1
+	if m.workspaceActive > len(m.workspaceSessions) {
+		m.workspaceActive = len(m.workspaceSessions)
 	}
-	m.workspaceActive = index + 1
 }
 
 func (m *tuiModel) closeWorkspaceSessions() {
@@ -253,6 +306,9 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if session == nil {
 		m.workspaceActive = 0
 		return m, nil
+	}
+	if !msg.Paste && msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+		session.ClearSelection()
 	}
 	if msg.Type == tea.KeyPgUp || msg.Type == tea.KeyPgDown {
 		_, pageHeight := m.workspaceTerminalSize()
@@ -433,6 +489,9 @@ func (m *tuiModel) viewWorkspaceSession() string {
 			status += ": " + firstLine(exitErr.Error())
 		}
 	}
+	if m.workspaceCopyNotice != "" {
+		status = m.workspaceCopyNotice
+	}
 	help := renderHelpLine([]helpItem{
 		{Key: "Wheel · PgUp/PgDn", Action: i18n.T("scroll output", "листать вывод")},
 		{Key: "Ctrl+PgUp/PgDn · Alt+←/→", Action: i18n.T("switch tab", "сменить вкладку")},
@@ -463,11 +522,31 @@ func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if session := m.activeWorkspaceSession(); session != nil {
+		if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft && event.Y >= 1 && event.Y < m.height-1 {
+			session.StartSelection(event.X, event.Y-1)
+			m.workspaceSelecting = true
+			m.workspaceCopyNotice = ""
+			return m, nil
+		}
+		if event.Action == tea.MouseActionMotion && m.workspaceSelecting {
+			session.MoveSelection(event.X, event.Y-1)
+			return m, nil
+		}
+		if event.Action == tea.MouseActionRelease && m.workspaceSelecting {
+			m.workspaceSelecting = false
+			text := session.FinishSelection(event.X, event.Y-1)
+			if text != "" {
+				return m, workspaceCopyCmd(text)
+			}
+			return m, nil
+		}
 		switch event.Button {
 		case tea.MouseButtonWheelUp:
+			session.ClearSelection()
 			session.Scroll(3)
 			return m, nil
 		case tea.MouseButtonWheelDown:
+			session.ClearSelection()
 			session.Scroll(-3)
 			return m, nil
 		}
