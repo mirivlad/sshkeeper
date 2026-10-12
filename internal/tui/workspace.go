@@ -611,7 +611,7 @@ func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft && event.Y >= 1 && event.Y < m.height-1 {
 		now := workspaceMouseNow()
-		if now.Sub(m.workspaceLastClick) > 0 && now.Sub(m.workspaceLastClick) <= 450*time.Millisecond &&
+		if !now.Before(m.workspaceLastClick) && now.Sub(m.workspaceLastClick) <= 450*time.Millisecond &&
 			m.workspaceLastClickID == session.ID() &&
 			event.X >= m.workspaceLastClickX-1 && event.X <= m.workspaceLastClickX+1 && event.Y == m.workspaceLastClickY {
 			m.workspaceClickCount++

@@ -332,6 +332,11 @@ func TestWorkspaceExitErrorKeepsOutputForInspection(t *testing.T) {
 // Synthetic SGR mouse events exercise the actual Bubble Tea workspace routing,
 // not just the low-level terminal selection model.
 func TestWorkspaceMultiClickAndScrollTimers(t *testing.T) {
+	// Windows timers can report identical timestamps for consecutive clicks.
+	originalNow := workspaceMouseNow
+	instant := time.Now()
+	workspaceMouseNow = func() time.Time { return instant }
+	t.Cleanup(func() { workspaceMouseNow = originalNow })
 	proc := newTUIWorkspaceFakeProcess()
 	session := workspacepkg.New("test", proc, 20, 5)
 	t.Cleanup(func() { _ = session.Close() })
