@@ -328,3 +328,160 @@ func TestWorkspaceExitErrorKeepsOutputForInspection(t *testing.T) {
 		t.Fatal("failed session was closed instead of keeping output")
 	}
 }
+
+// Synthetic SGR mouse events exercise the actual Bubble Tea workspace routing,
+// not just the low-level terminal selection model.
+func TestWorkspaceMultiClickAndScrollTimers(t *testing.T) {
+	proc := newTUIWorkspaceFakeProcess()
+	session := workspacepkg.New("test", proc, 20, 5)
+	t.Cleanup(func() { _ = session.Close() })
+	m := New(nil)
+	m.width, m.height = 20, 7
+	m.workspaceSessions = []*workspacepkg.Session{session}
+	m.workspaceActive = 1
+	press := func(x, y int) {
+		_, _ = m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}))
+	}
+	release := func(x, y int) {
+		_, _ = m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{X: x, Y: y, Button: tea.MouseButtonNone, Action: tea.MouseActionRelease}))
+	}
+	press(3, 2)
+	release(3, 2)
+	if m.workspaceClickCount != 1 {
+		t.Fatalf("one click count %d", m.workspaceClickCount)
+	}
+	press(3, 2)
+	release(3, 2)
+	if m.workspaceClickCount != 2 {
+		t.Fatalf("double click count %d", m.workspaceClickCount)
+	}
+	press(3, 2)
+	release(3, 2)
+	if m.workspaceClickCount != 3 {
+		t.Fatalf("triple click count %d", m.workspaceClickCount)
+	}
+	press(3, 2)
+	if m.workspaceClickCount != 1 {
+		t.Fatalf("fourth click should reset, got %d", m.workspaceClickCount)
+	}
+	// A drag to the upper tab-strip must not activate a tab.
+	_, cmd := m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{X: 0, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion}))
+	if cmd == nil || m.workspaceScrollDir != 1 || m.workspaceActive != 1 {
+		t.Fatalf("drag out of viewport failed, dir=%d", m.workspaceScrollDir)
+	}
+	oldEpoch := m.workspaceScrollEpoch
+	release(0, 0)
+	if m.workspaceScrollDir != 0 || m.workspaceScrollEpoch == oldEpoch {
+		t.Fatal("release left autoscroll enabled")
+	}
+	_, next := m.handleWorkspaceAutoScroll(workspaceAutoScrollMsg{id: session.ID(), epoch: oldEpoch})
+	if next != nil {
+		t.Fatal("stale autoscroll timer restarted after release")
+	}
+}
+func TestWorkspaceMouseWheelDoesNotClearSelection(t *testing.T) {
+	proc := newTUIWorkspaceFakeProcess()
+	session := workspacepkg.New("wheel", proc, 20, 5)
+	t.Cleanup(func() { _ = session.Close() })
+	m := New(nil)
+	m.width, m.height = 20, 7
+	m.workspaceSessions = []*workspacepkg.Session{session}
+	m.workspaceActive = 1
+	m.workspaceSelecting = true
+	_, _ = m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{X: 1, Y: 3, Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress}))
+	if !m.workspaceSelecting {
+		t.Fatal("wheel cancelled in-progress selection")
+	}
+	m.workspaceSelecting = false
+	_, _ = m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{X: 1, Y: 3, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress}))
+	if m.workspaceScrollDir != 0 {
+		t.Fatal("wheel triggered auto scroll")
+	}
+}
+
+// feedableWorkspaceProcess lets the UI tests exercise scrollback and clipboard
+// end-to-end without opening a real SSH connection.
+type feedableWorkspaceProcess struct {
+	*tuiWorkspaceFakeProcess
+	reader *io.PipeReader
+	writer *io.PipeWriter
+}
+
+func newFeedableWorkspaceProcess() *feedableWorkspaceProcess {
+	r, w := io.Pipe()
+	return &feedableWorkspaceProcess{tuiWorkspaceFakeProcess: newTUIWorkspaceFakeProcess(), reader: r, writer: w}
+}
+func (p *feedableWorkspaceProcess) Read(b []byte) (int, error) { return p.reader.Read(b) }
+func (p *feedableWorkspaceProcess) Kill() error {
+	_ = p.writer.Close()
+	_ = p.reader.Close()
+	return p.tuiWorkspaceFakeProcess.Kill()
+}
+func (p *feedableWorkspaceProcess) Close() error {
+	_ = p.writer.Close()
+	_ = p.reader.Close()
+	return p.tuiWorkspaceFakeProcess.Close()
+}
+
+func TestWorkspaceDragAutoScrollCopiesBeyondVisibleScreen(t *testing.T) {
+	proc := newFeedableWorkspaceProcess()
+	session := workspacepkg.New("scroll", proc, 20, 5)
+	t.Cleanup(func() { _ = session.Close() })
+	m := New(nil)
+	m.width, m.height = 20, 7
+	m.workspaceSessions = []*workspacepkg.Session{session}
+	m.workspaceActive = 1
+	for i := 0; i < 18; i++ {
+		_, _ = fmt.Fprintf(proc.writer, "row%02d\r\n", i)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for session.ScrollOffset() != 0 || !strings.Contains(session.Render(), "row17") {
+		if time.Now().After(deadline) {
+			t.Fatal("terminal output was not rendered")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_, _ = m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+		X: 1, Y: 3, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}))
+	_, firstCmd := m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+		X: 0, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion}))
+	if firstCmd == nil {
+		t.Fatal("no auto-scroll timer scheduled at viewport edge")
+	}
+	firstOffset := session.ScrollOffset()
+	if firstOffset == 0 {
+		t.Fatal("no initial scroll at top edge")
+	}
+	token := m.workspaceScrollEpoch
+	for i := 0; i < 8; i++ {
+		_, next := m.handleWorkspaceAutoScroll(workspaceAutoScrollMsg{id: session.ID(), epoch: token})
+		if next == nil {
+			t.Fatal("auto-scroll unexpectedly stopped")
+		}
+	}
+	if got := session.ScrollOffset(); got <= firstOffset {
+		t.Fatalf("timer failed to move viewport: first=%d now=%d", firstOffset, got)
+	}
+	_, copyCmd := m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+		X: 0, Y: 0, Button: tea.MouseButtonNone, Action: tea.MouseActionRelease}))
+	if copyCmd == nil {
+		t.Fatal("no copy command after drag beyond viewport")
+	}
+	copied := ""
+	original := workspaceClipboardWrite
+	workspaceClipboardWrite = func(value string) error { copied = value; return nil }
+	defer func() { workspaceClipboardWrite = original }()
+	msg := copyCmd()
+	if _, ok := msg.(workspaceCopiedMsg); !ok {
+		t.Fatalf("copy returned %T", msg)
+	}
+	if !strings.Contains(copied, "row") || strings.Count(copied, "\n") < 5 {
+		t.Fatalf("drag did not include scrolled text: %q", copied)
+	}
+	previousOffset := session.ScrollOffset()
+	_, _ = m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+		X: 5, Y: 3, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress}))
+	if session.ScrollOffset() >= previousOffset {
+		t.Fatal("wheel did not scroll the viewport after mouse selection")
+	}
+}

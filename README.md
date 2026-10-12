@@ -271,7 +271,11 @@ you return to the server dashboard or switch to another SSH tab.
 - `Alt+W` closes the current SSH tab.
 - Mouse wheel and `PgUp` / `PgDn` scroll the SSH output history on the normal shell screen; typing returns to live output. Full-screen alternate-screen applications keep their own PageUp/PageDown handling.
 - Drag with the left mouse button in an SSH tab to select text **without Shift**.
-  Releasing the button copies the highlighted text to the system clipboard (using
+  Holding the drag against the upper/lower border auto-scrolls through output,
+  while the mouse wheel scrolls without clearing the selection.
+  Double-click selects a word (including Unicode), triple-click selects a line;
+  dragging after those gestures extends the selection by words or lines.
+  Releasing the button copies the selection to the system clipboard (using
   a native clipboard helper or OSC 52 fallback when supported by the terminal).
 - A clean remote `exit` (exit status 0) automatically closes its SSH tab.
   Unsuccessful connections keep their output and error visible until explicitly closed.
