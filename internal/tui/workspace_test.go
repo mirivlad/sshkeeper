@@ -467,18 +467,26 @@ func TestWorkspaceDragAutoScrollCopiesBeyondVisibleScreen(t *testing.T) {
 	if got := session.ScrollOffset(); got <= firstOffset {
 		t.Fatalf("timer failed to move viewport: first=%d now=%d", firstOffset, got)
 	}
-	_, copyCmd := m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+	_, primaryCmd := m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
 		X: 0, Y: 0, Button: tea.MouseButtonNone, Action: tea.MouseActionRelease}))
-	if copyCmd == nil {
-		t.Fatal("no copy command after drag beyond viewport")
+	if primaryCmd == nil {
+		t.Fatal("no PRIMARY update after drag beyond viewport")
 	}
 	copied := ""
 	original := workspaceClipboardWrite
 	workspaceClipboardWrite = func(value string) error { copied = value; return nil }
 	defer func() { workspaceClipboardWrite = original }()
-	msg := copyCmd()
-	if _, ok := msg.(workspaceCopiedMsg); !ok {
-		t.Fatalf("copy returned %T", msg)
+	_ = primaryCmd()
+	if copied != "" {
+		t.Fatalf("drag unexpectedly overwrote CLIPBOARD: %q", copied)
+	}
+	_, copyCmd := m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+		X: 1, Y: m.height - 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}))
+	if copyCmd == nil {
+		t.Fatal("no command from explicit Copy button after drag")
+	}
+	if _, ok := copyCmd().(workspaceCopiedMsg); !ok {
+		t.Fatal("explicit Copy button did not return copied status")
 	}
 	if !strings.Contains(copied, "row") || strings.Count(copied, "\n") < 5 {
 		t.Fatalf("drag did not include scrolled text: %q", copied)
