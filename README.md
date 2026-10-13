@@ -275,8 +275,16 @@ you return to the server dashboard or switch to another SSH tab.
   while the mouse wheel scrolls without clearing the selection.
   Double-click selects a word (including Unicode), triple-click selects a line;
   dragging after those gestures extends the selection by words or lines.
-  Releasing the button copies the selection to the system clipboard (using
-  a native clipboard helper or OSC 52 fallback when supported by the terminal).
+  Releasing the button copies the selection to CLIPBOARD (using a native
+  clipboard helper or OSC 52 fallback when supported by the terminal) and,
+  where supported, to PRIMARY (middle-click selection on Linux).
+- `Alt+C` copies the current selection again; `Alt+V` pastes CLIPBOARD into
+  the active SSH session. Middle-click pastes PRIMARY on X11/Wayland and falls
+  back to CLIPBOARD on platforms without PRIMARY. The outer terminal's
+  `Ctrl+Shift+V` / `Shift+Insert` paste also works when it sends bracketed paste.
+  Some terminals intercept copy/paste shortcuts themselves; Bubble Tea 1.x
+  cannot distinguish `Ctrl+Insert` from `Insert`, so `Alt+C` is the reliable
+  in-app copy shortcut.
 - A clean remote `exit` (exit status 0) automatically closes its SSH tab.
   Unsuccessful connections keep their output and error visible until explicitly closed.
 - The embedded terminal renders the remote cursor position, so editors such as `nano` and `vim` have a visible cursor.

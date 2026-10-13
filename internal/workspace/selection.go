@@ -180,6 +180,15 @@ func (s *Session) FinishSelection(x, y int) string {
 	}
 	return s.selectedTextLocked()
 }
+
+// SelectedText returns the highlighted output after mouse release, so copying
+// with a keyboard shortcut does not require another drag.
+func (s *Session) SelectedText() string {
+	s.screenMu.Lock()
+	defer s.screenMu.Unlock()
+	return s.selectedTextLocked()
+}
+
 func (s *Session) ClearSelection() {
 	s.screenMu.Lock()
 	s.selectionDrag = false
