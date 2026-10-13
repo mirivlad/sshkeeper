@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func assertWorkspaceInput(t *testing.T, p *clipboardWorkspaceProcess, want strin
 	}
 }
 
-func TestWorkspaceAltCCopiesExistingHighlight(t *testing.T) {
+func TestWorkspaceMouseSelectionCopiesWithoutShortcut(t *testing.T) {
 	proc := newFeedableWorkspaceProcess()
 	session := workspacepkg.New("copy", proc, 20, 5)
 	t.Cleanup(func() { _ = session.Close() })
@@ -57,28 +58,51 @@ func TestWorkspaceAltCCopiesExistingHighlight(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	session.StartSelection(0, 0)
-	if got := session.FinishSelection(4, 0); got != "alpha" {
-		t.Fatalf("highlighted text = %q", got)
-	}
 	old := workspaceClipboardWrite
 	var copied string
 	workspaceClipboardWrite = func(text string) error { copied = text; return nil }
 	t.Cleanup(func() { workspaceClipboardWrite = old })
 
-	_, cmd := m.updateWorkspaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}, Alt: true})
-	if cmd == nil {
-		t.Fatal("Alt+C did not request clipboard copy")
+	_, cmd := m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+		X: 0, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	}))
+	if cmd != nil {
+		t.Fatal("mouse press should not copy")
 	}
-	if _, ok := cmd().(workspaceCopiedMsg); !ok || copied != "alpha" {
-		t.Fatalf("Alt+C clipboard value = %q", copied)
+	_, cmd = m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+		X: 4, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease,
+	}))
+	if cmd == nil {
+		t.Fatal("releasing a mouse selection did not request clipboard copy")
+	}
+	result, ok := cmd().(workspaceCopiedMsg)
+	if !ok || result.err != nil || copied != "alpha" {
+		t.Fatalf("mouse release copied %q, message %#v", copied, result)
 	}
 	if got := session.SelectedText(); got != "alpha" {
 		t.Fatalf("copy discarded highlight: %q", got)
 	}
 }
 
-func TestWorkspacePasteFromBracketedInputAndClipboard(t *testing.T) {
+func TestWorkspaceAltCVKeysReachRemotePTY(t *testing.T) {
+	proc := newClipboardWorkspaceProcess()
+	session := workspacepkg.New("key-forward", proc, 20, 5)
+	t.Cleanup(func() { _ = session.Close() })
+	m := New(nil)
+	m.width, m.height = 20, 7
+	m.workspaceSessions = []*workspacepkg.Session{session}
+	m.workspaceActive = 1
+
+	for _, r := range []rune{'c', 'v'} {
+		_, cmd := m.updateWorkspaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: true})
+		if cmd != nil {
+			t.Fatalf("Alt+%c was intercepted by SSHKeeper", r)
+		}
+		assertWorkspaceInput(t, proc, string([]rune{'\x1b', r}))
+	}
+}
+
+func TestWorkspacePasteFromBracketedInputAndPrimary(t *testing.T) {
 	proc := newClipboardWorkspaceProcess()
 	session := workspacepkg.New("paste", proc, 20, 5)
 	t.Cleanup(func() { _ = session.Close() })
@@ -99,10 +123,10 @@ func TestWorkspacePasteFromBracketedInputAndClipboard(t *testing.T) {
 	var calls []bool
 	workspaceClipboardRead = func(primary bool) (string, error) {
 		calls = append(calls, primary)
-		if primary {
-			return "primary-text", nil
+		if !primary {
+			t.Fatal("middle-click should read PRIMARY, not CLIPBOARD")
 		}
-		return "clipboard-text", nil
+		return "primary-text", nil
 	}
 	t.Cleanup(func() { workspaceClipboardRead = old })
 
@@ -114,15 +138,8 @@ func TestWorkspacePasteFromBracketedInputAndClipboard(t *testing.T) {
 	}
 	m.Update(cmd())
 	assertWorkspaceInput(t, proc, "primary-text")
-
-	_, cmd = m.updateWorkspaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}, Alt: true})
-	if cmd == nil {
-		t.Fatal("Alt+V did not request clipboard paste")
-	}
-	m.Update(cmd())
-	assertWorkspaceInput(t, proc, "clipboard-text")
-	if len(calls) != 2 || !calls[0] || calls[1] {
-		t.Fatalf("clipboard source selection = %v; want PRIMARY then CLIPBOARD", calls)
+	if len(calls) != 1 || !calls[0] {
+		t.Fatalf("clipboard source selection = %v; want PRIMARY only", calls)
 	}
 }
 
@@ -135,13 +152,16 @@ func TestWorkspaceClipboardPasteNeverTargetsSwitchedTab(t *testing.T) {
 	m := New(nil)
 	m.workspaceSessions = []*workspacepkg.Session{sa, sb}
 	m.workspaceActive = 1
+	m.width, m.height = 20, 7
 	old := workspaceClipboardRead
 	workspaceClipboardRead = func(bool) (string, error) { return "keep-in-original-tab", nil }
 	t.Cleanup(func() { workspaceClipboardRead = old })
 
-	_, cmd := m.updateWorkspaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}, Alt: true})
+	_, cmd := m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+		X: 2, Y: 3, Button: tea.MouseButtonMiddle, Action: tea.MouseActionPress,
+	}))
 	if cmd == nil {
-		t.Fatal("missing paste command")
+		t.Fatal("missing PRIMARY paste command")
 	}
 	m.workspaceActive = 2
 	m.Update(cmd())
@@ -151,6 +171,72 @@ func TestWorkspaceClipboardPasteNeverTargetsSwitchedTab(t *testing.T) {
 	case got := <-a.writes:
 		t.Fatalf("unexpected background paste to old session: %q", got)
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// A real Bubble Tea program must decode the bracketed-paste bytes emitted by
+// the outer terminal, then forward them to the remote PTY. A synthesized
+// KeyMsg alone wouldn't exercise the terminal input parser.
+type workspacePasteInputModel struct {
+	workspace *tuiModel
+	seen      chan tea.KeyMsg
+}
+
+func (m workspacePasteInputModel) Init() tea.Cmd { return nil }
+
+func (m workspacePasteInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		m.seen <- key
+		_, _ = m.workspace.updateWorkspaceKey(key)
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m workspacePasteInputModel) View() string { return "" }
+
+func TestWorkspaceBracketedPasteThroughBubbleTeaInput(t *testing.T) {
+	proc := newClipboardWorkspaceProcess()
+	session := workspacepkg.New("real-paste", proc, 40, 10)
+	t.Cleanup(func() { _ = session.Close() })
+	m := New(nil)
+	m.width, m.height = 40, 12
+	m.workspaceSessions = []*workspacepkg.Session{session}
+	m.workspaceActive = 1
+
+	reader, writer := io.Pipe()
+	defer func() { _ = reader.Close(); _ = writer.Close() }()
+	seen := make(chan tea.KeyMsg, 1)
+	program := tea.NewProgram(workspacePasteInputModel{workspace: m, seen: seen},
+		tea.WithInput(reader), tea.WithOutput(io.Discard))
+	finished := make(chan error, 1)
+	go func() {
+		_, err := program.Run()
+		finished <- err
+	}()
+	const pasted = "hello\nsecond строка"
+	_, err := io.WriteString(writer, "\x1b[200~"+pasted+"\x1b[201~")
+	if err != nil {
+		t.Fatalf("send terminal paste: %v", err)
+	}
+	select {
+	case key := <-seen:
+		if !key.Paste || string(key.Runes) != pasted {
+			t.Fatalf("Bubble Tea parsed clipboard paste as %#v", key)
+		}
+	case <-time.After(3 * time.Second):
+		program.Kill()
+		t.Fatal("Bubble Tea did not decode bracketed paste")
+	}
+	assertWorkspaceInput(t, proc, pasted)
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatalf("Bubble Tea program failed: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		program.Kill()
+		t.Fatal("Bubble Tea program did not exit")
 	}
 }
 

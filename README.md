@@ -278,13 +278,18 @@ you return to the server dashboard or switch to another SSH tab.
   Releasing the button copies the selection to CLIPBOARD (using a native
   clipboard helper or OSC 52 fallback when supported by the terminal) and,
   where supported, to PRIMARY (middle-click selection on Linux).
-- `Alt+C` copies the current selection again; `Alt+V` pastes CLIPBOARD into
-  the active SSH session. Middle-click pastes PRIMARY on X11/Wayland and falls
-  back to CLIPBOARD on platforms without PRIMARY. The outer terminal's
-  `Ctrl+Shift+V` / `Shift+Insert` paste also works when it sends bracketed paste.
-  Some terminals intercept copy/paste shortcuts themselves; Bubble Tea 1.x
-  cannot distinguish `Ctrl+Insert` from `Insert`, so `Alt+C` is the reliable
-  in-app copy shortcut.
+- `Ctrl+Shift+V` / `Shift+Insert` (or the terminal's configured paste
+  shortcut) pastes into the active SSH session when the outer terminal sends
+  bracketed paste. Middle-click pastes PRIMARY on X11/Wayland and falls back
+  to CLIPBOARD where PRIMARY is unavailable.
+- `Ctrl+Shift+C` belongs to the **outer terminal** and cannot copy SSHKeeper's
+  internal highlight directly. **Releasing a mouse selection already copies
+  it** to CLIPBOARD, so there is no separate in-app copy shortcut to press.
+  Using the terminal's `Ctrl+Shift+C` with no *native terminal selection* is
+  unnecessary (and can behave differently between terminal emulators).
+  Shift-drag is an option for copying visible text with the outer terminal's
+  native selection. `Alt+C` and `Alt+V` are forwarded to the remote program,
+  not reserved by SSHKeeper.
 - A clean remote `exit` (exit status 0) automatically closes its SSH tab.
   Unsuccessful connections keep their output and error visible until explicitly closed.
 - The embedded terminal renders the remote cursor position, so editors such as `nano` and `vim` have a visible cursor.

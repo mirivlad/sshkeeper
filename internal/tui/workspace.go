@@ -390,19 +390,9 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.workspaceActive = 0
 		return m, nil
 	}
-	// Bubble Tea 1.x cannot distinguish Ctrl+Insert from Insert, and many
-	// terminal emulators consume Ctrl+Shift+C/V themselves. Alt+C/V are
-	// explicit fallbacks that survive both Linux and Windows console input.
-	if !msg.Paste && msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 {
-		switch msg.Runes[0] {
-		case 'c', 'C':
-			if text := session.SelectedText(); text != "" {
-				return m, workspaceCopyCmd(text)
-			}
-		case 'v', 'V':
-			return m, workspacePasteCmd(session, false)
-		}
-	}
+	// The enclosing terminal owns Ctrl+Shift+C/V. Text selected with the
+	// mouse is copied on release; Ctrl+Shift+V normally arrives as bracketed
+	// paste below. Never steal Alt+C/V from programs in the remote PTY.
 	if !msg.Paste && msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
 		session.ClearSelection()
 	}
@@ -417,6 +407,7 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if msg.Paste && msg.Type == tea.KeyRunes {
+		session.ClearSelection()
 		session.Paste(string(msg.Runes))
 		return m, nil
 	}
@@ -592,7 +583,7 @@ func (m *tuiModel) viewWorkspaceSession() string {
 		{Key: "Wheel · PgUp/PgDn", Action: i18n.T("scroll output", "листать вывод")},
 		{Key: "Ctrl+PgUp/PgDn · Alt+←/→", Action: i18n.T("switch tab", "сменить вкладку")},
 		{Key: "Alt+0", Action: i18n.T("servers", "серверы")},
-		{Key: "Alt+C/V", Action: i18n.T("copy/paste", "копировать/вставить")},
+		{Key: "Drag / Ctrl+Shift+V", Action: i18n.T("copy / paste", "копировать / вставить")},
 		{Key: "Alt+W", Action: i18n.T("close session", "закрыть сессию")},
 	})
 	statusLine := fitLine(status+"  "+help, width)
