@@ -36,10 +36,10 @@ type workspacePastedMsg struct {
 	err  error
 }
 
-// Mouse selection is captured by sshkeeper, not by the enclosing terminal.
-// Publish it to PRIMARY as well as CLIPBOARD so middle-click works on X11 and
-// Wayland desktops. PRIMARY is optional (e.g. on Windows), so failures here
-// must never make an otherwise successful copy fail.
+// Mouse selection is captured by SSHKeeper, not by the enclosing terminal.
+// PRIMARY follows mouse selection on X11/Wayland, just like a normal terminal.
+// Never update CLIPBOARD from a selection: it may contain an irreplaceable
+// token or password. CLIPBOARD is written only after explicit user action.
 func workspaceWritePrimary(text string) {
 	var name string
 	var args []string
@@ -109,7 +109,7 @@ var workspaceClipboardWrite = func(text string) error {
 		}
 	}
 	if err := clipboard.WriteAll(text); err == nil {
-		workspaceWritePrimary(text)
+		workspacePrimaryWrite(text)
 		return nil
 	} else if tty, openErr := os.OpenFile("/dev/tty", os.O_WRONLY, 0); openErr == nil {
 		defer tty.Close()
@@ -129,7 +129,28 @@ var workspaceClipboardWrite = func(text string) error {
 }
 
 func workspaceCopyCmd(text string) tea.Cmd {
+	if text == "" {
+		return nil
+	}
 	return func() tea.Msg { return workspaceCopiedMsg{err: workspaceClipboardWrite(text)} }
+}
+
+// A selection updates PRIMARY only, never CLIPBOARD; the latter requires
+// pressing the explicit Copy action in the SSH tab.
+var workspacePrimaryWrite = workspaceWritePrimary
+
+func workspaceSelectPrimaryCmd(text string) tea.Cmd {
+	if text == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		workspacePrimaryWrite(text)
+		return nil
+	}
+}
+
+func workspaceCopyLabel() string {
+	return i18n.T("[Copy]", "[Копировать]")
 }
 
 func workspacePasteCmd(session *workspacepkg.Session, primary bool) tea.Cmd {
@@ -412,9 +433,9 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.workspaceActive = 0
 		return m, nil
 	}
-	// The enclosing terminal owns Ctrl+Shift+C/V. Text selected with the
-	// mouse is copied on release; Ctrl+Shift+V normally arrives as bracketed
-	// paste below. Never steal Alt+C/V from programs in the remote PTY.
+	// The enclosing terminal owns Ctrl+Shift+C/V. Clipboard copying needs
+	// an explicit action, never just selecting text. Ctrl+Shift+V normally
+	// arrives as bracketed paste below. Do not steal Ctrl+C or Alt+C/V.
 	if !msg.Paste && msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
 		session.ClearSelection()
 	}
@@ -612,6 +633,9 @@ func (m *tuiModel) viewWorkspaceSession() string {
 		{Key: "Drag / Ctrl+Shift+V", Action: i18n.T("copy / paste", "копировать / вставить")},
 		{Key: "Alt+W", Action: i18n.T("close session", "закрыть сессию")},
 	})
+	if session.SelectedText() != "" {
+		status = workspaceCopyLabel() + "  " + status
+	}
 	statusLine := fitLine(status+"  "+help, width)
 
 	bodyHeight := max(1, height-2)
@@ -705,7 +729,7 @@ func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.workspaceClickCount = 0
 			}
 			if text != "" {
-				return m, workspaceCopyCmd(text)
+				return m, workspaceSelectPrimaryCmd(text)
 			}
 			return m, nil
 		}
@@ -721,6 +745,12 @@ func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if session == nil {
 		return m, nil
+	}
+	// The Copy button is an explicit, discoverable way to write CLIPBOARD
+	// even when the enclosing terminal intercepts Ctrl+Shift+C.
+	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft &&
+		event.Y == m.height-1 && event.X >= 0 && event.X < lineWidth(workspaceCopyLabel()) {
+		return m, workspaceCopyCmd(session.SelectedText())
 	}
 	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonMiddle && event.Y >= 1 && event.Y < m.height-1 {
 		return m, workspacePasteCmd(session, true)
