@@ -602,6 +602,19 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.workspaceCopyNotice = i18n.T("Selection copied", "Выделенное скопировано")
 		}
 		return m, nil
+	case workspacePastedMsg:
+		// Reading the clipboard is asynchronous. Never paste into another tab
+		// if the user switched sessions before the command completed.
+		if session := m.activeWorkspaceSession(); session != nil && session.ID() == msg.id {
+			if msg.err != nil {
+				m.workspaceCopyNotice = i18n.Tf("Paste failed: %v", "Не удалось вставить: %v", msg.err)
+			} else if msg.text != "" {
+				session.ClearSelection()
+				session.Paste(msg.text)
+				m.workspaceCopyNotice = ""
+			}
+		}
+		return m, nil
 
 	case serverTestedMsg:
 		m.applyServerTest(msg)
