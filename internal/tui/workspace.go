@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -27,16 +28,86 @@ type workspaceSessionUpdateMsg struct {
 }
 
 type workspaceCopiedMsg struct{ err error }
+type workspacePastedMsg struct {
+	id   string
+	text string
+	err  error
+}
+
+// Mouse selection is captured by sshkeeper, not by the enclosing terminal.
+// Publish it to PRIMARY as well as CLIPBOARD so middle-click works on X11 and
+// Wayland desktops. PRIMARY is optional (e.g. on Windows), so failures here
+// must never make an otherwise successful copy fail.
+func workspaceWritePrimary(text string) {
+	var name string
+	var args []string
+	switch {
+	case os.Getenv("WAYLAND_DISPLAY") != "":
+		name, args = "wl-copy", []string{"--primary"}
+	case os.Getenv("DISPLAY") != "":
+		if _, err := exec.LookPath("xclip"); err == nil {
+			name, args = "xclip", []string{"-in", "-selection", "primary"}
+		} else {
+			name, args = "xsel", []string{"--input", "--primary"}
+		}
+	default:
+		return
+	}
+	if _, err := exec.LookPath(name); err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = strings.NewReader(text)
+	_ = cmd.Run()
+}
+
+func workspaceReadTool(name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).Output()
+	return string(out), err
+}
+
+// Middle-click prefers PRIMARY and falls back to the normal clipboard on
+// systems without a PRIMARY selection (including native Windows consoles).
+var workspaceClipboardRead = func(primary bool) (string, error) {
+	if primary {
+		if os.Getenv("WAYLAND_DISPLAY") != "" {
+			if _, err := exec.LookPath("wl-paste"); err == nil {
+				if value, err := workspaceReadTool("wl-paste", "--primary", "--no-newline"); err == nil {
+					return value, nil
+				}
+			}
+		}
+		if os.Getenv("DISPLAY") != "" {
+			if _, err := exec.LookPath("xclip"); err == nil {
+				if value, err := workspaceReadTool("xclip", "-out", "-selection", "primary"); err == nil {
+					return value, nil
+				}
+			}
+			if _, err := exec.LookPath("xsel"); err == nil {
+				if value, err := workspaceReadTool("xsel", "--output", "--primary"); err == nil {
+					return value, nil
+				}
+			}
+		}
+	}
+	return clipboard.ReadAll()
+}
 
 var workspaceClipboardWrite = func(text string) error {
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		if _, err := exec.LookPath("wl-copy"); err == nil {
 			if err := exec.Command("wl-copy", "--", text).Run(); err == nil {
+				workspaceWritePrimary(text)
 				return nil
 			}
 		}
 	}
 	if err := clipboard.WriteAll(text); err == nil {
+		workspaceWritePrimary(text)
 		return nil
 	} else if tty, openErr := os.OpenFile("/dev/tty", os.O_WRONLY, 0); openErr == nil {
 		defer tty.Close()
@@ -44,6 +115,9 @@ var workspaceClipboardWrite = func(text string) error {
 		// without xclip/xsel. Keep the payload bounded for terminal safety.
 		if len(text) <= 100*1024 {
 			_, writeErr := fmt.Fprintf(tty, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(text)))
+			if writeErr == nil {
+				workspaceWritePrimary(text)
+			}
 			return writeErr
 		}
 		return err
@@ -54,6 +128,14 @@ var workspaceClipboardWrite = func(text string) error {
 
 func workspaceCopyCmd(text string) tea.Cmd {
 	return func() tea.Msg { return workspaceCopiedMsg{err: workspaceClipboardWrite(text)} }
+}
+
+func workspacePasteCmd(session *workspacepkg.Session, primary bool) tea.Cmd {
+	id := session.ID()
+	return func() tea.Msg {
+		value, err := workspaceClipboardRead(primary)
+		return workspacePastedMsg{id: id, text: value, err: err}
+	}
 }
 
 func workspaceSessionUpdateCmd(session *workspacepkg.Session) tea.Cmd {
@@ -308,6 +390,19 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.workspaceActive = 0
 		return m, nil
 	}
+	// Bubble Tea 1.x cannot distinguish Ctrl+Insert from Insert, and many
+	// terminal emulators consume Ctrl+Shift+C/V themselves. Alt+C/V are
+	// explicit fallbacks that survive both Linux and Windows console input.
+	if !msg.Paste && msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 {
+		switch msg.Runes[0] {
+		case 'c', 'C':
+			if text := session.SelectedText(); text != "" {
+				return m, workspaceCopyCmd(text)
+			}
+		case 'v', 'V':
+			return m, workspacePasteCmd(session, false)
+		}
+	}
 	if !msg.Paste && msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
 		session.ClearSelection()
 	}
@@ -497,6 +592,7 @@ func (m *tuiModel) viewWorkspaceSession() string {
 		{Key: "Wheel · PgUp/PgDn", Action: i18n.T("scroll output", "листать вывод")},
 		{Key: "Ctrl+PgUp/PgDn · Alt+←/→", Action: i18n.T("switch tab", "сменить вкладку")},
 		{Key: "Alt+0", Action: i18n.T("servers", "серверы")},
+		{Key: "Alt+C/V", Action: i18n.T("copy/paste", "копировать/вставить")},
 		{Key: "Alt+W", Action: i18n.T("close session", "закрыть сессию")},
 	})
 	statusLine := fitLine(status+"  "+help, width)
@@ -608,6 +704,9 @@ func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if session == nil {
 		return m, nil
+	}
+	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonMiddle && event.Y >= 1 && event.Y < m.height-1 {
+		return m, workspacePasteCmd(session, true)
 	}
 	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft && event.Y >= 1 && event.Y < m.height-1 {
 		now := workspaceMouseNow()
