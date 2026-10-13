@@ -37,7 +37,6 @@ jobs:
           if [ -n "$unformatted" ]; then
             echo "These files are not gofmt-clean:" >&2
             echo "$unformatted" >&2
-            gofmt -d internal/tui/workspace_clipboard_test.go internal/workspace/selection.go
             exit 1
           fi
 
