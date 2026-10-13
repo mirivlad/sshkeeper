@@ -42,7 +42,7 @@ func assertWorkspaceInput(t *testing.T, p *clipboardWorkspaceProcess, want strin
 	}
 }
 
-func TestWorkspaceMouseSelectionCopiesWithoutShortcut(t *testing.T) {
+func TestWorkspaceMouseSelectionPreservesClipboardUntilExplicitCopy(t *testing.T) {
 	proc := newFeedableWorkspaceProcess()
 	session := workspacepkg.New("copy", proc, 20, 5)
 	t.Cleanup(func() { _ = session.Close() })
@@ -60,9 +60,14 @@ func TestWorkspaceMouseSelectionCopiesWithoutShortcut(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	old := workspaceClipboardWrite
-	var copied string
+	oldPrimary := workspacePrimaryWrite
+	var copied, primary string
 	workspaceClipboardWrite = func(text string) error { copied = text; return nil }
-	t.Cleanup(func() { workspaceClipboardWrite = old })
+	workspacePrimaryWrite = func(text string) { primary = text }
+	t.Cleanup(func() {
+		workspaceClipboardWrite = old
+		workspacePrimaryWrite = oldPrimary
+	})
 
 	_, cmd := m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
 		X: 0, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
@@ -74,14 +79,26 @@ func TestWorkspaceMouseSelectionCopiesWithoutShortcut(t *testing.T) {
 		X: 4, Y: 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease,
 	}))
 	if cmd == nil {
-		t.Fatal("releasing a mouse selection did not request clipboard copy")
+		t.Fatal("releasing mouse selection should update PRIMARY")
+	}
+	if msg := cmd(); msg != nil {
+		t.Fatalf("selection unexpectedly produced event %T", msg)
+	}
+	if copied != "" || primary != "alpha" {
+		t.Fatalf("selection touched CLIPBOARD %q or PRIMARY %q", copied, primary)
+	}
+	if got := session.SelectedText(); got != "alpha" {
+		t.Fatalf("selection lost highlight: %q", got)
+	}
+	_, cmd = m.updateWorkspaceMouse(tea.MouseMsg(tea.MouseEvent{
+		X: 1, Y: m.height - 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	}))
+	if cmd == nil {
+		t.Fatal("explicit Copy button did not request copy")
 	}
 	result, ok := cmd().(workspaceCopiedMsg)
 	if !ok || result.err != nil || copied != "alpha" {
-		t.Fatalf("mouse release copied %q, message %#v", copied, result)
-	}
-	if got := session.SelectedText(); got != "alpha" {
-		t.Fatalf("copy discarded highlight: %q", got)
+		t.Fatalf("explicit Copy button copied %q, message %#v", copied, result)
 	}
 }
 
