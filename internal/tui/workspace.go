@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/atotto/clipboard"
 
@@ -381,6 +383,26 @@ func (m *tuiModel) workspaceShortcut(msg tea.KeyMsg) bool {
 	return false
 }
 
+// Bubble Tea 1.x wraps ANSI input in go-localereader on Windows. For a
+// bracketed paste sent as UTF-8 by a modern terminal, that decoder can map
+// each UTF-8 byte to an individual Latin-1 rune. Recover the original bytes
+// only when they form valid multi-byte UTF-8. Native Windows console key
+// events (and legitimate single-byte characters) are left untouched.
+func workspaceWindowsPasteText(runes []rune) string {
+	text := string(runes)
+	bytes := make([]byte, len(runes))
+	for i, r := range runes {
+		if r > 0xff {
+			return text
+		}
+		bytes[i] = byte(r)
+	}
+	if utf8.Valid(bytes) && utf8.RuneCount(bytes) < len(bytes) {
+		return string(bytes)
+	}
+	return text
+}
+
 func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.workspaceShortcut(msg) {
 		return m, nil
@@ -390,19 +412,9 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.workspaceActive = 0
 		return m, nil
 	}
-	// Bubble Tea 1.x cannot distinguish Ctrl+Insert from Insert, and many
-	// terminal emulators consume Ctrl+Shift+C/V themselves. Alt+C/V are
-	// explicit fallbacks that survive both Linux and Windows console input.
-	if !msg.Paste && msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 {
-		switch msg.Runes[0] {
-		case 'c', 'C':
-			if text := session.SelectedText(); text != "" {
-				return m, workspaceCopyCmd(text)
-			}
-		case 'v', 'V':
-			return m, workspacePasteCmd(session, false)
-		}
-	}
+	// The enclosing terminal owns Ctrl+Shift+C/V. Text selected with the
+	// mouse is copied on release; Ctrl+Shift+V normally arrives as bracketed
+	// paste below. Never steal Alt+C/V from programs in the remote PTY.
 	if !msg.Paste && msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
 		session.ClearSelection()
 	}
@@ -417,7 +429,12 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if msg.Paste && msg.Type == tea.KeyRunes {
-		session.Paste(string(msg.Runes))
+		session.ClearSelection()
+		text := string(msg.Runes)
+		if runtime.GOOS == "windows" {
+			text = workspaceWindowsPasteText(msg.Runes)
+		}
+		session.Paste(text)
 		return m, nil
 	}
 	if msg.Type == tea.KeyRunes {
@@ -592,7 +609,7 @@ func (m *tuiModel) viewWorkspaceSession() string {
 		{Key: "Wheel · PgUp/PgDn", Action: i18n.T("scroll output", "листать вывод")},
 		{Key: "Ctrl+PgUp/PgDn · Alt+←/→", Action: i18n.T("switch tab", "сменить вкладку")},
 		{Key: "Alt+0", Action: i18n.T("servers", "серверы")},
-		{Key: "Alt+C/V", Action: i18n.T("copy/paste", "копировать/вставить")},
+		{Key: "Drag / Ctrl+Shift+V", Action: i18n.T("copy / paste", "копировать / вставить")},
 		{Key: "Alt+W", Action: i18n.T("close session", "закрыть сессию")},
 	})
 	statusLine := fitLine(status+"  "+help, width)
