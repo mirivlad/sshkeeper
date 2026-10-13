@@ -19,7 +19,7 @@ type clipboardWorkspaceProcess struct {
 func newClipboardWorkspaceProcess() *clipboardWorkspaceProcess {
 	return &clipboardWorkspaceProcess{
 		tuiWorkspaceFakeProcess: newTUIWorkspaceFakeProcess(),
-		writes: make(chan string, 10),
+		writes:                  make(chan string, 10),
 	}
 }
 
