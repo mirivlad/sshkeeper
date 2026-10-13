@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +196,24 @@ func (m workspacePasteInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m workspacePasteInputModel) View() string { return "" }
 
+func TestWorkspaceWindowsPasteTextDecodesUTF8BytesOnly(t *testing.T) {
+	const value = "second строка"
+	encoded := []byte(value)
+	byteRunes := make([]rune, len(encoded))
+	for i, b := range encoded {
+		byteRunes[i] = rune(b)
+	}
+	if got := workspaceWindowsPasteText(byteRunes); got != value {
+		t.Fatalf("decoded UTF-8 bytes = %q, want %q", got, value)
+	}
+	if got := workspaceWindowsPasteText([]rune{'c', 'a', 'f', 'é'}); got != "café" {
+		t.Fatalf("changed a legitimate single-byte character: %q", got)
+	}
+	if got := workspaceWindowsPasteText([]rune{'я'}); got != "я" {
+		t.Fatalf("changed a correctly decoded Unicode rune: %q", got)
+	}
+}
+
 func TestWorkspaceBracketedPasteThroughBubbleTeaInput(t *testing.T) {
 	proc := newClipboardWorkspaceProcess()
 	session := workspacepkg.New("real-paste", proc, 40, 10)
@@ -221,8 +240,12 @@ func TestWorkspaceBracketedPasteThroughBubbleTeaInput(t *testing.T) {
 	}
 	select {
 	case key := <-seen:
-		if !key.Paste || string(key.Runes) != pasted {
-			t.Fatalf("Bubble Tea parsed clipboard paste as %#v", key)
+		decoded := string(key.Runes)
+		if runtime.GOOS == "windows" {
+			decoded = workspaceWindowsPasteText(key.Runes)
+		}
+		if !key.Paste || decoded != pasted {
+			t.Fatalf("Bubble Tea parsed clipboard paste as %#v, decoded %q", key, decoded)
 		}
 	case <-time.After(3 * time.Second):
 		program.Kill()

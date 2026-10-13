@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/atotto/clipboard"
 
@@ -381,6 +383,26 @@ func (m *tuiModel) workspaceShortcut(msg tea.KeyMsg) bool {
 	return false
 }
 
+// Bubble Tea 1.x wraps ANSI input in go-localereader on Windows. For a
+// bracketed paste sent as UTF-8 by a modern terminal, that decoder can map
+// each UTF-8 byte to an individual Latin-1 rune. Recover the original bytes
+// only when they form valid multi-byte UTF-8. Native Windows console key
+// events (and legitimate single-byte characters) are left untouched.
+func workspaceWindowsPasteText(runes []rune) string {
+	text := string(runes)
+	bytes := make([]byte, len(runes))
+	for i, r := range runes {
+		if r > 0xff {
+			return text
+		}
+		bytes[i] = byte(r)
+	}
+	if utf8.Valid(bytes) && utf8.RuneCount(bytes) < len(bytes) {
+		return string(bytes)
+	}
+	return text
+}
+
 func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.workspaceShortcut(msg) {
 		return m, nil
@@ -408,7 +430,11 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.Paste && msg.Type == tea.KeyRunes {
 		session.ClearSelection()
-		session.Paste(string(msg.Runes))
+		text := string(msg.Runes)
+		if runtime.GOOS == "windows" {
+			text = workspaceWindowsPasteText(msg.Runes)
+		}
+		session.Paste(text)
 		return m, nil
 	}
 	if msg.Type == tea.KeyRunes {
