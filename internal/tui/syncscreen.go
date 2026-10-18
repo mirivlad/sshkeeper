@@ -51,15 +51,14 @@ type SyncResult struct {
 
 // Sync callbacks, provided by the command layer.
 var (
-	GetSyncInfo           func() SyncInfo
-	SaveSyncSettings      func(SyncSettings) error
-	RunSync               func() (SyncResult, error)
-	CreateSyncSpace       func() (SyncResult, error)
-	PairSyncDevice        func(password string) (string, time.Time, error)
-	PairSyncDeviceOffline func() (string, time.Time, error)
-	JoinSyncSpace         func(secret, password string) (SyncResult, error)
-	SyncRecoveryKey       func() (string, error)
-	LeaveSync             func() error
+	GetSyncInfo        func() SyncInfo
+	SaveSyncSettings   func(SyncSettings) error
+	RunSync            func() (SyncResult, error)
+	CreateSyncSpace    func(string) (SyncResult, error)
+	JoinSyncSpace      func(password string) (SyncResult, error)
+	EnableSyncPassword func(string) error
+	SyncRecoveryKey    func() (string, error)
+	LeaveSync          func() error
 )
 
 // autoSyncDelay debounces automatic syncs after local changes.
@@ -71,13 +70,6 @@ type syncDoneMsg struct {
 	err    error
 }
 
-type syncPairDoneMsg struct {
-	code    string
-	expires time.Time
-	offline bool
-	err     error
-}
-
 type syncTickMsg struct{ generation int }
 
 type syncView int
@@ -85,7 +77,6 @@ type syncView int
 const (
 	syncViewForm syncView = iota
 	syncViewPassword
-	syncViewCode
 	syncViewJoin
 	syncViewRecovery
 )
@@ -109,14 +100,10 @@ type syncScreenModel struct {
 	auto      bool
 	focus     int
 
-	view        syncView
-	password    textinput.Model
-	secret      textinput.Model
-	joinFocus   int
-	pairCode    string
-	pairExpires time.Time
-	pairOffline bool
-	recovery    string
+	view           syncView
+	password       textinput.Model
+	passwordAction string
+	recovery       string
 
 	busy     string
 	notice   string
@@ -139,7 +126,6 @@ func newSyncScreenModel(width, height int, info SyncInfo) *syncScreenModel {
 		gitURL:    newSyncInput("git@git.example.org:me/sshkeeper-sync.git"),
 		gitBranch: newSyncInput("sshkeeper"),
 		password:  newSyncInput(""),
-		secret:    newSyncInput("123 456"),
 	}
 	m.password.EchoMode = textinput.EchoPassword
 	m.applyInfo(info)
@@ -199,15 +185,14 @@ func (m *syncScreenModel) controls() []syncControl {
 	if m.info.Joined {
 		controls = append(controls,
 			syncControl{kind: "button", action: "sync", label: i18n.T("Sync now", "Синхронизировать")},
-			syncControl{kind: "button", action: "pair", label: i18n.T("Add device", "Добавить устройство")},
-			syncControl{kind: "button", action: "pair-offline", label: i18n.T("Add later (24h)", "Добавить позже (24 ч)")},
+			syncControl{kind: "button", action: "enable-password", label: i18n.T("Enable / update password recovery", "Включить / обновить восстановление по паролю")},
 			syncControl{kind: "button", action: "recovery", label: i18n.T("Recovery key", "Ключ восстановления")},
 			syncControl{kind: "button", action: "leave", label: i18n.T("Leave sync", "Отключить устройство")},
 		)
 	} else {
 		controls = append(controls,
 			syncControl{kind: "button", action: "create", label: i18n.T("Create sync space", "Создать синхронизацию")},
-			syncControl{kind: "button", action: "join", label: i18n.T("Connect this device", "Подключить это устройство")},
+			syncControl{kind: "button", action: "join", label: i18n.T("Restore from storage", "Восстановить из хранилища")},
 		)
 	}
 	return controls
@@ -225,17 +210,12 @@ func (m *syncScreenModel) syncFocus() {
 	m.gitURL.Blur()
 	m.gitBranch.Blur()
 	m.password.Blur()
-	m.secret.Blur()
 	switch m.view {
 	case syncViewPassword:
 		m.password.Focus()
 		return
 	case syncViewJoin:
-		if m.joinFocus == 0 {
-			m.secret.Focus()
-		} else {
-			m.password.Focus()
-		}
+		m.password.Focus()
 		return
 	}
 	switch m.focused().kind {
@@ -370,7 +350,10 @@ func (m *tuiModel) handleSyncDone(msg syncDoneMsg) tea.Cmd {
 			case "create":
 				screen.recovery = msg.result.RecoveryKey
 				screen.view = syncViewRecovery
-				screen.notice = i18n.T("Sync space created. Save the recovery key below.", "Синхронизация создана. Сохраните ключ восстановления.")
+				screen.notice = i18n.T("Synchronization created. Recovery by master password is enabled.", "Синхронизация создана. Восстановление по мастер-паролю включено.")
+			case "enable-password":
+				screen.view = syncViewForm
+				screen.notice = i18n.T("Password recovery is enabled for this storage.", "Восстановление по паролю для этого хранилища включено.")
 			case "join":
 				screen.view = syncViewForm
 				screen.notice = i18n.Tf("This device joined the sync: %d change(s) received.", "Устройство подключено: получено изменений — %d.", msg.result.Received)
@@ -403,12 +386,10 @@ func (m *tuiModel) updateSync(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateSyncPassword(msg)
 	case syncViewJoin:
 		return m.updateSyncJoin(msg)
-	case syncViewCode, syncViewRecovery:
+	case syncViewRecovery:
 		if msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter {
 			s.view = syncViewForm
 			s.recovery = ""
-			s.pairCode = ""
-			s.pairOffline = false
 			s.syncFocus()
 		}
 		return m, nil
@@ -516,35 +497,15 @@ func (m *tuiModel) runSyncAction(action string) (tea.Model, tea.Cmd) {
 			s.busy = i18n.T("Syncing…", "Синхронизация…")
 			return m, cmd
 		}
-	case "create":
-		if CreateSyncSpace == nil {
-			return m, nil
-		}
-		s.busy = i18n.T("Creating the sync space…", "Создание синхронизации…")
-		m.syncing = true
-		return m, func() tea.Msg {
-			result, err := CreateSyncSpace()
-			return syncDoneMsg{kind: "create", result: result, err: err}
-		}
+	case "create", "enable-password":
+		s.view = syncViewPassword
+		s.passwordAction = action
+		s.password.SetValue("")
+		s.syncFocus()
 	case "join":
 		s.view = syncViewJoin
-		s.joinFocus = 0
-		s.secret.SetValue("")
 		s.password.SetValue("")
 		s.syncFocus()
-	case "pair":
-		s.view = syncViewPassword
-		s.password.SetValue("")
-		s.syncFocus()
-	case "pair-offline":
-		if PairSyncDeviceOffline == nil {
-			return m, nil
-		}
-		s.busy = i18n.T("Creating a 24-hour offline code…", "Создание офлайн-кода на 24 часа…")
-		return m, func() tea.Msg {
-			code, expires, err := PairSyncDeviceOffline()
-			return syncPairDoneMsg{code: code, expires: expires, offline: true, err: err}
-		}
 	case "recovery":
 		if SyncRecoveryKey == nil {
 			return m, nil
@@ -560,7 +521,7 @@ func (m *tuiModel) runSyncAction(action string) (tea.Model, tea.Cmd) {
 		m.beginConfirm(confirmState{
 			title:       i18n.T("Stop syncing this device?", "Отключить это устройство от синхронизации?"),
 			target:      i18n.T("Sync on this device", "Синхронизация на этом устройстве"),
-			consequence: i18n.T("Profiles, secrets, and keys stay here. Other devices keep syncing. You can join again later with a code.", "Профили, секреты и ключи останутся здесь. Остальные устройства продолжат синхронизацию. Подключиться снова можно по коду."),
+			consequence: i18n.T("Profiles, secrets, and keys stay here. Other devices keep syncing. You can restore from storage with the master password.", "Профили, секреты и ключи останутся здесь. Остальные устройства продолжат синхронизацию. Восстановиться можно по мастер-паролю."),
 			verb:        i18n.T("Leave", "Отключить"),
 			parent:      screenSync,
 			action: func() tea.Cmd {
@@ -587,13 +548,24 @@ func (m *tuiModel) updateSyncPassword(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		password := s.password.Value()
 		s.password.SetValue("")
-		if password == "" || PairSyncDevice == nil {
+		if password == "" {
 			return m, nil
 		}
-		s.busy = i18n.T("Creating a pairing code…", "Создание кода…")
+		action := s.passwordAction
+		s.busy = i18n.T("Configuring password recovery…", "Настройка восстановления по паролю…")
+		m.syncing = true
 		return m, func() tea.Msg {
-			code, expires, err := PairSyncDevice(password)
-			return syncPairDoneMsg{code: code, expires: expires, offline: false, err: err}
+			if action == "create" {
+				if CreateSyncSpace == nil {
+					return syncDoneMsg{kind: action, err: fmt.Errorf("sync is unavailable")}
+				}
+				result, err := CreateSyncSpace(password)
+				return syncDoneMsg{kind: action, result: result, err: err}
+			}
+			if EnableSyncPassword == nil {
+				return syncDoneMsg{kind: action, err: fmt.Errorf("sync is unavailable")}
+			}
+			return syncDoneMsg{kind: action, err: EnableSyncPassword(password)}
 		}
 	}
 	var cmd tea.Cmd
@@ -603,76 +575,28 @@ func (m *tuiModel) updateSyncPassword(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) updateSyncJoin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	s := m.syncScreen
-	needsPassword := pairingNeedsPassword(s.secret.Value())
 	switch msg.Type {
 	case tea.KeyEsc:
 		s.view = syncViewForm
-		s.secret.SetValue("")
 		s.password.SetValue("")
 		s.syncFocus()
 		return m, nil
-	case tea.KeyTab, tea.KeyShiftTab, tea.KeyUp, tea.KeyDown:
-		if needsPassword {
-			s.joinFocus = 1 - s.joinFocus
-			s.syncFocus()
-		}
-		return m, nil
 	case tea.KeyEnter:
-		if s.joinFocus == 0 && needsPassword {
-			s.joinFocus = 1
-			s.syncFocus()
-			return m, nil
-		}
-		secret, password := s.secret.Value(), s.password.Value()
+		password := s.password.Value()
 		s.password.SetValue("")
-		if strings.TrimSpace(secret) == "" || JoinSyncSpace == nil {
+		if password == "" || JoinSyncSpace == nil {
 			return m, nil
 		}
-		s.busy = i18n.T("Joining the sync…", "Подключение к синхронизации…")
+		s.busy = i18n.T("Restoring encrypted sync…", "Восстановление зашифрованной синхронизации…")
 		m.syncing = true
 		return m, func() tea.Msg {
-			result, err := JoinSyncSpace(secret, password)
+			result, err := JoinSyncSpace(password)
 			return syncDoneMsg{kind: "join", result: result, err: err}
 		}
 	}
 	var cmd tea.Cmd
-	if s.joinFocus == 0 {
-		s.secret, cmd = s.secret.Update(msg)
-	} else {
-		s.password, cmd = s.password.Update(msg)
-	}
+	s.password, cmd = s.password.Update(msg)
 	return m, cmd
-}
-
-// The SKP1 prefix is reserved for high-entropy offline pairing codes. A
-// recovery key uses Base32 and therefore cannot contain the digit 1.
-func looksLikeOfflinePairingCode(text string) bool {
-	clean := strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(strings.TrimSpace(text)))
-	return strings.HasPrefix(clean, "SKP1")
-}
-
-func looksLikeRecoveryKey(text string) bool {
-	return !looksLikeOfflinePairingCode(text) && len(strings.TrimSpace(text)) > 12
-}
-
-func pairingNeedsPassword(text string) bool {
-	return !looksLikeOfflinePairingCode(text) && !looksLikeRecoveryKey(text)
-}
-
-func (m *tuiModel) handleSyncPairDone(msg syncPairDoneMsg) {
-	s := m.syncScreen
-	if s == nil {
-		return
-	}
-	s.busy = ""
-	if msg.err != nil {
-		s.err = msg.err
-		s.view = syncViewForm
-		s.syncFocus()
-		return
-	}
-	s.pairCode, s.pairExpires, s.pairOffline = msg.code, msg.expires, msg.offline
-	s.view = syncViewCode
 }
 
 // --- view ---
@@ -699,43 +623,23 @@ func (s *syncScreenModel) View(vaultUnlocked bool) string {
 	case syncViewPassword:
 		footer = []helpItem{{Key: "Enter", Action: i18n.T("continue", "продолжить")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}}
 		body = func(width, height int) string {
-			return renderPaddedPanel(width, height, append([]string{
-				dashboardSection(i18n.T("Add a device", "Добавить устройство")), "",
-			}, append(wrapCells(i18n.T("Confirm the master password of this device. The new device will need it together with a six-digit code.", "Подтвердите мастер-пароль этого устройства. Новому устройству понадобятся он и шестизначный код."), max(1, width-6)),
-				"", focusedStyle.Render(i18n.T("Master password> ", "Мастер-пароль> "))+s.password.View())...))
-		}
-	case syncViewCode:
-		footer = []helpItem{{Key: "Enter", Action: i18n.T("done", "готово")}}
-		body = func(width, height int) string {
-			code := s.pairCode
-			if len(code) == 6 {
-				code = code[:3] + " " + code[3:]
+			title := i18n.T("Create synchronization", "Создать синхронизацию")
+			hint := i18n.T("Confirm this vault's master password. It will protect recovery of your encrypted sync data on new installations.", "Подтвердите мастер-пароль этого вольта. Он позволит восстанавливать зашифрованные данные на новых установках. Используйте стойкий пароль: файл восстановления допускает офлайн-подбор пароля.")
+			if s.passwordAction == "enable-password" {
+				title = i18n.T("Enable password recovery", "Включить восстановление по паролю")
+				hint = i18n.T("Enter this vault's master password to enable recovery of an existing sync storage. Old device pairing is not required.", "Введите мастер-пароль этого вольта, чтобы включить восстановление существующей синхронизации без сопряжения устройств.")
 			}
-			title := i18n.T("Pairing code", "Код сопряжения")
-			message := i18n.Tf("On the new device open Settings → Synchronization, choose the same storage, then \"Connect this device\" and enter this code with the master password of this device. Valid until %s.", "На новом устройстве откройте Настройки → Синхронизация, выберите то же хранилище, затем «Подключить это устройство» и введите этот код и мастер-пароль этого устройства. Код действует до %s.", s.pairExpires.Format("15:04"))
-			if s.pairOffline {
-				title = i18n.T("Offline pairing code", "Офлайн-код подключения")
-				message = i18n.Tf("Save this one-time code. If the storage is a folder synced by another app, let it finish syncing before rebooting. On the other device choose the same storage, then \"Connect this device\" and enter the code. No master password from this device is needed. Valid until %s.", "Сохраните этот одноразовый код. Если хранилище — папка, которую синхронизирует другая программа, дождитесь окончания синхронизации перед перезагрузкой. На другом устройстве выберите то же хранилище, затем «Подключить это устройство» и введите код. Мастер-пароль этого устройства не нужен. Код действует до %s.", s.pairExpires.Format("2006-01-02 15:04"))
-			}
-			lines := []string{dashboardSection(title), "", brandStyle.Render("    " + code), ""}
-			lines = append(lines, wrapCells(message, max(1, width-6))...)
+			lines := []string{dashboardSection(title), ""}
+			lines = append(lines, wrapCells(hint, max(1, width-6))...)
+			lines = append(lines, "", focusedStyle.Render(i18n.T("Master password> ", "Мастер-пароль> "))+s.password.View())
 			return renderPaddedPanel(width, height, lines)
 		}
 	case syncViewJoin:
-		footer = []helpItem{{Key: "Tab", Action: i18n.T("next field", "следующее поле")}, {Key: "Enter", Action: i18n.T("join", "подключиться")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}}
+		footer = []helpItem{{Key: "Enter", Action: i18n.T("restore", "восстановить")}, {Key: "Esc", Action: i18n.T("cancel", "отмена")}}
 		body = func(width, height int) string {
-			lines := []string{dashboardSection(i18n.T("Connect this device", "Подключить это устройство")), ""}
-			lines = append(lines, wrapCells(i18n.T("Enter a six-digit pairing code with the other device's master password, a 24-hour SKP1 offline code, or a recovery key.", "Введите шестизначный код сопряжения и мастер-пароль другого устройства, офлайн-код SKP1 на 24 часа или ключ восстановления."), max(1, width-6))...)
-			label := func(text string, focused bool) string {
-				if focused {
-					return focusedStyle.Render(text + "> ")
-				}
-				return blurredStyle.Render(text + ": ")
-			}
-			lines = append(lines, "", label(i18n.T("Code", "Код"), s.joinFocus == 0)+s.secret.View())
-			if pairingNeedsPassword(s.secret.Value()) {
-				lines = append(lines, label(i18n.T("Master password of that device", "Мастер-пароль того устройства"), s.joinFocus == 1)+s.password.View())
-			}
+			lines := []string{dashboardSection(i18n.T("Restore from storage", "Восстановить из хранилища")), ""}
+			lines = append(lines, wrapCells(i18n.T("Enter the master password used to create synchronization on the original installation. No device codes are needed.", "Введите мастер-пароль вольта, с которым создавалась синхронизация. Коды устройств не нужны."), max(1, width-6))...)
+			lines = append(lines, "", focusedStyle.Render(i18n.T("Master password> ", "Мастер-пароль> "))+s.password.View())
 			return renderPaddedPanel(width, height, lines)
 		}
 	case syncViewRecovery:
@@ -862,7 +766,7 @@ func (s *syncScreenModel) modeHint() string {
 func (s *syncScreenModel) statusLines(width int) []string {
 	lines := []string{dashboardSection(i18n.T("This device", "Это устройство"))}
 	if !s.info.Joined {
-		hint := i18n.T("Not set up. On the first device choose \"Create sync space\"; on the others choose \"Join with code\".", "Не настроено. На первом устройстве выберите «Создать синхронизацию», на остальных — «Подключиться по коду».")
+		hint := i18n.T("Not set up. Create synchronization here or restore it from the configured storage with the master password.", "Не настроено. Создайте синхронизацию или восстановите её из указанного хранилища по мастер-паролю.")
 		for _, line := range wrapCells(hint, width) {
 			lines = append(lines, mutedStyle.Render(line))
 		}

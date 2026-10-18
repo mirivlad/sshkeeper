@@ -475,61 +475,63 @@ running tunnels, language and sort order — stay on each device.
   touches anything else in the repository. Git never prompts from inside
   sshkeeper: use an SSH key loaded in your agent or a credential helper.
 
-**Setting up.**
+**Setting up and restoring.**
 
-1. On the first device choose the storage and **Create sync space**.
-   sshkeeper shows a recovery key: keep it offline. It is only needed if every
-   device is lost.
-2. To add a device that is online at the same time, choose **Add device**
-   and confirm the master password. It shows a six-digit code, valid for ten
-   minutes.
-3. For dual-boot or a device that cannot be online at the same time, choose
-   **Add later (24h)**. sshkeeper shows a high-entropy one-time **SKP1-...**
-   code valid for 24 hours. If a separate app syncs the storage folder, let it
-   finish uploading first; then the old device can be shut down. Its master
-   password is not needed on the new device.
-4. On the new device choose the same storage, then **Connect this device**.
-   Enter the six-digit code plus the old device's master password, the
-   **SKP1-...** offline code by itself, or the recovery key.
+1. On the existing installation select the shared Folder/Git storage, choose
+   **Create synchronization**, and confirm that vault's master password. SSHKeeper
+   writes `sshkeeper.sync` plus a password-wrapped recovery file. Save the
+   displayed random recovery key offline as a last-resort backup.
+2. On a new installation create/unlock an empty local vault, configure the
+   **same storage**, select **Restore from storage**, and enter the **original
+   vault's master password**. No device approval, six-digit codes, or running
+   old computer is necessary.
+3. For a **previously configured (legacy) sync space**, update a connected
+   installation and use **Enable / update password recovery** once. This does
+   not modify or replace the existing encrypted bundle. Then restore on a
+   fresh device using only the master password. If every connected device
+   has already been lost and password recovery was not enabled, the original
+   random recovery key is still required.
 
 With **Auto sync** on, the TUI syncs when it starts and three seconds after
-each change; the header shows `⇅` with the time since the last sync. The same
-works from the command line:
+each change; the header shows `⇅` with the time since the last sync.
+
+Command line:
 
 ```bash
-sshkeeper sync setup folder ~/Sync/sshkeeper   # or: sync setup git <url> [--branch]
-sshkeeper sync init                            # first device
-sshkeeper sync add-device                      # six-digit code, valid 10 min
-sshkeeper sync add-device --offline            # SKP1 one-time code, valid 24 h
-sshkeeper sync join                            # connect a new device
+sshkeeper sync setup folder ~/Sync/sshkeeper   # or: setup git <url> [--branch]
+sshkeeper sync init                            # initial vault; confirm master password
+sshkeeper sync join                            # new vault; enter original master password
+sshkeeper sync enable-password                 # one-time migration of older sync
 sshkeeper sync                                 # sync now
 sshkeeper sync status | recovery-key | leave
 ```
 
-**How secrets stay secret.**
+**Encryption and limitations.**
 
-- Everything travels inside one file sealed with XChaCha20-Poly1305 under a
-  random 256-bit sync key. The storage sees a format tag and a key fingerprint,
-  nothing else — no names, hosts, or even how many secrets exist.
-- The sync key lives only in each device's vault. A stolen sync file has no
-  password to guess.
-- The six-digit code alone is worthless: it wraps the sync key together with
-  the master password of the device that shows it (Argon2id), expires after
-  ten minutes, and is deleted once used.
-- Offline pairing uses a random 128-bit **SKP1-...** one-time code instead of
-  the old device's master password. It remains valid for 24 hours so a
-  dual-boot machine can reboot into the other OS. The pending pairing data is
-  deleted after use. In git pairing lives on a separate temporary branch that
-  is removed afterwards, so it never enters the sync history.
-- Sync refuses to run while the vault is locked, so missing secrets are never
-  mistaken for deletions.
-- Referenced SSH keys use portable paths in the sync bundle. For example,
-  `/home/alice/.ssh/id_ed25519` is received on Windows as the local
-  `%USERPROFILE%\.ssh\id_ed25519`, not as a Linux path.
-- An existing key file is never overwritten. If a device already has a
-  different key at the same local path, it keeps its own, reports it, and
-  never sends it to other devices.
-- Changes merge per item by the latest edit; deletions travel too.
+- Records, SSH private keys and saved secrets remain encrypted with
+  XChaCha20-Poly1305 under a random 256-bit sync key.
+- In **folder mode**, `sshkeeper.access` contains only that random key
+  wrapped using a separately salted Argon2id derivation of the initial vault's
+  master password (128 MiB, 3 passes) and authenticated encryption.
+  In **git mode**, the wrapper lives on a dedicated `sshkeeper-access` branch;
+  the existing `sshkeeper` bundle branch and format are unchanged.
+- **Security tradeoff:** anyone who obtains the access envelope can attempt
+  offline guesses of the master password. This was impossible with the old
+  random-key-only scheme. Use a strong unique master password and restrict
+  read/write access to the storage. The master password is **not** the git
+  server / shared-folder login.
+- If you change the original vault's master password, re-publish recovery
+  using **Enable / update password recovery** or `sync enable-password`.
+  Existing joined devices retain their random key and keep working.
+- The old recovery key and legacy pairing-code CLI remain available for
+  compatibility; device pairing is no longer part of the normal UI.
+- Without server snapshots/version history, someone with storage write
+  permission can delete encrypted files or roll them back. Keep
+  Syncthing/Nextcloud snapshots or Git backups, and verify your restore
+  procedure before replacing keys or wiping a workstation.
+- Sync refuses to run with the vault locked. Referenced SSH private key paths
+  are portable between operating systems and an existing different key file
+  is never silently overwritten. Last-write-wins record merging is preserved.
 
 ## Vault
 

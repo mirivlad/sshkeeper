@@ -221,6 +221,10 @@ func changeVaultPasswordInteractive() error {
 	}
 
 	fmt.Println(tr("Master password changed.", "Мастер-пароль изменён."))
+	if cfg.Sync.Mode != config.SyncOff && v.HasSecret("sync:key") {
+		fmt.Println(tr("To restore this sync using the NEW master password, run: sshkeeper sync enable-password",
+			"Чтобы восстанавливать синхронизацию по НОВОМУ мастер-паролю, выполните: sshkeeper sync enable-password"))
+	}
 	return nil
 }
 
