@@ -73,11 +73,11 @@ func verifyMasterPassword(password string) error {
 func syncErrorText(err error) string {
 	switch {
 	case errors.Is(err, syncer.ErrNoKey):
-		return tr("This device is not set up for sync yet. Create a sync space on the first device, then add others with a pairing code.",
-			"Это устройство ещё не подключено к синхронизации. Создайте пространство синхронизации на первом устройстве, затем добавьте остальные по коду.")
+		return tr("This vault is not connected to synchronization. Create a sync or restore from the shared storage using the master password.",
+			"Этот вольт не подключён к синхронизации. Создайте её или восстановите из общего хранилища по мастер-паролю.")
 	case errors.Is(err, syncer.ErrSpaceExists):
-		return tr("The storage already has synced data. Add this device with a pairing code from a device that is already set up.",
-			"В хранилище уже есть данные синхронизации. Добавьте это устройство по коду с уже подключённого устройства.")
+		return tr("The storage already has synced data. Choose restore using the original vault master password.",
+			"В хранилище уже есть данные синхронизации. Восстановите их с мастер-паролем исходного вольта.")
 	case errors.Is(err, syncer.ErrVaultLocked):
 		return tr("Unlock the vault before syncing.", "Разблокируйте хранилище перед синхронизацией.")
 	case errors.Is(err, syncer.ErrNoPairing):
@@ -87,6 +87,12 @@ func syncErrorText(err error) string {
 		return tr("The pairing code has expired. Create a new one.", "Срок действия кода истёк. Создайте новый.")
 	case errors.Is(err, syncer.ErrPairingInvalid):
 		return tr("Wrong pairing/offline code or master password.", "Неверный обычный/офлайн-код или мастер-пароль.")
+	case errors.Is(err, syncer.ErrAccessMissing):
+		return tr("Password recovery is not enabled on this sync storage. Enable it on a connected installation, or use the legacy recovery key.", "В этом хранилище ещё не включено восстановление по паролю. Включите его на подключённой установке или используйте прежний ключ восстановления.")
+	case errors.Is(err, syncer.ErrAccessPassword):
+		return tr("Wrong synchronization master password.", "Неверный мастер-пароль синхронизации.")
+	case errors.Is(err, syncer.ErrAccessMismatch):
+		return tr("Password recovery belongs to a different sync space.", "Восстановление по паролю относится к другому пространству синхронизации.")
 	case errors.Is(err, syncer.ErrWrongKey):
 		return tr("This storage belongs to a different sync space.", "Это хранилище принадлежит другому пространству синхронизации.")
 	}
@@ -130,20 +136,18 @@ profiles reference in step across devices through an end-to-end encrypted
 bundle in a folder or a git repository.
 
   sshkeeper sync setup folder ~/Sync/sshkeeper   (or: setup git <url>)
-  sshkeeper sync init                            first device: create the space
-  sshkeeper sync add-device                      show a six-digit code
-  sshkeeper sync add-device --offline            24-hour code for dual-boot/offline device
-  sshkeeper sync join                            new device: enter a code
+  sshkeeper sync init                            first device: enter master password
+  sshkeeper sync join                            new device: enter master password
+  sshkeeper sync enable-password                 migrate an existing sync space
   sshkeeper sync                                 sync now`,
 		`Синхронизирует профили, пробросы, шаблоны, секреты хранилища и закрытые
 ключи, на которые ссылаются профили, через пакет со сквозным шифрованием в
 папке или git-репозитории.
 
   sshkeeper sync setup folder ~/Sync/sshkeeper   (или: setup git <url>)
-  sshkeeper sync init                            первое устройство: создать пространство
-  sshkeeper sync add-device                      показать шестизначный код
-  sshkeeper sync add-device --offline            код на 24 часа для dual-boot/выключенного устройства
-  sshkeeper sync join                            новое устройство: ввести код
+  sshkeeper sync init                            первое устройство: ввести мастер-пароль
+  sshkeeper sync join                            новое устройство: ввести мастер-пароль
+  sshkeeper sync enable-password                 перевести старую синхронизацию
   sshkeeper sync                                 синхронизировать сейчас`),
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -200,7 +204,14 @@ var syncInitCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		recovery, report, err := engine.Create()
+		password, err := readSecretLine(tr("Master password of this vault: ", "Мастер-пароль этого вольта: "))
+		if err != nil {
+			return err
+		}
+		if err := verifyMasterPassword(password); err != nil {
+			return err
+		}
+		recovery, report, err := engine.CreatePassword(password)
 		if err != nil {
 			return fmt.Errorf("%s", syncErrorText(err))
 		}
@@ -254,32 +265,63 @@ var syncAddDeviceCmd = &cobra.Command{
 	},
 }
 
+// The no-argument flow needs only the master password of the original vault.
+// Supplying a legacy code still works for migrations from older installations.
 var syncJoinCmd = &cobra.Command{
-	Use:   "join [code | offline-code | recovery-key]",
-	Short: tr("Join a sync space with a pairing, offline, or recovery code", "Подключиться к синхронизации по обычному, офлайн-коду или ключу восстановления"),
+	Use:   "join [legacy-code-or-recovery-key]",
+	Short: tr("Connect to the encrypted sync using the master password", "Подключиться к синхронизации по мастер-паролю"),
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		engine, err := newSyncEngine()
 		if err != nil {
 			return err
 		}
-		secret := strings.Join(args, " ")
-		if secret == "" {
-			if secret, err = readSecretLine(tr("Pairing, offline, or recovery code: ", "Код сопряжения, офлайн-код или ключ восстановления: ")); err != nil {
+		var report syncer.Report
+		if len(args) == 0 {
+			password, err := readSecretLine(tr("Master password of the original vault: ", "Мастер-пароль исходного вольта: "))
+			if err != nil {
 				return err
 			}
-		}
-		password := ""
-		if !syncer.LooksLikeRecoveryKey(secret) && !syncer.LooksLikeOfflinePairingCode(secret) {
-			if password, err = readSecretLine(tr("Master password of the device showing the code: ", "Мастер-пароль устройства, показавшего код: ")); err != nil {
-				return err
+			report, err = engine.JoinPassword(password)
+		} else {
+			secret := args[0]
+			password := ""
+			if !syncer.LooksLikeRecoveryKey(secret) && !syncer.LooksLikeOfflinePairingCode(secret) {
+				password, err = readSecretLine(tr("Master password of device showing the legacy code: ", "Мастер-пароль устройства, показавшего старый код: "))
+				if err != nil {
+					return err
+				}
 			}
+			report, err = engine.Join(secret, password)
 		}
-		report, err := engine.Join(secret, password)
 		if err != nil {
 			return fmt.Errorf("%s", syncErrorText(err))
 		}
 		printSyncReport(report)
+		return nil
+	},
+}
+
+var syncEnablePasswordCmd = &cobra.Command{
+	Use:   "enable-password",
+	Short: tr("Enable password-only restore for an existing sync space", "Разрешить восстановление старой синхронизации по паролю"),
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		engine, err := newSyncEngine()
+		if err != nil {
+			return err
+		}
+		password, err := readSecretLine(tr("Master password of this vault: ", "Мастер-пароль этого вольта: "))
+		if err != nil {
+			return err
+		}
+		if err := verifyMasterPassword(password); err != nil {
+			return err
+		}
+		if err := engine.EnablePassword(password); err != nil {
+			return fmt.Errorf("%s", syncErrorText(err))
+		}
+		fmt.Println(tr("Password recovery enabled. New installations can use 'sshkeeper sync join'.", "Восстановление по паролю включено. На новой установке используйте «sshkeeper sync join»."))
 		return nil
 	},
 }
@@ -362,8 +404,9 @@ var syncLeaveCmd = &cobra.Command{
 func init() {
 	syncSetupCmd.Flags().StringVar(&syncSetupBranch, "branch", "", tr("git branch for the bundle (default \"sshkeeper\")", "ветка git для пакета (по умолчанию «sshkeeper»)"))
 	syncSetupCmd.Flags().BoolVar(&syncSetupNoAuto, "no-auto", false, tr("do not sync automatically from the TUI", "не синхронизировать автоматически из TUI"))
+	syncAddDeviceCmd.Hidden = true // backward-compatible CLI only; no new device pairing
 	syncAddDeviceCmd.Flags().BoolVar(&syncAddDeviceOffline, "offline", false, tr("create a one-time 24-hour code for dual-boot or an offline device", "создать одноразовый код на 24 часа для dual-boot или выключенного устройства"))
-	syncCmd.AddCommand(syncSetupCmd, syncInitCmd, syncAddDeviceCmd, syncJoinCmd, syncStatusCmd, syncRecoveryKeyCmd, syncLeaveCmd)
+	syncCmd.AddCommand(syncSetupCmd, syncInitCmd, syncEnablePasswordCmd, syncAddDeviceCmd, syncJoinCmd, syncStatusCmd, syncRecoveryKeyCmd, syncLeaveCmd)
 	// Sync errors are explained in words and printed once by Execute; the
 	// usage block would bury them.
 	for _, command := range append(syncCmd.Commands(), syncCmd) {
@@ -377,14 +420,15 @@ func init() {
 // language is loaded, like localizeCLIHelp does for the other commands.
 func localizeSyncHelp() {
 	short := map[*cobra.Command][2]string{
-		syncCmd:            {"Sync profiles, secrets, and keys between devices", "Синхронизация профилей, секретов и ключей между устройствами"},
-		syncSetupCmd:       {"Choose where the encrypted bundle is stored", "Выбрать, где хранится зашифрованный пакет"},
-		syncInitCmd:        {"Create a sync space from this device", "Создать пространство синхронизации с этого устройства"},
-		syncAddDeviceCmd:   {"Create a code to add another device", "Создать код для добавления другого устройства"},
-		syncJoinCmd:        {"Join with a pairing, offline, or recovery code", "Подключиться по обычному, офлайн-коду или ключу восстановления"},
-		syncStatusCmd:      {"Show sync settings and the last result", "Показать настройки и последний результат синхронизации"},
-		syncRecoveryKeyCmd: {"Print the recovery key of this sync space", "Показать ключ восстановления пространства синхронизации"},
-		syncLeaveCmd:       {"Stop syncing this device; local data stays", "Отключить устройство от синхронизации; данные остаются"},
+		syncCmd:               {"Sync profiles, secrets, and keys between devices", "Синхронизация профилей, секретов и ключей между устройствами"},
+		syncSetupCmd:          {"Choose where the encrypted bundle is stored", "Выбрать, где хранится зашифрованный пакет"},
+		syncInitCmd:           {"Create a sync space from this device", "Создать пространство синхронизации с этого устройства"},
+		syncAddDeviceCmd:      {"Create a code to add another device", "Создать код для добавления другого устройства"},
+		syncJoinCmd:           {"Connect to sync using the master password", "Подключиться к синхронизации по мастер-паролю"},
+		syncEnablePasswordCmd: {"Enable password-only restore for an existing sync space", "Разрешить восстановление старой синхронизации по паролю"},
+		syncStatusCmd:         {"Show sync settings and the last result", "Показать настройки и последний результат синхронизации"},
+		syncRecoveryKeyCmd:    {"Print the recovery key of this sync space", "Показать ключ восстановления пространства синхронизации"},
+		syncLeaveCmd:          {"Stop syncing this device; local data stays", "Отключить устройство от синхронизации; данные остаются"},
 	}
 	for command, pair := range short {
 		command.Short = tr(pair[0], pair[1])
@@ -394,20 +438,18 @@ profiles reference in step across devices through an end-to-end encrypted
 bundle in a folder or a git repository.
 
   sshkeeper sync setup folder ~/Sync/sshkeeper   (or: setup git <url>)
-  sshkeeper sync init                            first device: create the space
-  sshkeeper sync add-device                      show a six-digit code
-  sshkeeper sync add-device --offline            24-hour code for dual-boot/offline device
-  sshkeeper sync join                            new device: enter a code
+  sshkeeper sync init                            first device: enter master password
+  sshkeeper sync join                            new device: enter master password
+  sshkeeper sync enable-password                 migrate an existing sync space
   sshkeeper sync                                 sync now`,
 		`Синхронизирует профили, пробросы, шаблоны, секреты хранилища и закрытые
 ключи, на которые ссылаются профили, через пакет со сквозным шифрованием в
 папке или git-репозитории.
 
   sshkeeper sync setup folder ~/Sync/sshkeeper   (или: setup git <url>)
-  sshkeeper sync init                            первое устройство: создать пространство
-  sshkeeper sync add-device                      показать шестизначный код
-  sshkeeper sync add-device --offline            код на 24 часа для dual-boot/выключенного устройства
-  sshkeeper sync join                            новое устройство: ввести код
+  sshkeeper sync init                            первое устройство: ввести мастер-пароль
+  sshkeeper sync join                            новое устройство: ввести мастер-пароль
+  sshkeeper sync enable-password                 перевести старую синхронизацию
   sshkeeper sync                                 синхронизировать сейчас`)
 	if flag := syncSetupCmd.Flags().Lookup("branch"); flag != nil {
 		flag.Usage = tr("git branch for the bundle (default \"sshkeeper\")", "ветка git для пакета (по умолчанию «sshkeeper»)")
@@ -453,42 +495,36 @@ func wireTUISync() {
 		report, err := engine.Sync()
 		return result(report), explain(err)
 	}
-	tui.CreateSyncSpace = func() (tui.SyncResult, error) {
+	tui.CreateSyncSpace = func(password string) (tui.SyncResult, error) {
+		if err := verifyMasterPassword(password); err != nil {
+			return tui.SyncResult{}, err
+		}
 		engine, err := newSyncEngine()
 		if err != nil {
 			return tui.SyncResult{}, err
 		}
-		recovery, report, err := engine.Create()
+		recovery, report, err := engine.CreatePassword(password)
 		out := result(report)
 		out.RecoveryKey = recovery
 		return out, explain(err)
 	}
-	tui.PairSyncDevice = func(password string) (string, time.Time, error) {
-		if err := verifyMasterPassword(password); err != nil {
-			return "", time.Time{}, err
-		}
-		engine, err := newSyncEngine()
-		if err != nil {
-			return "", time.Time{}, err
-		}
-		code, expires, err := engine.Pair(password)
-		return code, expires, explain(err)
-	}
-	tui.PairSyncDeviceOffline = func() (string, time.Time, error) {
-		engine, err := newSyncEngine()
-		if err != nil {
-			return "", time.Time{}, err
-		}
-		code, expires, err := engine.PairOffline()
-		return code, expires, explain(err)
-	}
-	tui.JoinSyncSpace = func(secret, password string) (tui.SyncResult, error) {
+	tui.JoinSyncSpace = func(password string) (tui.SyncResult, error) {
 		engine, err := newSyncEngine()
 		if err != nil {
 			return tui.SyncResult{}, err
 		}
-		report, err := engine.Join(secret, password)
+		report, err := engine.JoinPassword(password)
 		return result(report), explain(err)
+	}
+	tui.EnableSyncPassword = func(password string) error {
+		if err := verifyMasterPassword(password); err != nil {
+			return err
+		}
+		engine, err := newSyncEngine()
+		if err != nil {
+			return err
+		}
+		return explain(engine.EnablePassword(password))
 	}
 	tui.SyncRecoveryKey = func() (string, error) {
 		engine, err := newSyncEngine()

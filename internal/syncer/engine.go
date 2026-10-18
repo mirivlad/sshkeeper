@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,7 +29,7 @@ var (
 	ErrNoKey = errors.New("this device is not set up for sync")
 	// ErrSpaceExists means the storage already holds a sync space, so this
 	// device must join it instead of creating a new one.
-	ErrSpaceExists = errors.New("the storage already has synced data; add this device with a pairing code from another device")
+	ErrSpaceExists = errors.New("the storage already has synced data; restore it using the original master password")
 	// ErrVaultLocked means secrets are unavailable. Syncing without them
 	// would look like every secret was deleted.
 	ErrVaultLocked = errors.New("unlock the vault before syncing")
@@ -111,6 +112,121 @@ func (e *Engine) Create() (string, Report, error) {
 	}
 	report, err := e.Sync()
 	return RecoveryKey(key), report, err
+}
+
+// CreatePassword starts a new space and makes the same random key recoverable
+// by the master password. The existing bundle format is unchanged. If
+// publishing the access file fails, local sync still exists and the caller
+// can retry EnablePassword without losing any records.
+func (e *Engine) CreatePassword(password string) (string, Report, error) {
+	if password == "" {
+		return "", Report{}, ErrAccessPassword
+	}
+	if storage, ok := e.Transport.(AccessTransport); ok {
+		existing, err := storage.ReadAccess()
+		if err != nil {
+			return "", Report{}, err
+		}
+		if len(existing) != 0 {
+			return "", Report{}, ErrSpaceExists
+		}
+	} else {
+		return "", Report{}, fmt.Errorf("this transport does not support password recovery")
+	}
+	recovery, report, err := e.Create()
+	if err != nil {
+		return recovery, report, err
+	}
+	if err := e.EnablePassword(password); err != nil {
+		return recovery, report, err
+	}
+	return recovery, report, nil
+}
+
+// EnablePassword publishes a password-wrapped key for an EXISTING sync
+// space. This migrates old spaces without touching their encrypted bundles.
+func (e *Engine) EnablePassword(password string) error {
+	if password == "" {
+		return ErrAccessPassword
+	}
+	key, err := e.Key()
+	if err != nil {
+		return err
+	}
+	storage, ok := e.Transport.(AccessTransport)
+	if !ok {
+		return fmt.Errorf("this transport does not support password recovery")
+	}
+	bundles, err := e.Transport.Fetch()
+	if err != nil {
+		return err
+	}
+	if len(bundles) == 0 {
+		return fmt.Errorf("no sync bundle in the configured storage")
+	}
+	for _, bundle := range bundles {
+		if _, err := Open(key, bundle); err != nil {
+			return err
+		}
+	}
+	existing, err := storage.ReadAccess()
+	if err != nil {
+		return err
+	}
+	if len(existing) != 0 {
+		meta, err := accessMetadata(existing)
+		if err != nil {
+			return err
+		}
+		if meta.KeyID != KeyID(key) {
+			return ErrAccessMismatch
+		}
+	}
+	blob, err := SealAccess(key, password)
+	if err != nil {
+		return err
+	}
+	return storage.WriteAccess(blob)
+}
+
+// JoinPassword joins without any device pairing or recovery code. Validate
+// every remote bundle BEFORE persisting a key or touching local data.
+func (e *Engine) JoinPassword(password string) (Report, error) {
+	if !e.Vault.IsUnlocked() {
+		return Report{}, ErrVaultLocked
+	}
+	storage, ok := e.Transport.(AccessTransport)
+	if !ok {
+		return Report{}, fmt.Errorf("this transport does not support password recovery")
+	}
+	bundles, err := e.Transport.Fetch()
+	if err != nil {
+		return Report{}, err
+	}
+	if len(bundles) == 0 {
+		return Report{}, fmt.Errorf("no sync bundle in the configured storage")
+	}
+	blob, err := storage.ReadAccess()
+	if err != nil {
+		return Report{}, err
+	}
+	if len(blob) == 0 {
+		return Report{}, ErrAccessMissing
+	}
+	key, err := OpenAccess(blob, password)
+	if err != nil {
+		return Report{}, err
+	}
+	defer zeroAccessBytes(key)
+	for _, bundle := range bundles {
+		if _, err := Open(key, bundle); err != nil {
+			return Report{}, err
+		}
+	}
+	if err := e.adoptKey(key); err != nil {
+		return Report{}, err
+	}
+	return e.Sync()
 }
 
 // Pair publishes the sync key for a new device, protected by a fresh

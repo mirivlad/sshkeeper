@@ -116,6 +116,23 @@ func (f *Folder) DeletePairing() error {
 	return err
 }
 
+// ReadAccess reads the persistent password recovery envelope, if enabled.
+func (f *Folder) ReadAccess() ([]byte, error) {
+	data, err := os.ReadFile(f.path(AccessFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return data, err
+}
+
+// WriteAccess never writes plaintext keys or passwords to the shared folder.
+func (f *Folder) WriteAccess(blob []byte) error {
+	if err := os.MkdirAll(f.Dir, 0o700); err != nil {
+		return err
+	}
+	return writeAtomic(f.path(AccessFile), blob)
+}
+
 func writeAtomic(path string, data []byte) error {
 	temp, err := os.CreateTemp(filepath.Dir(path), ".sshkeeper-*.tmp")
 	if err != nil {
@@ -166,6 +183,8 @@ func (g *Git) branch() string {
 }
 
 func (g *Git) pairingBranch() string { return g.branch() + "-pairing" }
+
+func (g *Git) accessBranch() string { return g.branch() + "-access" }
 
 func (g *Git) git(stdin []byte, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", append([]string{"-C", g.Cache}, args...)...)
@@ -322,5 +341,43 @@ func (g *Git) DeletePairing() error {
 		return err
 	}
 	_, err = g.git(nil, "push", "--quiet", "origin", "--delete", g.pairingBranch())
+	return err
+}
+
+// ReadAccess uses a dedicated persistent branch, because older clients
+// overwrite the single-file sync branch without understanding access data.
+func (g *Git) ReadAccess() ([]byte, error) {
+	if err := g.ensureCache(); err != nil {
+		return nil, err
+	}
+	commit, err := g.fetchRef(g.accessBranch())
+	if err != nil || commit == "" {
+		return nil, err
+	}
+	data, err := g.git(nil, "cat-file", "blob", commit+":"+AccessFile)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// WriteAccess force-updates just the access branch using a lease; it never
+// touches the sync bundle. Force-replacement limits retained Git history,
+// though server-side backups/reflogs can still preserve the old envelope.
+func (g *Git) WriteAccess(blob []byte) error {
+	if err := g.ensureCache(); err != nil {
+		return err
+	}
+	previous, err := g.fetchRef(g.accessBranch())
+	if err != nil {
+		return err
+	}
+	commit, err := g.commitFile(AccessFile, blob, "")
+	if err != nil {
+		return err
+	}
+	branch := "refs/heads/" + g.accessBranch()
+	_, err = g.git(nil, "push", "--quiet", "--force-with-lease="+branch+":"+previous,
+		"origin", commit+":"+branch)
 	return err
 }
