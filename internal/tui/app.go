@@ -561,8 +561,6 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.handleSyncDone(msg)
 
-		return m, nil
-
 	case syncTickMsg:
 		return m, m.handleSyncTick(msg)
 
