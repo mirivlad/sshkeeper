@@ -15,24 +15,23 @@ type fakeSync struct {
 	info     SyncInfo
 	saved    []SyncSettings
 	syncs    int
-	joined   [2]string
+	joined   string
 	password string
 }
 
 func installFakeSync(t *testing.T, info SyncInfo) *fakeSync {
 	t.Helper()
 	fake := &fakeSync{info: info}
-	previous := []any{GetSyncInfo, SaveSyncSettings, RunSync, CreateSyncSpace, PairSyncDevice, PairSyncDeviceOffline, JoinSyncSpace, SyncRecoveryKey, LeaveSync}
+	previous := []any{GetSyncInfo, SaveSyncSettings, RunSync, CreateSyncSpace, JoinSyncSpace, SyncRecoveryKey, LeaveSync, EnableSyncPassword}
 	t.Cleanup(func() {
 		GetSyncInfo = previous[0].(func() SyncInfo)
 		SaveSyncSettings = previous[1].(func(SyncSettings) error)
 		RunSync = previous[2].(func() (SyncResult, error))
-		CreateSyncSpace = previous[3].(func() (SyncResult, error))
-		PairSyncDevice = previous[4].(func(string) (string, time.Time, error))
-		PairSyncDeviceOffline = previous[5].(func() (string, time.Time, error))
-		JoinSyncSpace = previous[6].(func(string, string) (SyncResult, error))
-		SyncRecoveryKey = previous[7].(func() (string, error))
-		LeaveSync = previous[8].(func() error)
+		CreateSyncSpace = previous[3].(func(string) (SyncResult, error))
+		JoinSyncSpace = previous[4].(func(string) (SyncResult, error))
+		SyncRecoveryKey = previous[5].(func() (string, error))
+		LeaveSync = previous[6].(func() error)
+		EnableSyncPassword = previous[7].(func(string) error)
 	})
 	GetSyncInfo = func() SyncInfo { return fake.info }
 	SaveSyncSettings = func(settings SyncSettings) error {
@@ -45,24 +44,22 @@ func installFakeSync(t *testing.T, info SyncInfo) *fakeSync {
 		fake.info.LastSync = time.Now()
 		return SyncResult{Received: 2, Sent: 1}, nil
 	}
-	CreateSyncSpace = func() (SyncResult, error) {
+	CreateSyncSpace = func(password string) (SyncResult, error) {
+		fake.password = password
 		fake.info.Joined = true
 		return SyncResult{RecoveryKey: "AAAA-BBBB"}, nil
 	}
-	PairSyncDevice = func(password string) (string, time.Time, error) {
-		fake.password = password
-		return "123456", time.Now().Add(10 * time.Minute), nil
-	}
-	PairSyncDeviceOffline = func() (string, time.Time, error) {
-		return "SKP1-ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ", time.Now().Add(24 * time.Hour), nil
-	}
-	JoinSyncSpace = func(secret, password string) (SyncResult, error) {
-		fake.joined = [2]string{secret, password}
+	JoinSyncSpace = func(password string) (SyncResult, error) {
+		fake.joined = password
 		if password != "right" {
-			return SyncResult{}, errors.New("Wrong pairing code or master password.")
+			return SyncResult{}, errors.New("Wrong synchronization master password.")
 		}
 		fake.info.Joined = true
 		return SyncResult{Received: 5}, nil
+	}
+	EnableSyncPassword = func(password string) error {
+		fake.password = password
+		return nil
 	}
 	SyncRecoveryKey = func() (string, error) { return "RECO-VERY", nil }
 	LeaveSync = func() error { fake.info.Joined = false; return nil }
@@ -161,106 +158,55 @@ func TestSyncSaveValidatesAndPersists(t *testing.T) {
 	}
 }
 
-func TestSyncJoinWithCodeAndPassword(t *testing.T) {
+func TestSyncRestoreByMasterPasswordOnly(t *testing.T) {
 	fake := installFakeSync(t, SyncInfo{Settings: SyncSettings{Mode: SyncModeFolder, Folder: "/sync", Auto: true}})
 	m := openSync(t)
 	focusAction(t, m, "join")
 	m, _ = press(m, key(tea.KeyEnter))
 	if m.syncScreen.view != syncViewJoin {
-		t.Fatal("join view did not open")
+		t.Fatal("restore view did not open")
 	}
-	m = typeKeys(m, "123 456")
-	m, _ = press(m, key(tea.KeyEnter))
+	if strings.Contains(m.View(), "Code") {
+		t.Fatal("restore must not request a pairing code")
+	}
 	m = typeKeys(m, "wrong")
 	m, cmd := press(m, key(tea.KeyEnter))
 	m = runCmd(m, cmd)
-	if m.syncScreen.err == nil || fake.joined != [2]string{"123 456", "wrong"} {
-		t.Fatalf("wrong password should fail: err=%v joined=%v", m.syncScreen.err, fake.joined)
+	if m.syncScreen.err == nil || fake.joined != "wrong" {
+		t.Fatalf("wrong password: %v %q", m.syncScreen.err, fake.joined)
 	}
-
-	// A failed attempt keeps the code and asks for the password again.
-	if m.syncScreen.view != syncViewJoin || m.syncScreen.secret.Value() != "123 456" || m.syncScreen.password.Value() != "" {
-		t.Fatalf("retry state: view=%v secret=%q", m.syncScreen.view, m.syncScreen.secret.Value())
+	if m.syncScreen.view != syncViewJoin || m.syncScreen.password.Value() != "" {
+		t.Fatal("password should be cleared for retry")
 	}
 	m = typeKeys(m, "right")
 	m, cmd = press(m, key(tea.KeyEnter))
-	if !strings.Contains(m.View(), "Joining") {
-		t.Fatal("join should show progress")
-	}
 	m = runCmd(m, cmd)
-	if m.syncScreen.err != nil || !strings.Contains(m.syncScreen.notice, "5 change") {
-		t.Fatalf("join result: err=%v notice=%q", m.syncScreen.err, m.syncScreen.notice)
-	}
-	if !m.syncInfo.Joined {
-		t.Fatal("sync info should be refreshed")
+	if m.syncScreen.err != nil || !m.syncInfo.Joined {
+		t.Fatalf("restore failed: %v", m.syncScreen.err)
 	}
 	if strings.Contains(m.View(), "right") {
-		t.Fatal("the password must never be displayed")
-	}
-}
-
-func TestSyncJoinWithRecoveryKeyHidesPassword(t *testing.T) {
-	fake := installFakeSync(t, SyncInfo{Settings: SyncSettings{Mode: SyncModeFolder, Folder: "/sync", Auto: true}})
-	m := openSync(t)
-	focusAction(t, m, "join")
-	m, _ = press(m, key(tea.KeyEnter))
-	m = typeKeys(m, "ABCD-EFGH-IJKL-MNOP")
-	if strings.Contains(m.View(), "Master password") {
-		t.Fatal("a recovery key needs no password field")
-	}
-	_, cmd := press(m, key(tea.KeyEnter))
-	runCmd(m, cmd)
-	if fake.joined[0] != "ABCD-EFGH-IJKL-MNOP" || fake.joined[1] != "" {
-		t.Fatalf("joined = %v", fake.joined)
-	}
-}
-
-func TestSyncAddDeviceShowsCode(t *testing.T) {
-	fake := installFakeSync(t, SyncInfo{Settings: SyncSettings{Mode: SyncModeGit, GitURL: "git@x:y.git", Auto: true}, Joined: true})
-	m := openSync(t)
-	focusAction(t, m, "pair")
-	m, _ = press(m, key(tea.KeyEnter))
-	m = typeKeys(m, "pw")
-	if strings.Contains(m.View(), "pw\n") {
 		t.Fatal("password echoed")
 	}
-	m, cmd := press(m, key(tea.KeyEnter))
-	m = runCmd(m, cmd)
-	if fake.password != "pw" || m.syncScreen.view != syncViewCode || !strings.Contains(m.View(), "123 456") {
-		t.Fatalf("code view:\n%s", m.View())
-	}
-	m, _ = press(m, key(tea.KeyEnter))
-	if m.syncScreen.view != syncViewForm {
-		t.Fatal("Enter should close the code")
-	}
 }
 
-func TestSyncOfflinePairingShowsLongLivedCodeAndNeedsNoPassword(t *testing.T) {
+func TestSyncJoinedUsesPasswordRecoveryNotDevicePairing(t *testing.T) {
 	fake := installFakeSync(t, SyncInfo{Settings: SyncSettings{Mode: SyncModeGit, GitURL: "git@x:y.git", Auto: true}, Joined: true})
 	m := openSync(t)
-	focusAction(t, m, "pair-offline")
+	for _, control := range m.syncScreen.controls() {
+		if control.action == "pair" || control.action == "pair-offline" {
+			t.Fatalf("device pairing must not appear: %s", control.action)
+		}
+	}
+	focusAction(t, m, "enable-password")
+	m, _ = press(m, key(tea.KeyEnter))
+	if m.syncScreen.view != syncViewPassword {
+		t.Fatal("password prompt missing")
+	}
+	m = typeKeys(m, "vault-secret")
 	m, cmd := press(m, key(tea.KeyEnter))
 	m = runCmd(m, cmd)
-	if m.syncScreen.view != syncViewCode || !m.syncScreen.pairOffline || !strings.Contains(m.View(), "SKP1-") {
-		t.Fatalf("offline code view:\n%s", m.View())
-	}
-	if strings.Contains(m.View(), "master password of this device") {
-		t.Fatal("offline pairing must not ask for the old device master password")
-	}
-
-	fake.info.Joined = false
-	m.syncScreen.info.Joined = false
-	m.syncScreen.view = syncViewForm
-	focusAction(t, m, "join")
-	m, _ = press(m, key(tea.KeyEnter))
-	m = typeKeys(m, "SKP1-ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ")
-	if strings.Contains(m.View(), "Master password") {
-		t.Fatal("offline code must hide the master-password field")
-	}
-	_, cmd = press(m, key(tea.KeyEnter))
-	runCmd(m, cmd)
-	if fake.joined[0] == "" || fake.joined[1] != "" {
-		t.Fatalf("offline joined = %v", fake.joined)
+	if fake.password != "vault-secret" || m.syncScreen.err != nil || m.syncScreen.view != syncViewForm {
+		t.Fatalf("password recovery: %q %v", fake.password, m.syncScreen.err)
 	}
 }
 
@@ -268,6 +214,11 @@ func TestSyncCreateShowsRecoveryKey(t *testing.T) {
 	installFakeSync(t, SyncInfo{Settings: SyncSettings{Mode: SyncModeFolder, Folder: "/sync", Auto: true}})
 	m := openSync(t)
 	focusAction(t, m, "create")
+	m, _ = press(m, key(tea.KeyEnter))
+	if m.syncScreen.view != syncViewPassword {
+		t.Fatal("create must ask for vault password")
+	}
+	m = typeKeys(m, "vault-secret")
 	m, cmd := press(m, key(tea.KeyEnter))
 	m = runCmd(m, cmd)
 	if m.syncScreen.view != syncViewRecovery || !strings.Contains(m.View(), "AAAA-BBBB") {
@@ -327,13 +278,12 @@ func TestLocalChangesScheduleAutoSync(t *testing.T) {
 func TestSyncScreenFitsSupportedSizes(t *testing.T) {
 	installFakeSync(t, SyncInfo{Settings: SyncSettings{Mode: SyncModeGit, GitURL: "git@git.example.org:someone/a-rather-long-repository-name.git", Auto: true}, Joined: true, LastSync: time.Now()})
 	for _, size := range []struct{ width, height int }{{120, 40}, {80, 24}, {60, 16}} {
-		for _, view := range []syncView{syncViewForm, syncViewPassword, syncViewCode, syncViewJoin, syncViewRecovery} {
+		for _, view := range []syncView{syncViewForm, syncViewPassword, syncViewJoin, syncViewRecovery} {
 			m := New(nil)
 			m.width, m.height = size.width, size.height
 			m.openSettingsMenu("sync")
 			m, _ = press(m, key(tea.KeyEnter))
 			m.syncScreen.view = view
-			m.syncScreen.pairCode = "123456"
 			m.syncScreen.recovery = "MQB5-MJZ5-I6WP-ISER-KUEC-YXQC-RYJI-FRO2-I3ZN-4WTT-ZOPW-BIKA-L5QQ"
 			assertUnifiedScreen(t, m.View(), size.width, size.height)
 		}
