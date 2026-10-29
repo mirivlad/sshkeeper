@@ -358,17 +358,8 @@ func (m *tuiModel) workspaceNext(delta int) {
 }
 
 func (m *tuiModel) workspaceShortcut(msg tea.KeyMsg) bool {
-	switch msg.Type {
-	case tea.KeyCtrlPgUp:
-		m.workspaceNext(-1)
-		return true
-	case tea.KeyCtrlPgDown:
-		m.workspaceNext(1)
-		return true
-	}
-	// Bubble Tea 1.3.x loses the Ctrl modifier for PageUp/PageDown when
-	// reading native Windows console input. Alt+Left/Right survives that path,
-	// so keep it as a cross-platform workspace-cycle shortcut as well.
+	// Only the documented Alt navigation belongs to SSHKeeper.
+	// Ctrl+PgUp/Ctrl+PgDn and other keys belong to the remote PTY.
 	if msg.Alt {
 		switch msg.Type {
 		case tea.KeyLeft:
@@ -458,6 +449,18 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		session.Paste(text)
 		return m, nil
 	}
+	// x/vt's key encoder may not emit modified PageUp/PageDown when the
+	// remote terminal has not negotiated an extended keyboard protocol.
+	// Forward the standard xterm CSI modifier sequences instead of dropping
+	// these non-SSHKeeper shortcuts.
+	if msg.Type == tea.KeyCtrlPgUp {
+		session.SendText("\x1b[5;5~")
+		return m, nil
+	}
+	if msg.Type == tea.KeyCtrlPgDown {
+		session.SendText("\x1b[6;5~")
+		return m, nil
+	}
 	if msg.Type == tea.KeyRunes {
 		mod := vt.KeyMod(0)
 		if msg.Alt {
@@ -528,6 +531,10 @@ func workspaceVTKey(msg tea.KeyMsg) (vt.KeyPressEvent, bool) {
 		return plain(vt.KeyPgUp)
 	case tea.KeyPgDown:
 		return plain(vt.KeyPgDown)
+	case tea.KeyCtrlPgUp:
+		return ctrl(vt.KeyPgUp)
+	case tea.KeyCtrlPgDown:
+		return ctrl(vt.KeyPgDown)
 	case tea.KeyInsert:
 		return plain(vt.KeyInsert)
 	case tea.KeyDelete:
@@ -627,15 +634,11 @@ func (m *tuiModel) viewWorkspaceSession() string {
 		status = m.workspaceCopyNotice
 	}
 	help := renderHelpLine([]helpItem{
-		{Key: "Wheel · PgUp/PgDn", Action: i18n.T("scroll output", "листать вывод")},
-		{Key: "Ctrl+PgUp/PgDn · Alt+←/→", Action: i18n.T("switch tab", "сменить вкладку")},
-		{Key: "Alt+0", Action: i18n.T("servers", "серверы")},
-		{Key: "Drag / Ctrl+Shift+V", Action: i18n.T("copy / paste", "копировать / вставить")},
-		{Key: "Alt+W", Action: i18n.T("close session", "закрыть сессию")},
+		{Key: "Alt+←/→", Action: i18n.T("switch tab", "сменить вкладку")},
+		{Key: "Alt+0…9", Action: i18n.T("select tab", "выбрать вкладку")},
+		{Key: "Alt+W", Action: i18n.T("close tab", "закрыть вкладку")},
+		{Key: "Drag · Ctrl+Shift+C/V", Action: i18n.T("terminal copy/paste", "копирование/вставка терминала")},
 	})
-	if session.SelectedText() != "" {
-		status = workspaceCopyLabel() + "  " + status
-	}
 	statusLine := fitLine(status+"  "+help, width)
 
 	bodyHeight := max(1, height-2)

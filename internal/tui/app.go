@@ -444,6 +444,11 @@ func (m *tuiModel) Init() tea.Cmd {
 		cmds = append(cmds, m.expireNoticeCmd())
 	}
 	cmds = append(cmds, m.workspaceWatchCmds()...)
+	// The dashboard needs mouse reporting; a live SSH tab must leave native
+	// terminal selection available for Ctrl+Shift+C.
+	if m.workspaceActive > 0 {
+		cmds = append(cmds, tea.DisableMouse)
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -467,7 +472,15 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	before := m.success
+	wasSSH := m.workspaceActive > 0
 	model, cmd := m.update(msg)
+	if nowSSH := m.workspaceActive > 0; wasSSH != nowSSH {
+		if nowSSH {
+			cmd = tea.Batch(cmd, tea.DisableMouse)
+		} else {
+			cmd = tea.Batch(cmd, tea.EnableMouseCellMotion)
+		}
+	}
 	if changes := localChanges.Load(); changes != m.seenChanges {
 		m.seenChanges = changes
 		cmd = tea.Batch(cmd, m.scheduleAutoSync())
@@ -977,7 +990,9 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if m.workspaceActive > 0 {
-			return m.updateWorkspaceMouse(msg)
+			// Mouse reporting is disabled in SSH tabs: leave selection and
+			// copy/paste to the enclosing terminal. Ignore stale mouse events.
+			return m, nil
 		}
 		return m.updateDashboardMouse(msg)
 
