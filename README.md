@@ -266,32 +266,31 @@ Normal **Connect** now opens SSH inside an sshkeeper workspace tab instead of
 handing the whole console to one `ssh.exe` process. Sessions keep running while
 you return to the server dashboard or switch to another SSH tab.
 
-- `Ctrl+PgUp` / `Ctrl+PgDn` switch workspace tabs where the terminal reports those modifiers; `Alt+Left` / `Alt+Right` is the native-Windows-safe equivalent.
-- `Alt+0` returns to **Servers**; `Alt+1`…`Alt+9` jump directly to SSH tabs.
-- `Alt+W` closes the current SSH tab.
-- Mouse wheel and `PgUp` / `PgDn` scroll the SSH output history on the normal shell screen; typing returns to live output. Full-screen alternate-screen applications keep their own PageUp/PageDown handling.
-- Drag with the left mouse button in an SSH tab to select text **without Shift**.
-  Holding the drag against the upper/lower border auto-scrolls through output,
-  while the mouse wheel scrolls without clearing the selection.
-  Double-click selects a word (including Unicode), triple-click selects a line;
-  dragging after those gestures extends the selection by words or lines.
-  Releasing the button leaves text highlighted and updates **PRIMARY only**
-  on X11/Wayland (for middle-click paste). **CLIPBOARD is never overwritten
-  by merely selecting text.** When a selection exists, click **[Copy]** in
-  the SSH tab's bottom status line to copy it explicitly to CLIPBOARD.
-- `Ctrl+Shift+V` / `Shift+Insert` (or the terminal's configured paste
-  shortcut) pastes into the active SSH session when the outer terminal sends
-  bracketed paste. Middle-click pastes PRIMARY on X11/Wayland and falls back
-  to CLIPBOARD where PRIMARY is unavailable.
-- `Ctrl+Shift+C` belongs to the **outer terminal**; its copy command
-  cannot access SSHKeeper's own mouse highlight. To use that exact shortcut,
-  hold Shift while selecting **visible** text with the terminal's native mouse
-  selection, then press `Ctrl+Shift+C`. For SSHKeeper's internal selections
-  (including scrolled history), click **[Copy]** instead. Never interpret
-  ordinary `Ctrl+C` as copy, since remote applications need it for SIGINT.
-  `Ctrl+Insert` is not reliably distinguishable from `Insert` in Bubble Tea
-  1.x, so it is not currently assigned to copy.
-  `Alt+C` and `Alt+V` continue to reach the remote program.
+- SSHKeeper owns only the explicit tab shortcuts: `Alt+0` opens **Servers**,
+  `Alt+1`…`Alt+9` selects SSH tabs, `Alt+Left` / `Alt+Right` cycles tabs,
+  and `Alt+W` closes the active SSH tab **and its session**.
+- Mouse reporting is turned **off** while an SSH tab is active. Drag selection,
+  double-click word selection, and `Ctrl+Shift+C` are handled by the enclosing
+  terminal (e.g. XFCE Terminal), exactly as for a normal terminal window.
+  Selection alone does **not** overwrite CLIPBOARD; copy happens only when you
+  press the terminal's copy shortcut. X11/Wayland PRIMARY and middle-click
+  follow the terminal's own behavior. No Shift-drag or SSHKeeper Copy button
+  is required.
+- `Ctrl+Shift+V` / `Shift+Insert` (when bound by your terminal) paste into
+  the SSH tab using bracketed paste. Ctrl+C, Ctrl+PgUp/Ctrl+PgDn and unrelated
+  Alt shortcuts are passed to the remote PTY.
+- The embedded emulator keeps remote output history. `PgUp` / `PgDn` scroll
+  that history on the normal shell screen when it exists; full-screen
+  alternate-screen editors receive those keys themselves. Because SSHKeeper
+  uses an alternate screen, the enclosing terminal's normal wheel-to-history
+  behavior can vary between terminal emulators. For now use PgUp/PgDn to read
+  older remote output. Switching off mouse reporting also means SSHKeeper
+  cannot receive mouse clicks on its tab bar while an SSH tab is active:
+  use the Alt tab shortcuts instead.
+- Remote applications that request mouse tracking (such as mouse-enabled vim)
+  do not yet receive forwarded mouse reports through the embedded emulator.
+  They remain fully usable with the keyboard; their mouse forwarding requires
+  a separate terminal-mode bridge.
 - A clean remote `exit` (exit status 0) automatically closes its SSH tab.
   Unsuccessful connections keep their output and error visible until explicitly closed.
 - The embedded terminal renders the remote cursor position, so editors such as `nano` and `vim` have a visible cursor.
