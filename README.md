@@ -269,24 +269,27 @@ you return to the server dashboard or switch to another SSH tab.
 - SSHKeeper owns only the explicit tab shortcuts: `Alt+0` opens **Servers**,
   `Alt+1`…`Alt+9` selects SSH tabs, `Alt+Left` / `Alt+Right` cycles tabs,
   and `Alt+W` closes the active SSH tab **and its session**.
-- Mouse reporting is turned **off** while an SSH tab is active. Drag selection,
-  double-click word selection, and `Ctrl+Shift+C` are handled by the enclosing
-  terminal (e.g. XFCE Terminal), exactly as for a normal terminal window.
-  Selection alone does **not** overwrite CLIPBOARD; copy happens only when you
-  press the terminal's copy shortcut. X11/Wayland PRIMARY and middle-click
-  follow the terminal's own behavior. No Shift-drag or SSHKeeper Copy button
-  is required.
+- **Default scrollback mouse mode:** SSHKeeper handles the wheel, drag-to-select
+  (with automatic scrolling at the edges), and double/triple-click selection.
+  Selection updates PRIMARY where supported, but never overwrites CLIPBOARD.
+  Click the visible **[Copy]** action or press `Alt+C` to copy to CLIPBOARD.
+  Middle-click pastes PRIMARY.
+- Press `Alt+M` to toggle **native terminal selection mode**, where drag and
+  `Ctrl+Shift+C` belong to the enclosing terminal (e.g. XFCE Terminal).
+  In native mode the mouse wheel can navigate shell command history instead
+  of internal scrollback; press `Alt+M` again to restore wheel scrolling.
+  Native terminal selection and SSHKeeper mouse-scroll cannot own the mouse
+  simultaneously.
 - `Ctrl+Shift+V` / `Shift+Insert` (when bound by your terminal) paste into
   the SSH tab using bracketed paste. Ctrl+C, Ctrl+PgUp/Ctrl+PgDn and unrelated
   Alt shortcuts are passed to the remote PTY.
-- The embedded emulator keeps remote output history. `PgUp` / `PgDn` scroll
-  that history on the normal shell screen when it exists; full-screen
-  alternate-screen editors receive those keys themselves. Because SSHKeeper
-  uses an alternate screen, the enclosing terminal's normal wheel-to-history
-  behavior can vary between terminal emulators. For now use PgUp/PgDn to read
-  older remote output. Switching off mouse reporting also means SSHKeeper
-  cannot receive mouse clicks on its tab bar while an SSH tab is active:
-  use the Alt tab shortcuts instead.
+- The embedded emulator keeps remote output history. In scrollback mouse mode
+  the wheel and `PgUp` / `PgDn` browse that history; dragging to a viewport
+  edge automatically scrolls while extending the selection. Full-screen
+  alternate-screen programs (`vim`, `nano`, `less`) retain their own PageUp/
+  PageDown behavior and do not generate normal shell scrollback.
+  In native selection mode `PgUp` / `PgDn` remain available for shell history.
+  Use the Alt tab shortcuts if the outer terminal owns mouse selection.
 - Remote applications that request mouse tracking (such as mouse-enabled vim)
   do not yet receive forwarded mouse reports through the embedded emulator.
   They remain fully usable with the keyboard; their mouse forwarding requires
