@@ -110,6 +110,7 @@ func TestWorkspaceAltCVKeysReachRemotePTY(t *testing.T) {
 	m.width, m.height = 20, 7
 	m.workspaceSessions = []*workspacepkg.Session{session}
 	m.workspaceActive = 1
+	m.workspaceNativeMouse = true // Alt+C is reserved for Copy only in scrollback mode.
 
 	for _, r := range []rune{'c', 'v'} {
 		_, cmd := m.updateWorkspaceKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: true})
