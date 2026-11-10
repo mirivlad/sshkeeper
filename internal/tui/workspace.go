@@ -385,6 +385,14 @@ func (m *tuiModel) workspaceShortcut(msg tea.KeyMsg) bool {
 				}
 			}
 			return true
+		case r == 'm' || r == 'M':
+			if session := m.activeWorkspaceSession(); session != nil {
+				m.workspaceNativeMouse = !m.workspaceNativeMouse
+				m.workspaceSelecting = false
+				m.cancelWorkspaceAutoScroll()
+				session.ClearSelection()
+			}
+			return true
 		case r == 'w' || r == 'W':
 			if m.workspaceActive > 0 {
 				m.closeActiveWorkspaceSession()
@@ -424,9 +432,13 @@ func (m *tuiModel) updateWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.workspaceActive = 0
 		return m, nil
 	}
-	// The enclosing terminal owns Ctrl+Shift+C/V. Clipboard copying needs
-	// an explicit action, never just selecting text. Ctrl+Shift+V normally
-	// arrives as bracketed paste below. Do not steal Ctrl+C or Alt+C/V.
+	// In scrollback mode mouse selection belongs to SSHKeeper, so the outer
+	// terminal cannot copy it with Ctrl+Shift+C. Alt+C and the visible Copy
+	// action explicitly write CLIPBOARD. Native mode keeps terminal shortcuts.
+	if !m.workspaceNativeMouse && msg.Alt && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 &&
+		(msg.Runes[0] == 'c' || msg.Runes[0] == 'C') {
+		return m, workspaceCopyCmd(session.SelectedText())
+	}
 	if !msg.Paste && msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
 		session.ClearSelection()
 	}
@@ -633,13 +645,13 @@ func (m *tuiModel) viewWorkspaceSession() string {
 	if m.workspaceCopyNotice != "" {
 		status = m.workspaceCopyNotice
 	}
-	help := renderHelpLine([]helpItem{
-		{Key: "Alt+←/→", Action: i18n.T("switch tab", "сменить вкладку")},
-		{Key: "Alt+0…9", Action: i18n.T("select tab", "выбрать вкладку")},
-		{Key: "Alt+W", Action: i18n.T("close tab", "закрыть вкладку")},
-		{Key: "Drag · Ctrl+Shift+C/V", Action: i18n.T("terminal copy/paste", "копирование/вставка терминала")},
-	})
-	statusLine := fitLine(status+"  "+help, width)
+	var statusLine string
+	if m.workspaceNativeMouse {
+		statusLine = fitLine(i18n.T("Native selection · Ctrl+Shift+C: copy · Alt+M: scroll", "Выделение терминала · Ctrl+Shift+C: копия · Alt+M: прокрутка")+"  "+status, width)
+	} else {
+		// The Copy label starts at x=0, matching the click target below.
+		statusLine = fitLine(workspaceCopyLabel()+"  "+i18n.T("Wheel: scroll · drag: select · Alt+C: copy · Alt+M: native", "Колесо: прокрутка · мышь: выделение · Alt+C: копия · Alt+M: терминал")+"  "+status, width)
+	}
 
 	bodyHeight := max(1, height-2)
 	_ = session.Resize(width, bodyHeight)
@@ -749,8 +761,8 @@ func (m *tuiModel) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if session == nil {
 		return m, nil
 	}
-	// The Copy button is an explicit, discoverable way to write CLIPBOARD
-	// even when the enclosing terminal intercepts Ctrl+Shift+C.
+	// The visible Copy button and Alt+C explicitly write CLIPBOARD without
+	// overwriting clipboard contents on every drag selection.
 	if event.Action == tea.MouseActionPress && event.Button == tea.MouseButtonLeft &&
 		event.Y == m.height-1 && event.X >= 0 && event.X < lineWidth(workspaceCopyLabel()) {
 		return m, workspaceCopyCmd(session.SelectedText())

@@ -313,7 +313,8 @@ type tuiModel struct {
 	seenChanges          int64
 	runtime              runtimeStatus
 	workspaceSessions    []*workspacepkg.Session
-	workspaceActive      int // 0 = dashboard, 1..n = embedded SSH session
+	workspaceActive      int  // 0 = dashboard, 1..n = embedded SSH session
+	workspaceNativeMouse bool // Alt+M: native selection vs in-app scrollback mouse
 	workspaceSelecting   bool
 	workspaceCopyNotice  string
 	workspaceDragX       int
@@ -444,9 +445,9 @@ func (m *tuiModel) Init() tea.Cmd {
 		cmds = append(cmds, m.expireNoticeCmd())
 	}
 	cmds = append(cmds, m.workspaceWatchCmds()...)
-	// The dashboard needs mouse reporting; a live SSH tab must leave native
-	// terminal selection available for Ctrl+Shift+C.
-	if m.workspaceActive > 0 {
+	// Only native-selection mode hands the mouse entirely to the outer terminal.
+	// The dashboard and SSH scrollback mode keep reporting enabled.
+	if m.workspaceActive > 0 && m.workspaceNativeMouse {
 		cmds = append(cmds, tea.DisableMouse)
 	}
 	return tea.Batch(cmds...)
@@ -472,13 +473,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	before := m.success
-	wasSSH := m.workspaceActive > 0
+	wasMouseReporting := m.workspaceActive == 0 || !m.workspaceNativeMouse
 	model, cmd := m.update(msg)
-	if nowSSH := m.workspaceActive > 0; wasSSH != nowSSH {
-		if nowSSH {
-			cmd = tea.Batch(cmd, tea.DisableMouse)
-		} else {
+	nowMouseReporting := m.workspaceActive == 0 || !m.workspaceNativeMouse
+	if wasMouseReporting != nowMouseReporting {
+		if nowMouseReporting {
 			cmd = tea.Batch(cmd, tea.EnableMouseCellMotion)
+		} else {
+			cmd = tea.Batch(cmd, tea.DisableMouse)
 		}
 	}
 	if changes := localChanges.Load(); changes != m.seenChanges {
@@ -990,9 +992,11 @@ func (m *tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if m.workspaceActive > 0 {
-			// Mouse reporting is disabled in SSH tabs: leave selection and
-			// copy/paste to the enclosing terminal. Ignore stale mouse events.
-			return m, nil
+			if m.workspaceNativeMouse {
+				// The outer terminal owns native text selection in this mode.
+				return m, nil
+			}
+			return m.updateWorkspaceMouse(msg)
 		}
 		return m.updateDashboardMouse(msg)
 
