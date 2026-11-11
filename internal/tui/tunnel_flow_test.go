@@ -190,7 +190,6 @@ func TestTunnelActionMenuFitsSupportedSizes(t *testing.T) {
 	}
 }
 
-
 func TestBackgroundTunnelAllowsPassphraseOnUnix(t *testing.T) {
 	menu := newActionMenuModel(80, 24)
 	menu.setServer(&model.Server{ID: 7, Alias: "web", AuthMethod: model.AuthKeyPassphrase}, 1, false)
