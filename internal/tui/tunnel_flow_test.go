@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mirivlad/sshkeeper/internal/model"
+	"github.com/mirivlad/sshkeeper/internal/tunnel"
 )
 
 func tunnelTestModel(auth model.AuthMethod) *tuiModel {
@@ -68,7 +69,7 @@ func TestBackgroundTunnelModeExplainsAuthRestriction(t *testing.T) {
 	selectTunnelAction(m.actionMenu, "tunnel_bg")
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(*tuiModel)
-	if cmd != nil || m.Result() != nil || !strings.Contains(m.View(), "key or agent authentication") {
+	if cmd != nil || m.Result() != nil || !strings.Contains(m.View(), "does not support password authentication") {
 		t.Fatalf("background auth limitation was not shown in TUI:\n%s", m.View())
 	}
 }
@@ -183,8 +184,24 @@ func TestTunnelActionMenuFitsSupportedSizes(t *testing.T) {
 		selectTunnelAction(menu, "tunnel_bg")
 		view := menu.View()
 		assertUnifiedScreen(t, view, size.width, size.height)
-		if !strings.Contains(view, "unavailable") || !strings.Contains(view, "key or agent") {
+		if !strings.Contains(view, "unavailable") || !strings.Contains(view, "password authentication") {
 			t.Fatalf("missing disabled-mode explanation at %dx%d:\n%s", size.width, size.height, view)
 		}
+	}
+}
+
+
+func TestBackgroundTunnelAllowsPassphraseOnUnix(t *testing.T) {
+	menu := newActionMenuModel(80, 24)
+	menu.setServer(&model.Server{ID: 7, Alias: "web", AuthMethod: model.AuthKeyPassphrase}, 1, false)
+	if tunnel.SupportsPassphraseBackground() {
+		if reason := menu.unavailableReason("tunnel_bg"); reason != "" {
+			t.Fatalf("passphrase tunnel action disabled: %s", reason)
+		}
+		if reason := menu.unavailableReason("tunnel_connect"); reason != "" {
+			t.Fatalf("passphrase tunnel+connect action disabled: %s", reason)
+		}
+	} else if menu.unavailableReason("tunnel_bg") == "" {
+		t.Fatal("expected a Windows passphrase limitation")
 	}
 }
