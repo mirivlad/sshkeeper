@@ -230,6 +230,8 @@ type TunnelState struct {
 	PID         int       `json:"pid"`
 	ForwardIDs  []int64   `json:"forward_ids"`
 	ConfigPath  string    `json:"config_path,omitempty"`
+	AgentPID    int       `json:"agent_pid,omitempty"`
+	AgentDir    string    `json:"agent_dir,omitempty"`
 	StartedAt   time.Time `json:"started_at"`
 	LastError   string    `json:"last_error"`
 }
