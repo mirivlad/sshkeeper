@@ -82,10 +82,21 @@ func startPassphraseAgent(identityFile, passphrase string) (*passphraseAgent, er
 }
 
 func stopPassphraseAgent(pid int, dir string) {
-	if pid > 0 {
-		_ = syscall.Kill(pid, syscall.SIGTERM)
+	// Tunnel state is persisted on disk. Never trust its directory field
+	// blindly: RemoveAll on a forged or corrupt value would be destructive.
+	clean := filepath.Clean(dir)
+	if !filepath.IsAbs(dir) || filepath.Dir(clean) != filepath.Clean(os.TempDir()) ||
+		!strings.HasPrefix(filepath.Base(clean), "sk-agent-") {
+		return
 	}
-	if dir != "" {
-		_ = os.RemoveAll(dir)
+	// Do not signal a potentially reused PID when the private agent socket
+	// is already dead. In that case only remove its stale directory.
+	conn, err := net.Dial("unix", filepath.Join(clean, "agent.sock"))
+	if err == nil {
+		_ = conn.Close()
+		if pid > 0 {
+			_ = syscall.Kill(pid, syscall.SIGTERM)
+		}
 	}
+	_ = os.RemoveAll(clean)
 }
