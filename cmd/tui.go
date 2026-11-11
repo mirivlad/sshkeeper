@@ -211,7 +211,7 @@ func runTUI() error {
 		if err := validateBackgroundTunnel(server, forwards); err != nil {
 			return nil, err
 		}
-		return tunnelpkg.StartResolved(cfg, server, forwards, true, dbProfileResolver)
+		return tunnelpkg.StartResolvedWithVault(cfg, server, forwards, true, dbProfileResolver, serverVaultFunc(server))
 	}
 	tui.ImportServers = func() (int, error) {
 		return importServersFromSSHConfig(nil)
