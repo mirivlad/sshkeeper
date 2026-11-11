@@ -258,7 +258,12 @@ func tunnelCommandSkipsStartupVaultUnlock(args []string) bool {
 	case "list", "stop", "stop-all":
 		return true
 	}
-	// A new background tunnel may use a passphrase-protected key from the
-	// vault; only read-only management commands can skip the startup unlock.
+	for _, arg := range args[1:] {
+		if arg == "--background" {
+			// Preserve zero-prompt startup for plain key/agent profiles.
+			// The tunnel command unlocks the vault only for key_passphrase.
+			return true
+		}
+	}
 	return false
 }
