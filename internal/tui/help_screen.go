@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
+	"github.com/mirivlad/sshkeeper/internal/tunnel"
 )
 
 // --- Help screen (?) ---
@@ -305,7 +306,7 @@ func (m *fullHelpModel) View() string {
 		{i18n.T("Tunnels", "Туннели"), [][2]string{
 			{"", i18n.T("A tunnel is a running SSH process that activates forwards.", "Туннель — работающий процесс SSH, который активирует правила проброса.")},
 			{"", i18n.T("At least one enabled forward is required.", "Нужно хотя бы одно включённое правило.")},
-			{"", i18n.T("Background mode needs key or agent auth.", "Для фонового режима нужен ключ или SSH-агент.")},
+			{"", i18n.T("Background mode: keys, Unix key+passphrase, or agent; passwords need foreground.", "Фоновый режим: ключ, ключ с passphrase (Unix) или агент; пароль — только обычно.")},
 			{"", i18n.T("Foreground mode stops with Ctrl+C.", "Активный процесс останавливается клавишами Ctrl+C.")},
 			{"", ""},
 			{"CLI:", "sshkeeper tunnel <alias>"},
@@ -397,8 +398,13 @@ func (m *actionMenuModel) unavailableReason(action string) string {
 	if m.enabledForwards == 0 {
 		return i18n.T("No enabled port forwards. Add or enable a rule first.", "Нет включённых правил проброса. Добавьте или включите правило.")
 	}
-	if (action == "tunnel_bg" || action == "tunnel_connect") && (m.authMethod == model.AuthPassword || m.authMethod == model.AuthKeyPassphrase) {
-		return i18n.T("Background mode needs key or agent authentication; use a foreground mode.", "Для фонового режима нужен ключ или SSH-агент; используйте активный режим.")
+	if action == "tunnel_bg" || action == "tunnel_connect" {
+		if m.authMethod == model.AuthPassword {
+			return i18n.T("Background mode does not support password authentication; use a foreground mode.", "Фоновый режим не поддерживает вход по паролю; используйте обычный туннель.")
+		}
+		if m.authMethod == model.AuthKeyPassphrase && !tunnel.SupportsPassphraseBackground() {
+			return i18n.T("Background key+passphrase tunnels are not supported on Windows; use an SSH agent or foreground mode.", "Фоновые туннели с passphrase не поддерживаются в Windows; используйте SSH-агент или обычный туннель.")
+		}
 	}
 	return ""
 }
