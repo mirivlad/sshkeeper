@@ -260,6 +260,8 @@ func tunnelCommandSkipsStartupVaultUnlock(args []string) bool {
 	}
 	for _, arg := range args[1:] {
 		if arg == "--background" {
+			// Preserve zero-prompt startup for plain key/agent profiles.
+			// The tunnel command unlocks the vault only for key_passphrase.
 			return true
 		}
 	}

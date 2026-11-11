@@ -11,6 +11,7 @@ import (
 	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
 	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
+	"github.com/mirivlad/sshkeeper/internal/tunnel"
 	workspacepkg "github.com/mirivlad/sshkeeper/internal/workspace"
 )
 
@@ -2317,8 +2318,8 @@ func (m *tuiModel) startForwardListTunnel() (tea.Model, tea.Cmd) {
 		m.forwardScreen.err = fmt.Errorf("%s", i18n.T("no enabled port forwards; add or enable a rule before starting a tunnel", "нет включённых правил проброса; добавьте или включите правило перед запуском туннеля"))
 		return m, nil
 	}
-	if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
-		m.forwardScreen.err = fmt.Errorf("%s", i18n.T("background mode needs key or agent authentication; use Ctrl+X for a foreground mode", "для фонового режима нужен ключ или SSH-агент; Ctrl+X открывает активный режим"))
+	if server.AuthMethod == model.AuthPassword || (server.AuthMethod == model.AuthKeyPassphrase && !tunnel.SupportsPassphraseBackground()) {
+		m.forwardScreen.err = fmt.Errorf("%s", i18n.T("background authentication is unavailable for this profile; use Ctrl+X for a foreground mode", "фоновой режим недоступен для этого способа входа; Ctrl+X открывает обычный туннель"))
 		return m, nil
 	}
 	return m.beginBackgroundTunnel(server, screenForwardList)

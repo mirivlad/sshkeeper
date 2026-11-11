@@ -34,7 +34,12 @@ var tunnelCmd = &cobra.Command{
 			if err := validateBackgroundTunnel(server, forwards); err != nil {
 				return err
 			}
-			state, err := tunnelpkg.StartResolved(cfg, server, forwards, true, dbProfileResolver)
+			if server.AuthMethod == model.AuthKeyPassphrase {
+				if err := unlockVaultForSession(); err != nil {
+					return err
+				}
+			}
+			state, err := tunnelpkg.StartResolvedWithVault(cfg, server, forwards, true, dbProfileResolver, serverVaultFunc(server))
 			if err != nil {
 				return err
 			}
@@ -124,8 +129,11 @@ func enabledForwardCount(forwards []*model.Forward) int {
 }
 
 func validateBackgroundTunnel(server *model.Server, forwards []*model.Forward) error {
-	if server.AuthMethod == model.AuthPassword || server.AuthMethod == model.AuthKeyPassphrase {
-		return fmt.Errorf("%s", trf("background tunnels support only key or agent auth; use foreground tunnel for %s auth", "фоновые туннели поддерживают только вход по ключу или через агент; для %s используйте обычный туннель", server.AuthMethod))
+	if server.AuthMethod == model.AuthPassword {
+		return fmt.Errorf("%s", tr("background tunnels do not support password authentication; use a foreground tunnel", "фоновые туннели не поддерживают вход по паролю; используйте обычный туннель"))
+	}
+	if server.AuthMethod == model.AuthKeyPassphrase && !tunnelpkg.SupportsPassphraseBackground() {
+		return fmt.Errorf("%s", tr("background key+passphrase tunnels are unsupported on this platform; use an SSH agent or a foreground tunnel", "фоновые туннели с ключом и passphrase недоступны на этой платформе; используйте SSH-агент или обычный туннель"))
 	}
 	if enabledForwardCount(forwards) == 0 {
 		return fmt.Errorf("%s", trf("no enabled forwards configured for %s", "для %s нет включённых перенаправлений", server.Alias))

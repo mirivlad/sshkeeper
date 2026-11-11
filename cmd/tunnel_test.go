@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mirivlad/sshkeeper/internal/model"
+	tunnelpkg "github.com/mirivlad/sshkeeper/internal/tunnel"
 )
 
 func TestTunnelCommandExposesBackgroundAndManagementCommands(t *testing.T) {
@@ -27,7 +28,7 @@ func TestValidateBackgroundTunnelRejectsSecretAuth(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected background tunnel to reject password auth")
 	}
-	if !strings.Contains(err.Error(), "key or agent auth") {
+	if !strings.Contains(err.Error(), "do not support password authentication") {
 		t.Fatalf("expected auth guidance, got %v", err)
 	}
 }
@@ -49,5 +50,17 @@ func TestEnabledForwardCount(t *testing.T) {
 	forwards := []*model.Forward{nil, {Enabled: false}, {Enabled: true}, {Enabled: true}}
 	if got := enabledForwardCount(forwards); got != 2 {
 		t.Fatalf("enabled count = %d, want 2", got)
+	}
+}
+
+func TestValidateBackgroundTunnelAllowsPassphraseOnSupportedPlatforms(t *testing.T) {
+	server := &model.Server{Alias: "web", AuthMethod: model.AuthKeyPassphrase}
+	forwards := []*model.Forward{{Enabled: true, Type: model.ForwardLocal, LocalPort: 9443}}
+	err := validateBackgroundTunnel(server, forwards)
+	if tunnelpkg.SupportsPassphraseBackground() && err != nil {
+		t.Fatalf("passphrase background tunnel unexpectedly rejected: %v", err)
+	}
+	if !tunnelpkg.SupportsPassphraseBackground() && err == nil {
+		t.Fatal("unsupported platform unexpectedly accepted passphrase background tunnel")
 	}
 }
