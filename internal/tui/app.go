@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/mirivlad/sshkeeper/internal/i18n"
 	"github.com/mirivlad/sshkeeper/internal/model"
-	"github.com/mirivlad/sshkeeper/internal/tunnel"
 	sessionpkg "github.com/mirivlad/sshkeeper/internal/session"
+	"github.com/mirivlad/sshkeeper/internal/tunnel"
 	workspacepkg "github.com/mirivlad/sshkeeper/internal/workspace"
 )
 
