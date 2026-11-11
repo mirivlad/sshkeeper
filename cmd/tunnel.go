@@ -34,6 +34,11 @@ var tunnelCmd = &cobra.Command{
 			if err := validateBackgroundTunnel(server, forwards); err != nil {
 				return err
 			}
+			if server.AuthMethod == model.AuthKeyPassphrase {
+				if err := unlockVaultForSession(); err != nil {
+					return err
+				}
+			}
 			state, err := tunnelpkg.StartResolvedWithVault(cfg, server, forwards, true, dbProfileResolver, serverVaultFunc(server))
 			if err != nil {
 				return err
