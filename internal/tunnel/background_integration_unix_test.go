@@ -109,8 +109,8 @@ func TestPassphraseBackgroundTunnelForwardsTraffic(t *testing.T) {
 						continue
 					}
 					var request struct {
-						Host string
-						Port uint32
+						Host       string
+						Port       uint32
 						OriginHost string
 						OriginPort uint32
 					}
