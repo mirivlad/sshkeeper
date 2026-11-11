@@ -53,7 +53,6 @@ func TestEnabledForwardCount(t *testing.T) {
 	}
 }
 
-
 func TestValidateBackgroundTunnelAllowsPassphraseOnSupportedPlatforms(t *testing.T) {
 	server := &model.Server{Alias: "web", AuthMethod: model.AuthKeyPassphrase}
 	forwards := []*model.Forward{{Enabled: true, Type: model.ForwardLocal, LocalPort: 9443}}
